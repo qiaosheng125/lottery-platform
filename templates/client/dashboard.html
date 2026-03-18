@@ -9,7 +9,7 @@
       <div class="card text-center border-primary">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-primary">{{ stats.ticket_count }}</div>
-          <div class="small text-muted">今日出票张数</div>
+          <div class="small text-muted">今日处理张数</div>
         </div>
       </div>
     </div>
@@ -17,7 +17,7 @@
       <div class="card text-center border-success">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-success">¥{{ stats.total_amount.toFixed(0) }}</div>
-          <div class="small text-muted">今日出票金额</div>
+          <div class="small text-muted">今日处理金额</div>
         </div>
       </div>
     </div>
@@ -25,7 +25,7 @@
       <div class="card text-center border-warning">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-warning">{{ stats.pool_total_pending }}</div>
-          <div class="small text-muted">票池未出张数</div>
+          <div class="small text-muted">待处理数量</div>
         </div>
       </div>
     </div>
@@ -33,7 +33,7 @@
       <div class="card text-center border-info">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-info">{{ stats.active_count }}</div>
-          <div class="small text-muted">正在出票</div>
+          <div class="small text-muted">处理中</div>
         </div>
       </div>
     </div>
@@ -70,7 +70,7 @@
           <!-- 倒计时 - 固定顶部 -->
           <div class="mode-a-countdown-bar">
             <div class="d-flex justify-content-between align-items-center">
-              <div class="text-muted small">期号: {{ currentTicket.detail_period }}</div>
+              <div class="text-muted small">编号: {{ currentTicket.detail_period }}</div>
               <div class="text-end">
                 <div class="text-danger fw-bold countdown-text" id="countdown">{{ countdown }}</div>
                 <div class="small text-muted">截止 {{ deadlineStr }}</div>
@@ -189,7 +189,7 @@
 
       <!-- 出票中列表 -->
       <div v-if="bPendingBatches.length > 0" class="mt-3">
-        <div class="fw-bold mb-2"><i class="bi bi-hourglass-split text-warning"></i> 出票中</div>
+        <div class="fw-bold mb-2"><i class="bi bi-hourglass-split text-warning"></i> 处理中</div>
         <div v-for="(batch, index) in bPendingBatches" :key="index"
              class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
           <div>
@@ -212,7 +212,7 @@
     <div class="col-md-6">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-trophy text-warning"></i> 中奖记录</span>
+          <span><i class="bi bi-trophy text-warning"></i> 中签记录</span>
           <button class="btn btn-sm btn-outline-warning" @click="openWinning">查看</button>
         </div>
       </div>
@@ -220,7 +220,7 @@
     <div class="col-md-6">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-file-earmark-arrow-down text-info"></i> 今日出票清单</span>
+          <span><i class="bi bi-file-earmark-arrow-down text-info"></i> 今日处理清单</span>
           <button class="btn btn-sm btn-outline-info" @click="exportDaily">下载</button>
         </div>
       </div>
@@ -230,18 +230,18 @@
   <!-- 中奖记录全屏面板 -->
   <div v-if="winningVisible" class="winning-panel">
     <div class="winning-panel-header">
-      <span><i class="bi bi-trophy text-warning"></i> 我的中奖记录</span>
+      <span><i class="bi bi-trophy text-warning"></i> 我的中签记录</span>
       <div class="d-flex align-items-center gap-2">
         <div class="btn-group btn-group-sm">
           <button class="btn" :class="winningGroupBy==='date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日期</button>
-          <button class="btn" :class="winningGroupBy==='type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按彩种</button>
+          <button class="btn" :class="winningGroupBy==='type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按类型</button>
         </div>
         <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">✕ 关闭</button>
       </div>
     </div>
     <div class="winning-panel-body">
       <div v-if="winningLoading" class="text-center py-5">加载中...</div>
-      <div v-else-if="Object.keys(winningGrouped).length === 0" class="text-center py-5 text-muted">暂无中奖记录</div>
+      <div v-else-if="Object.keys(winningGrouped).length === 0" class="text-center py-5 text-muted">暂无中签记录</div>
       <div v-else>
         <div v-for="(items, date) in winningGrouped" :key="date" class="mb-4">
           <div class="winning-date-header">{{ date }}</div>
@@ -250,7 +250,7 @@
               <div class="winning-badges">
                 <span class="badge bg-secondary">票#{{ r.ticket_id }}</span>
                 <span class="badge bg-primary">{{ r.lottery_type }}</span>
-                <span class="badge bg-dark">期号 {{ r.detail_period }}</span>
+                <span class="badge bg-dark">编号 {{ r.detail_period }}</span>
               </div>
               <div class="winning-amount">
                 <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>

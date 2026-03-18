@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}中奖管理{% endblock %}
+{% block title %}结果管理{% endblock %}
 {% block content %}
 {% raw %}
 <div id="winning-app">
@@ -7,7 +7,7 @@
   <!-- 1. 中奖记录管理 -->
   <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-trophy"></i> 中奖记录管理</span>
+      <span><i class="bi bi-trophy"></i> 中签记录管理</span>
       <span class="badge bg-success">共 {{ total }} 条</span>
     </div>
     <div class="card-body">
@@ -27,7 +27,7 @@
         </div>
         <div class="col-md-2">
           <select v-model="filterLotteryType" class="form-select form-select-sm">
-            <option value="">全部彩种</option>
+            <option value="">全部类型</option>
             <option v-for="t in lotteryTypeOptions" :key="t" :value="t">{{ t }}</option>
           </select>
         </div>
@@ -59,12 +59,12 @@
           <thead class="table-dark">
             <tr>
               <th>票ID</th>
-              <th>投注内容</th>
+              <th>数据内容</th>
               <th>票面金额</th>
               <th>用户名</th>
-              <th>彩种</th>
-              <th>期号</th>
-              <th>中奖金额</th>
+              <th>类型</th>
+              <th>编号</th>
+              <th>中签金额</th>
               <th>图片</th>
               <th>完成时间</th>
             </tr>
@@ -112,18 +112,18 @@
     </div>
   </div>
 
-  <!-- 2. 上传赛果文件 -->
+  <!-- 2. 上传结果文件 -->
   <div class="card mb-3">
-    <div class="card-header"><i class="bi bi-upload"></i> 上传赛果文件</div>
+    <div class="card-header"><i class="bi bi-upload"></i> 上传结果文件</div>
     <div class="card-body">
       <div class="row g-2 align-items-end">
         <div class="col-md-5">
-          <label class="form-label small mb-1">选择赛果TXT文件</label>
+          <label class="form-label small mb-1">选择结果TXT文件</label>
           <input type="file" class="form-control form-control-sm" accept=".txt" ref="resultFileInput" @change="onResultFileChange">
         </div>
         <div class="col-md-3">
-          <label class="form-label small mb-1">期号（如：26034）</label>
-          <input type="text" class="form-control form-control-sm" v-model="uploadPeriod" placeholder="输入期号">
+          <label class="form-label small mb-1">编号（如：26034）</label>
+          <input type="text" class="form-control form-control-sm" v-model="uploadPeriod" placeholder="输入编号">
         </div>
         <div class="col-md-2">
           <button class="btn btn-sm btn-success w-100" @click="uploadResultFile" :disabled="uploading || !resultFile || !uploadPeriod">
@@ -136,10 +136,10 @@
     </div>
   </div>
 
-  <!-- 3. 赛果计算状态 -->
+  <!-- 3. 结果计算状态 -->
   <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-calculator"></i> 赛果计算状态</span>
+      <span><i class="bi bi-calculator"></i> 结果计算状态</span>
       <select v-model="mrFilterDate" class="form-select form-select-sm w-auto" @change="loadMatchResults()">
         <option value="">全部日期</option>
         <option v-for="d in mrDateOptions" :key="d" :value="d">{{ d }}</option>
@@ -148,10 +148,10 @@
     <div class="card-body p-0">
       <table class="table table-sm mb-0">
         <thead class="table-dark">
-          <tr><th>期号</th><th>上传时间</th><th>计算状态</th><th>总票数</th><th>中奖数</th><th>总中奖金额</th><th>操作</th></tr>
+          <tr><th>编号</th><th>上传时间</th><th>计算状态</th><th>总数</th><th>中签数</th><th>总中签金额</th><th>操作</th></tr>
         </thead>
         <tbody>
-          <tr v-if="matchResults.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无赛果</td></tr>
+          <tr v-if="matchResults.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无结果</td></tr>
           <tr v-for="r in matchResults" :key="r.id">
             <td>{{ r.detail_period }}</td>
             <td class="small">{{ r.uploaded_at ? r.uploaded_at.substring(0,16) : '-' }}</td>
@@ -176,11 +176,11 @@
     </div>
   </div>
 
-  <!-- 4. 赛果详情弹窗 -->
+  <!-- 4. 结果详情弹窗 -->
   <div v-if="detailVisible" class="modal-backdrop-custom" @click.self="detailVisible=false">
     <div class="modal-box">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6 class="mb-0"><i class="bi bi-file-text"></i> 赛果详情 — 期号 {{ detailPeriod }}</h6>
+        <h6 class="mb-0"><i class="bi bi-file-text"></i> 结果详情 — 编号 {{ detailPeriod }}</h6>
         <button class="btn btn-sm btn-outline-secondary" @click="detailVisible=false">关闭</button>
       </div>
       <div v-if="detailLoading" class="text-center py-4">加载中...</div>
@@ -309,7 +309,7 @@ createApp({
         const data = await res.json();
         this.uploadSuccess = data.success;
         this.uploadMsg = data.success
-          ? `上传成功，解析 ${data.count} 条赛果，中奖计算已提交`
+          ? `上传成功，解析 ${data.count} 条结果，中签计算已提交`
           : (data.error || '上传失败');
         if (data.success) {
           this.uploadPeriod = '';
