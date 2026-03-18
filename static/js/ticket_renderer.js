@@ -1,5 +1,5 @@
 /**
- * 彩票票面渲染工具
+ * 票面渲染工具
  * 样式参考 aaa-main/templates/dashboard.html getPlayTypeColors()
  */
 
@@ -86,7 +86,7 @@ const BET_TYPE_NAMES = {
 
 /**
  * 生成票面HTML，样式与 aaa-main dashboard 一致
- * lotteryType: 从文件名解析的彩种（如"胜平负"），用于配色
+ * lotteryType: 从文件名解析的类型（如"胜平负"），用于配色
  */
 function renderTicketHTML(raw, lotteryType) {
   const parsed = parseTicketContent(raw);
