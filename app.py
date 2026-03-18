@@ -1,10 +1,10 @@
 import os
-from flask import Flask
 from dotenv import load_dotenv
+load_dotenv()
+
+from flask import Flask
 from config import config
 from extensions import db, login_manager, bcrypt, socketio, migrate, init_redis
-
-load_dotenv()
 
 
 def create_app(config_name=None):
