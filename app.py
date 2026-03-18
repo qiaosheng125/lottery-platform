@@ -16,6 +16,14 @@ def create_app(config_name=None):
 
     # Ensure upload folder exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'images'), exist_ok=True)
+
+    # Serve uploaded images
+    from flask import send_from_directory
+    @app.route('/uploads/images/<path:filename>')
+    def uploaded_image(filename):
+        images_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'images')
+        return send_from_directory(images_dir, filename)
 
     # Init extensions
     db.init_app(app)

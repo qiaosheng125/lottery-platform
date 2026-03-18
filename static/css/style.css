@@ -116,7 +116,8 @@ body {
 .mode-a-fullscreen-container {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 300px); /* 减去顶部统计栏和标题栏 */
+  height: calc(100vh - 300px);
+  min-height: 400px;
   background: #fff;
   border-radius: 8px;
   overflow: hidden;
@@ -137,9 +138,10 @@ body {
   letter-spacing: 0.1em;
 }
 
-/* 票面滚动区域 - 占据剩余空间 */
+/* 票面滚动区域 - 占据剩余空间，内容超出时可滚动 */
 .mode-a-ticket-scroll {
   flex: 1;
+  min-height: 0;        /* 关键：让 flex 子元素可以收缩到 0，overflow 才能生效 */
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -186,7 +188,8 @@ body {
 /* 手机端优化（<768px） - 更大的字体和按钮 */
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
-    min-height: calc(100vh - 250px);
+    height: calc(100vh - 250px);
+    min-height: 350px;
   }
 
   .countdown-text {
@@ -216,7 +219,8 @@ body {
 /* 小屏手机（<375px） - 保持清晰可读 */
 @media (max-width: 375px) {
   .mode-a-fullscreen-container {
-    min-height: calc(100vh - 230px);
+    height: calc(100vh - 230px);
+    min-height: 320px;
   }
 
   .countdown-text {
@@ -248,18 +252,21 @@ body.mode-a-active .row.g-3 {
 }
 
 body.mode-a-active .mode-a-fullscreen-container {
-  min-height: calc(100vh - 150px);
+  height: calc(100vh - 150px);
+  min-height: 300px;
 }
 
 @media (max-width: 768px) {
   body.mode-a-active .mode-a-fullscreen-container {
-    min-height: calc(100vh - 120px);
+    height: calc(100vh - 120px);
+    min-height: 280px;
   }
 }
 
 @media (max-width: 375px) {
   body.mode-a-active .mode-a-fullscreen-container {
-    min-height: calc(100vh - 100px);
+    height: calc(100vh - 100px);
+    min-height: 260px;
   }
 }
 

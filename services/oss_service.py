@@ -1,14 +1,15 @@
 """
-阿里云 OSS 服务
+图片存储服务
 
-提供预签名直传 URL 生成和对象删除功能。
+OSS 可用时使用阿里云 OSS；否则降级为本地 uploads/images/ 目录存储。
 """
 
 import os
-from typing import Optional, Tuple
+import uuid
+from typing import Tuple
 from datetime import datetime
 
-from flask import current_app
+from flask import current_app, url_for
 
 try:
     import oss2
@@ -17,55 +18,78 @@ except ImportError:
     OSS_AVAILABLE = False
 
 
-def _get_bucket():
-    if not OSS_AVAILABLE:
-        raise RuntimeError('aliyun-oss2 not installed')
+def _oss_configured() -> bool:
+    return (
+        OSS_AVAILABLE
+        and bool(current_app.config.get('OSS_ACCESS_KEY_ID'))
+        and bool(current_app.config.get('OSS_ACCESS_KEY_SECRET'))
+        and bool(current_app.config.get('OSS_BUCKET_NAME'))
+    )
 
+
+def _get_bucket():
     auth = oss2.Auth(
         current_app.config['OSS_ACCESS_KEY_ID'],
         current_app.config['OSS_ACCESS_KEY_SECRET'],
     )
-    bucket = oss2.Bucket(
+    return oss2.Bucket(
         auth,
         current_app.config['OSS_ENDPOINT'],
         current_app.config['OSS_BUCKET_NAME'],
     )
-    return bucket
-
-
-def generate_presign_url(oss_key: str, expires: int = 300) -> Tuple[str, str]:
-    """
-    生成预签名上传 URL（PUT）。
-    Returns: (presign_url, oss_key)
-    """
-    bucket = _get_bucket()
-    url = bucket.sign_url('PUT', oss_key, expires, slash_safe=True)
-    return url, oss_key
 
 
 def build_oss_key(ticket_id: int, ext: str = 'jpg') -> str:
-    """生成 OSS 对象 Key"""
-    from datetime import datetime
     date_str = datetime.utcnow().strftime('%Y/%m/%d')
     return f"winning/{date_str}/{ticket_id}.{ext}"
 
 
+def generate_presign_url(oss_key: str, expires: int = 300) -> Tuple[str, str]:
+    """
+    生成上传 URL。
+    OSS 可用 → 返回预签名 PUT URL；
+    否则 → 返回本地上传接口 URL（POST multipart）。
+    """
+    if _oss_configured():
+        bucket = _get_bucket()
+        url = bucket.sign_url('PUT', oss_key, expires, slash_safe=True)
+        return url, oss_key
+
+    # 本地模式：返回本地上传接口，oss_key 作为文件名标识
+    local_key = oss_key.replace('/', '_')
+    upload_url = f"/admin/api/winning/upload-local?key={local_key}"
+    return upload_url, local_key
+
+
 def get_public_url(oss_key: str) -> str:
-    """获取对象公开访问 URL"""
-    domain = current_app.config.get('OSS_DOMAIN', '')
-    if domain:
-        return f"{domain.rstrip('/')}/{oss_key}"
-    bucket_name = current_app.config.get('OSS_BUCKET_NAME', '')
-    endpoint = current_app.config.get('OSS_ENDPOINT', '')
-    return f"https://{bucket_name}.{endpoint}/{oss_key}"
+    if _oss_configured():
+        domain = current_app.config.get('OSS_DOMAIN', '')
+        if domain:
+            return f"{domain.rstrip('/')}/{oss_key}"
+        bucket_name = current_app.config.get('OSS_BUCKET_NAME', '')
+        endpoint = current_app.config.get('OSS_ENDPOINT', '')
+        return f"https://{bucket_name}.{endpoint}/{oss_key}"
+
+    # 本地模式：返回静态文件 URL
+    filename = oss_key if '/' not in oss_key else oss_key.replace('/', '_')
+    return f"/uploads/images/{filename}"
 
 
 def delete_object(oss_key: str) -> bool:
-    """删除 OSS 对象（覆盖上传前调用）"""
+    if _oss_configured():
+        try:
+            _get_bucket().delete_object(oss_key)
+            return True
+        except Exception as e:
+            current_app.logger.warning(f"OSS delete {oss_key} failed: {e}")
+            return False
+
+    # 本地模式：删除本地文件
     try:
-        bucket = _get_bucket()
-        bucket.delete_object(oss_key)
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+        path = os.path.join(upload_folder, 'images', oss_key)
+        if os.path.exists(path):
+            os.remove(path)
         return True
-    except Exception as e:
-        current_app.logger.warning(f"OSS delete {oss_key} failed: {e}")
+    except Exception:
         return False

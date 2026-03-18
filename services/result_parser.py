@@ -84,11 +84,12 @@ def _parse_result_line(cols: list, seq_no: str) -> dict:
         field_data['SXP'] = {'result': sxp_result, 'sp': float(sxp_sp) if sxp_sp else 0}
 
     # SF (胜负) - uses its own sequence number in col 11
+    sf_seq = safe_get(11)
     sf_result_raw = safe_get(12)
     sf_sp = safe_get(13)
     if sf_result_raw:
         sf_result = SF_RESULT_MAP.get(sf_result_raw, sf_result_raw)
-        field_data['SF'] = {'result': sf_result, 'sp': float(sf_sp) if sf_sp else 0}
+        field_data['SF'] = {'result': sf_result, 'sp': float(sf_sp) if sf_sp else 0, 'seq': sf_seq}
 
     return field_data
 

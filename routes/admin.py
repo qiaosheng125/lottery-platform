@@ -360,17 +360,27 @@ def winning_page():
 @login_required
 @admin_required
 def api_winning_filter_options():
-    """获取中奖记录筛选下拉选项（用户名列表和期号列表）"""
-    from sqlalchemy import distinct
+    from sqlalchemy import distinct, func
     usernames = db.session.query(distinct(LotteryTicket.assigned_username))\
-        .filter(LotteryTicket.assigned_username.isnot(None))\
+        .filter(LotteryTicket.assigned_username.isnot(None),
+                LotteryTicket.is_winning == True)\
         .order_by(LotteryTicket.assigned_username).all()
-    periods = db.session.query(distinct(WinningRecord.detail_period))\
-        .filter(WinningRecord.detail_period.isnot(None))\
-        .order_by(WinningRecord.detail_period.desc()).all()
+    dates_raw = db.session.query(
+        func.date(func.datetime(LotteryTicket.completed_at, '+8 hours'))
+    ).filter(
+        LotteryTicket.is_winning == True,
+        LotteryTicket.completed_at.isnot(None)
+    ).distinct().order_by(
+        func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')).desc()
+    ).all()
+    types_raw = db.session.query(distinct(LotteryTicket.lottery_type))\
+        .filter(LotteryTicket.is_winning == True,
+                LotteryTicket.lottery_type.isnot(None))\
+        .order_by(LotteryTicket.lottery_type).all()
     return jsonify({
         'usernames': [u[0] for u in usernames if u[0]],
-        'periods': [p[0] for p in periods if p[0]],
+        'dates': [d[0] for d in dates_raw if d[0]],
+        'lottery_types': [t[0] for t in types_raw if t[0]],
     })
 
 
@@ -378,36 +388,137 @@ def api_winning_filter_options():
 @login_required
 @admin_required
 def api_winning_list():
+    """查询中奖票列表（从 LotteryTicket 查 is_winning=True）"""
+    from sqlalchemy import func
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 50))
     username = request.args.get('username', '').strip()
-    date_str = request.args.get('date', '')
-    period = request.args.get('period', '').strip()
+    date_str = request.args.get('date', '').strip()
+    lottery_type = request.args.get('lottery_type', '').strip()
 
-    q = WinningRecord.query.order_by(WinningRecord.uploaded_at.desc())
+    q = LotteryTicket.query.filter(LotteryTicket.is_winning == True)
     if username:
-        q = q.join(LotteryTicket, WinningRecord.ticket_id == LotteryTicket.id)\
-             .filter(LotteryTicket.assigned_username.ilike(f'%{username}%'))
-    if period:
-        q = q.filter(WinningRecord.detail_period == period)
-
+        q = q.filter(LotteryTicket.assigned_username == username)
+    if date_str:
+        q = q.filter(
+            func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')) == date_str
+        )
+    if lottery_type:
+        q = q.filter(LotteryTicket.lottery_type == lottery_type)
+    q = q.order_by(LotteryTicket.completed_at.desc())
     pagination = q.paginate(page=page, per_page=per_page, error_out=False)
+
+    records = []
+    for t in pagination.items:
+        records.append({
+            'ticket_id': t.id,
+            'username': t.assigned_username or '-',
+            'device_id': t.assigned_device_id or '-',
+            'device_name': t.assigned_device_name or '-',
+            'lottery_type': t.lottery_type,
+            'detail_period': t.detail_period,
+            'winning_gross': float(t.winning_gross) if t.winning_gross else 0,
+            'winning_amount': float(t.winning_amount) if t.winning_amount else 0,
+            'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
+            'winning_image_url': t.winning_image_url,
+            'raw_content': t.raw_content or '',
+            'ticket_amount': float(t.ticket_amount) if t.ticket_amount else 0,
+            'completed_at': (t.completed_at.isoformat() if t.completed_at else None),
+        })
     return jsonify({
-        'records': [r.to_dict() for r in pagination.items],
+        'records': records,
         'total': pagination.total,
         'pages': pagination.pages,
     })
 
 
-@admin_bp.route('/api/winning/<int:record_id>/presign', methods=['POST'])
+@admin_bp.route('/api/winning/<int:ticket_id>/presign', methods=['POST'])
 @login_required
 @admin_required
-def admin_winning_presign(record_id):
-    record = WinningRecord.query.get_or_404(record_id)
+def admin_winning_presign(ticket_id):
+    ticket = LotteryTicket.query.get_or_404(ticket_id)
     from services.oss_service import generate_presign_url, build_oss_key
-    oss_key = build_oss_key(record.ticket_id)
+    oss_key = build_oss_key(ticket.id)
     url, key = generate_presign_url(oss_key)
     return jsonify({'success': True, 'url': url, 'oss_key': key})
+
+
+@admin_bp.route('/api/winning/record', methods=['POST'])
+@login_required
+@admin_required
+def admin_winning_record():
+    """管理员更新中奖图片URL"""
+    data = request.get_json() or {}
+    ticket_id = data.get('ticket_id')
+    oss_key = data.get('oss_key', '')
+    if not ticket_id:
+        return jsonify({'success': False, 'error': '缺少ticket_id'}), 400
+    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    from services.oss_service import get_public_url
+    image_url = get_public_url(oss_key) if oss_key else ''
+    ticket.winning_image_url = image_url
+    db.session.commit()
+    return jsonify({'success': True, 'image_url': image_url})
+
+
+@admin_bp.route('/api/winning/<int:ticket_id>/upload-image', methods=['POST'])
+@login_required
+@admin_required
+def admin_winning_upload_image(ticket_id):
+    """直接上传中奖图片，自动压缩后存储（本地或OSS）"""
+    ticket = LotteryTicket.query.get_or_404(ticket_id)
+
+    if 'image' not in request.files:
+        return jsonify({'success': False, 'error': '请选择图片文件'}), 400
+
+    file = request.files['image']
+    if not file.filename:
+        return jsonify({'success': False, 'error': '文件名为空'}), 400
+
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
+    if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp'):
+        return jsonify({'success': False, 'error': '不支持的图片格式'}), 400
+
+    # 压缩图片：最长边不超过 1200px，JPEG 质量 80
+    import io as _io
+    from PIL import Image as _Image
+    try:
+        img = _Image.open(file.stream)
+        img = img.convert('RGB')  # 统一转 RGB（兼容 PNG/WEBP 透明通道）
+        max_side = 1200
+        if max(img.width, img.height) > max_side:
+            img.thumbnail((max_side, max_side), _Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG', quality=80, optimize=True)
+        buf.seek(0)
+        compressed = buf
+        save_ext = 'jpg'
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'图片处理失败: {e}'}), 400
+
+    from services.oss_service import _oss_configured, build_oss_key, get_public_url
+
+    if _oss_configured():
+        from services.oss_service import _get_bucket
+        oss_key = build_oss_key(ticket_id, save_ext)
+        try:
+            _get_bucket().put_object(oss_key, compressed.read())
+            image_url = get_public_url(oss_key)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'OSS上传失败: {e}'}), 500
+    else:
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+        images_dir = os.path.join(upload_folder, 'images')
+        os.makedirs(images_dir, exist_ok=True)
+        filename = f"winning_{ticket_id}_{uuid.uuid4().hex[:8]}.{save_ext}"
+        save_path = os.path.join(images_dir, filename)
+        with open(save_path, 'wb') as f:
+            f.write(compressed.read())
+        image_url = f"/uploads/images/{filename}"
+
+    ticket.winning_image_url = image_url
+    db.session.commit()
+    return jsonify({'success': True, 'image_url': image_url})
 
 
 # ── Match results ─────────────────────────────────────────────────────
@@ -470,8 +581,33 @@ def upload_match_result():
 @login_required
 @admin_required
 def api_match_results():
-    results = MatchResult.query.order_by(MatchResult.uploaded_at.desc()).limit(50).all()
-    return jsonify({'results': [r.to_dict() for r in results]})
+    from sqlalchemy import func
+    date_str = request.args.get('date', '').strip()
+    q = MatchResult.query.order_by(MatchResult.uploaded_at.desc())
+    if date_str:
+        q = q.filter(
+            func.date(func.datetime(MatchResult.uploaded_at, '+8 hours')) == date_str
+        )
+    results = q.limit(100).all()
+    # 附带日期列表供前端筛选
+    dates_raw = db.session.query(
+        func.date(func.datetime(MatchResult.uploaded_at, '+8 hours'))
+    ).distinct().order_by(
+        func.date(func.datetime(MatchResult.uploaded_at, '+8 hours')).desc()
+    ).all()
+    return jsonify({
+        'results': [r.to_dict() for r in results],
+        'dates': [d[0] for d in dates_raw if d[0]],
+    })
+
+
+@admin_bp.route('/api/match-results/<int:result_id>/detail')
+@login_required
+@admin_required
+def api_match_result_detail(result_id):
+    """查看某条赛果的详细内容（result_data）"""
+    mr = MatchResult.query.get_or_404(result_id)
+    return jsonify({'success': True, 'result_data': mr.result_data, 'detail_period': mr.detail_period})
 
 
 @admin_bp.route('/api/match-results/<int:result_id>/recalc', methods=['POST'])

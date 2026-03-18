@@ -97,31 +97,83 @@ def record_winning():
 @login_required
 @login_required_json
 def my_winning():
-    """用户中奖记录（按业务日期分类）"""
-    from models.winning import WinningRecord
-
-    records = WinningRecord.query.join(
-        LotteryTicket, WinningRecord.ticket_id == LotteryTicket.id
-    ).filter(
-        LotteryTicket.assigned_user_id == current_user.id
+    """用户中奖记录（从 LotteryTicket.is_winning=True 查询，按业务日期分类）"""
+    tickets = LotteryTicket.query.filter(
+        LotteryTicket.assigned_user_id == current_user.id,
+        LotteryTicket.is_winning == True,
     ).order_by(LotteryTicket.completed_at.desc()).limit(200).all()
 
     grouped = {}
-    for rec in records:
-        ticket = rec.ticket
-        bdate = str(get_business_date(ticket.completed_at)) if ticket and ticket.completed_at else 'unknown'
+    for t in tickets:
+        bdate = str(get_business_date(t.completed_at)) if t.completed_at else 'unknown'
         if bdate not in grouped:
             grouped[bdate] = []
         grouped[bdate].append({
-            'id': rec.id,
-            'ticket_id': rec.ticket_id,
-            'detail_period': rec.detail_period,
-            'lottery_type': rec.lottery_type,
-            'winning_amount': float(rec.winning_amount) if rec.winning_amount else None,
-            'winning_image_url': rec.winning_image_url,
-            'raw_content': ticket.raw_content if ticket else '',
-            'ticket_amount': float(ticket.ticket_amount) if ticket and ticket.ticket_amount else None,
-            'completed_at': ticket.completed_at.isoformat() if ticket and ticket.completed_at else None,
+            'ticket_id': t.id,
+            'detail_period': t.detail_period,
+            'lottery_type': t.lottery_type,
+            'raw_content': t.raw_content or '',
+            'ticket_amount': float(t.ticket_amount) if t.ticket_amount else None,
+            'winning_gross': float(t.winning_gross) if t.winning_gross else 0,
+            'winning_amount': float(t.winning_amount) if t.winning_amount else 0,
+            'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
+            'winning_image_url': t.winning_image_url,
+            'completed_at': t.completed_at.isoformat() if t.completed_at else None,
         })
 
     return jsonify({'success': True, 'grouped': grouped})
+
+
+@winning_bp.route('/upload-image/<int:ticket_id>', methods=['POST'])
+@login_required
+@login_required_json
+def upload_winning_image(ticket_id):
+    """用户上传自己中奖票的图片"""
+    import os, uuid, io as _io
+    from flask import current_app
+    from PIL import Image as _Image
+
+    ticket = LotteryTicket.query.get_or_404(ticket_id)
+    if ticket.assigned_user_id != current_user.id:
+        return jsonify({'success': False, 'error': '权限不足'}), 403
+
+    if 'image' not in request.files:
+        return jsonify({'success': False, 'error': '请选择图片'}), 400
+
+    file = request.files['image']
+    ext = (file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg')
+    if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp'):
+        return jsonify({'success': False, 'error': '不支持的图片格式'}), 400
+
+    # 压缩：最长边 1200px，JPEG 质量 80
+    try:
+        img = _Image.open(file.stream).convert('RGB')
+        if max(img.width, img.height) > 1200:
+            img.thumbnail((1200, 1200), _Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG', quality=80, optimize=True)
+        buf.seek(0)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'图片处理失败: {e}'}), 400
+
+    from services.oss_service import _oss_configured, build_oss_key, get_public_url
+    if _oss_configured():
+        from services.oss_service import _get_bucket
+        oss_key = build_oss_key(ticket_id, 'jpg')
+        try:
+            _get_bucket().put_object(oss_key, buf.read())
+            image_url = get_public_url(oss_key)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'OSS上传失败: {e}'}), 500
+    else:
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+        images_dir = os.path.join(upload_folder, 'images')
+        os.makedirs(images_dir, exist_ok=True)
+        filename = f"winning_{ticket_id}_{uuid.uuid4().hex[:8]}.jpg"
+        with open(os.path.join(images_dir, filename), 'wb') as f:
+            f.write(buf.read())
+        image_url = f"/uploads/images/{filename}"
+
+    ticket.winning_image_url = image_url
+    db.session.commit()
+    return jsonify({'success': True, 'image_url': image_url})

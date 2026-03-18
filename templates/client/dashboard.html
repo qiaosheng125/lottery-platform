@@ -206,13 +206,14 @@
   {% endraw %}
   {% endif %}
 
+  {% raw %}
   <!-- Quick links -->
   <div class="row g-3">
     <div class="col-md-6">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
           <span><i class="bi bi-trophy text-warning"></i> 中奖记录</span>
-          <a href="/api/winning/my" class="btn btn-sm btn-outline-warning">查看</a>
+          <button class="btn btn-sm btn-outline-warning" @click="openWinning">查看</button>
         </div>
       </div>
     </div>
@@ -225,7 +226,64 @@
       </div>
     </div>
   </div>
+
+  <!-- 中奖记录全屏面板 -->
+  <div v-if="winningVisible" class="winning-panel">
+    <div class="winning-panel-header">
+      <span><i class="bi bi-trophy text-warning"></i> 我的中奖记录</span>
+      <div class="d-flex align-items-center gap-2">
+        <div class="btn-group btn-group-sm">
+          <button class="btn" :class="winningGroupBy==='date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日期</button>
+          <button class="btn" :class="winningGroupBy==='type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按彩种</button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">✕ 关闭</button>
+      </div>
+    </div>
+    <div class="winning-panel-body">
+      <div v-if="winningLoading" class="text-center py-5">加载中...</div>
+      <div v-else-if="Object.keys(winningGrouped).length === 0" class="text-center py-5 text-muted">暂无中奖记录</div>
+      <div v-else>
+        <div v-for="(items, date) in winningGrouped" :key="date" class="mb-4">
+          <div class="winning-date-header">{{ date }}</div>
+          <div v-for="r in items" :key="r.ticket_id" class="winning-card">
+            <div class="winning-card-top">
+              <div class="winning-badges">
+                <span class="badge bg-secondary">票#{{ r.ticket_id }}</span>
+                <span class="badge bg-primary">{{ r.lottery_type }}</span>
+                <span class="badge bg-dark">期号 {{ r.detail_period }}</span>
+              </div>
+              <div class="winning-amount">
+                <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>
+                <span v-else>¥{{ r.winning_amount }}</span>
+              </div>
+            </div>
+            <div class="winning-raw">{{ r.raw_content }}</div>
+            <div class="winning-card-bottom">
+              <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0,16) : '-' }}</span>
+              <div class="winning-img-actions">
+                <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewWinningImage(r.winning_image_url)">查看图片</button>
+                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingWinningId === r.ticket_id}">
+                  <span v-if="uploadingWinningId === r.ticket_id" class="spinner-border spinner-border-sm"></span>
+                  <span v-else>{{ r.winning_image_url ? '换图' : '上传图片' }}</span>
+                  <input type="file" accept="image/*" class="d-none" :disabled="uploadingWinningId === r.ticket_id" @change="uploadWinningImage($event, r)">
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 图片预览弹窗 -->
+  <div v-if="winningPreviewUrl" class="modal-backdrop-custom" @click.self="winningPreviewUrl=null" style="z-index:2000">
+    <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
+      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl=null">✕ 关闭</button>
+      <img :src="winningPreviewUrl" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
+    </div>
+  </div>
 </div>
+{% endraw %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/ticket_renderer.js') }}"></script>
@@ -259,6 +317,10 @@ createApp({
       downloading: false,
       // 出票中列表：[{filename, ticket_ids, count, amount, downloaded_at}]
       bPendingBatches: [],
+      // 中奖记录弹窗
+      winningVisible: false, winningLoading: false, winningGrouped: {},
+      winningPreviewUrl: null, uploadingWinningId: null,
+      winningGroupBy: 'date', // 'date' | 'type'
     };
   },
   mounted() {
@@ -463,10 +525,112 @@ createApp({
         showToast(`${batch.count} 张已完成`, 'success');
       }
     },
+    async openWinning() {
+      this.winningVisible = true;
+      this.winningLoading = true;
+      try {
+        const res = await fetch('/api/winning/my');
+        const data = await res.json();
+        this.winningGrouped = data.grouped || {};
+        this._winningAll = Object.values(data.grouped || {}).flat(); // 缓存全部
+      } catch(e) {
+        this.winningGrouped = {};
+        this._winningAll = [];
+      } finally {
+        this.winningLoading = false;
+      }
+    },
+    setWinningGroupBy(mode) {
+      this.winningGroupBy = mode;
+      if (!this._winningAll) return;
+      if (mode === 'date') {
+        // 已经是按日期分组的原始数据，直接用
+        const res = {};
+        this._winningAll.forEach(r => {
+          const d = r.completed_at ? r.completed_at.substring(0, 10) : 'unknown';
+          (res[d] = res[d] || []).push(r);
+        });
+        this.winningGrouped = res;
+      } else {
+        const res = {};
+        this._winningAll.forEach(r => {
+          const t = r.lottery_type || '未知';
+          (res[t] = res[t] || []).push(r);
+        });
+        this.winningGrouped = res;
+      }
+    },
+    previewWinningImage(url) { this.winningPreviewUrl = url; },
+    async uploadWinningImage(event, record) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploadingWinningId = record.ticket_id;
+      try {
+        const fd = new FormData();
+        fd.append('image', file);
+        const res = await fetch(`/api/winning/upload-image/${record.ticket_id}`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.success) {
+          record.winning_image_url = data.image_url;
+          showToast('图片上传成功', 'success');
+        } else {
+          showToast(data.error || '上传失败', 'danger');
+        }
+      } catch(e) {
+        showToast('上传出错', 'danger');
+      } finally {
+        this.uploadingWinningId = null;
+        event.target.value = '';
+      }
+    },
   },
   beforeUnmount() {
     clearInterval(this.countdownTimer);
   }
 }).mount('#client-dashboard');
 </script>
+<style>
+.modal-backdrop-custom {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  z-index: 1050; display: flex; align-items: center; justify-content: center;
+}
+/* 全屏中奖记录面板 */
+.winning-panel {
+  position: fixed; inset: 0; z-index: 1040;
+  background: #f8f9fa; display: flex; flex-direction: column;
+}
+.winning-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .75rem 1rem; background: #fff;
+  border-bottom: 1px solid #dee2e6; font-weight: 600; font-size: 1rem;
+  position: sticky; top: 0; z-index: 10;
+}
+.winning-panel-body {
+  flex: 1; overflow-y: auto; padding: 1rem;
+}
+.winning-date-header {
+  font-weight: 600; color: #6c757d; font-size: .85rem;
+  border-bottom: 1px solid #dee2e6; padding-bottom: .25rem; margin-bottom: .5rem;
+}
+.winning-card {
+  background: #fff; border: 1px solid #ffc107; border-radius: 8px;
+  padding: .75rem 1rem; margin-bottom: .75rem;
+}
+.winning-card-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  flex-wrap: wrap; gap: .25rem; margin-bottom: .4rem;
+}
+.winning-badges { display: flex; gap: .25rem; flex-wrap: wrap; }
+.winning-amount { font-weight: 700; color: #198754; font-size: .95rem; }
+.winning-raw {
+  font-family: monospace; font-size: .8rem; color: #6c757d;
+  word-break: break-all; margin-bottom: .4rem;
+}
+.winning-card-bottom {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: .25rem;
+}
+.winning-img-actions { display: flex; align-items: center; gap: .25rem; }
+.btn-xs { padding: .15rem .4rem; font-size: .75rem; }
+</style>
 {% endblock %}

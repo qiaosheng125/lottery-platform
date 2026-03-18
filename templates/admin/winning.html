@@ -3,54 +3,85 @@
 {% block content %}
 {% raw %}
 <div id="winning-app">
+
+  <!-- 1. 中奖记录管理 -->
   <div class="card mb-3">
-    <div class="card-header"><i class="bi bi-trophy"></i> 中奖记录管理</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-trophy"></i> 中奖记录管理</span>
+      <span class="badge bg-success">共 {{ total }} 条</span>
+    </div>
     <div class="card-body">
       <div class="row g-2 mb-3">
-        <div class="col-md-3">
+        <div class="col-md-2">
           <select v-model="filterUsername" class="form-select form-select-sm">
             <option value="">全部用户</option>
             <option v-for="u in usernameOptions" :key="u" :value="u">{{ u }}</option>
           </select>
         </div>
-        <div class="col-md-3">
-          <select v-model="filterPeriod" class="form-select form-select-sm">
-            <option value="">全部期号</option>
-            <option v-for="p in periodOptions" :key="p" :value="p">{{ p }}</option>
+        <div class="col-md-2">
+          <select v-model="filterDate" class="form-select form-select-sm">
+            <option value="">全部日期</option>
+            <option v-for="d in winningDateOptions" :key="d" :value="d">{{ d }}</option>
           </select>
         </div>
         <div class="col-md-2">
+          <select v-model="filterLotteryType" class="form-select form-select-sm">
+            <option value="">全部彩种</option>
+            <option v-for="t in lotteryTypeOptions" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
           <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
-          <button class="btn btn-sm btn-outline-secondary ms-1" @click="filterUsername=''; filterPeriod=''; page=1; loadWinning()">重置</button>
+          <button class="btn btn-sm btn-outline-secondary ms-1" @click="filterUsername=''; filterDate=''; filterLotteryType=''; page=1; loadWinning()">重置</button>
         </div>
       </div>
       <div class="table-responsive">
-        <table class="table table-sm table-hover">
+        <table class="table table-sm table-hover align-middle">
           <thead class="table-dark">
             <tr>
-              <th>票ID</th><th>用户名</th><th>彩种</th><th>期号</th>
-              <th>中奖金额</th><th>图片</th><th>上传时间</th>
+              <th>票ID</th>
+              <th>投注内容</th>
+              <th>票面金额</th>
+              <th>用户名</th>
+              <th>彩种</th>
+              <th>期号</th>
+              <th>中奖金额</th>
+              <th>图片</th>
+              <th>完成时间</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="7" class="text-center py-3">加载中...</td></tr>
-            <tr v-else-if="records.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无记录</td></tr>
-            <tr v-for="r in records" :key="r.id">
-              <td>{{ r.ticket_id }}</td>
-              <td>{{ r.username || '-' }}</td>
+            <tr v-if="loading"><td colspan="9" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="records.length === 0"><td colspan="9" class="text-center py-3 text-muted">暂无记录</td></tr>
+            <tr v-for="r in records" :key="r.ticket_id">
+              <td class="fw-bold text-nowrap">#{{ r.ticket_id }}</td>
+              <td>
+                <div class="small font-monospace text-nowrap" style="max-width:220px;overflow:hidden;text-overflow:ellipsis" :title="r.raw_content">{{ r.raw_content }}</div>
+              </td>
+              <td class="text-nowrap">¥{{ r.ticket_amount }}</td>
+              <td>{{ r.username }}</td>
               <td>{{ r.lottery_type }}</td>
               <td>{{ r.detail_period }}</td>
-              <td class="fw-bold text-success">¥{{ r.winning_amount }}</td>
-              <td>
-                <a v-if="r.winning_image_url" :href="r.winning_image_url" target="_blank" class="btn btn-xs btn-outline-info">查看</a>
-                <span v-else class="text-muted small">无</span>
+              <td class="text-nowrap">
+                <div class="fw-bold text-success">
+                  <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>
+                  <span v-else>¥{{ r.winning_amount }}</span>
+                </div>
               </td>
-              <td class="small">{{ r.uploaded_at ? r.uploaded_at.substring(0,16) : '-' }}</td>
+              <td style="white-space:nowrap">
+                <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewImage(r.winning_image_url)">查看</button>
+                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingImageId === r.ticket_id}">
+                  <span v-if="uploadingImageId === r.ticket_id" class="spinner-border spinner-border-sm"></span>
+                  <span v-else>{{ r.winning_image_url ? '换图' : '上传' }}</span>
+                  <input type="file" accept="image/*" class="d-none" :disabled="uploadingImageId === r.ticket_id" @change="uploadImage($event, r)">
+                </label>
+              </td>
+              <td class="small text-nowrap">{{ r.completed_at ? r.completed_at.substring(0,16) : '-' }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div class="d-flex justify-content-between" v-if="totalPages > 1">
+      <div class="d-flex justify-content-between align-items-center" v-if="totalPages > 1">
         <span class="small text-muted">共 {{ total }} 条</span>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-secondary" @click="page--; loadWinning()" :disabled="page<=1">上一页</button>
@@ -61,9 +92,39 @@
     </div>
   </div>
 
-  <!-- Match results -->
-  <div class="card">
-    <div class="card-header"><i class="bi bi-calculator"></i> 赛果计算状态</div>
+  <!-- 2. 上传赛果文件 -->
+  <div class="card mb-3">
+    <div class="card-header"><i class="bi bi-upload"></i> 上传赛果文件</div>
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label small mb-1">选择赛果TXT文件</label>
+          <input type="file" class="form-control form-control-sm" accept=".txt" ref="resultFileInput" @change="onResultFileChange">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-1">期号（如：26034）</label>
+          <input type="text" class="form-control form-control-sm" v-model="uploadPeriod" placeholder="输入期号">
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-sm btn-success w-100" @click="uploadResultFile" :disabled="uploading || !resultFile || !uploadPeriod">
+            <span v-if="uploading" class="spinner-border spinner-border-sm me-1"></span>
+            {{ uploading ? '上传中...' : '上传并计算' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="uploadMsg" class="mt-2 small" :class="uploadSuccess ? 'text-success' : 'text-danger'">{{ uploadMsg }}</div>
+    </div>
+  </div>
+
+  <!-- 3. 赛果计算状态 -->
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-calculator"></i> 赛果计算状态</span>
+      <select v-model="mrFilterDate" class="form-select form-select-sm w-auto" @change="loadMatchResults()">
+        <option value="">全部日期</option>
+        <option v-for="d in mrDateOptions" :key="d" :value="d">{{ d }}</option>
+      </select>
+    </div>
     <div class="card-body p-0">
       <table class="table table-sm mb-0">
         <thead class="table-dark">
@@ -86,6 +147,7 @@
             <td>{{ r.tickets_winning }}</td>
             <td class="text-success fw-bold">¥{{ r.total_winning_amount }}</td>
             <td>
+              <button class="btn btn-xs btn-outline-primary me-1" @click="viewResultDetail(r)">查看</button>
               <button class="btn btn-xs btn-outline-secondary" @click="recalc(r.id)">重算</button>
             </td>
           </tr>
@@ -93,19 +155,89 @@
       </table>
     </div>
   </div>
+
+  <!-- 4. 赛果详情弹窗 -->
+  <div v-if="detailVisible" class="modal-backdrop-custom" @click.self="detailVisible=false">
+    <div class="modal-box">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="mb-0"><i class="bi bi-file-text"></i> 赛果详情 — 期号 {{ detailPeriod }}</h6>
+        <button class="btn btn-sm btn-outline-secondary" @click="detailVisible=false">关闭</button>
+      </div>
+      <div v-if="detailLoading" class="text-center py-4">加载中...</div>
+      <div v-else class="table-responsive" style="max-height:60vh;overflow-y:auto">
+        <table class="table table-sm table-bordered table-hover">
+          <thead class="table-dark sticky-top">
+            <tr>
+              <th>场次</th>
+              <th>胜平负结果</th><th>胜平负SP</th>
+              <th>比分结果</th><th>比分SP</th>
+              <th>总进球结果</th><th>总进球SP</th>
+              <th>半全场结果</th><th>半全场SP</th>
+              <th>上下单双结果</th><th>上下单双SP</th>
+              <th>胜负序号</th><th>胜负结果</th><th>胜负SP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, seq) in detailRows" :key="seq">
+              <td class="fw-bold">{{ seq }}</td>
+              <td>{{ row.SPF ? row.SPF.result : '-' }}</td><td>{{ row.SPF ? row.SPF.sp : '-' }}</td>
+              <td>{{ row.CBF ? row.CBF.result : '-' }}</td><td>{{ row.CBF ? row.CBF.sp : '-' }}</td>
+              <td>{{ row.JQS ? row.JQS.result : '-' }}</td><td>{{ row.JQS ? row.JQS.sp : '-' }}</td>
+              <td>{{ row.BQC ? row.BQC.result : '-' }}</td><td>{{ row.BQC ? row.BQC.sp : '-' }}</td>
+              <td>{{ row.SXP ? row.SXP.result : '-' }}</td><td>{{ row.SXP ? row.SXP.sp : '-' }}</td>
+              <td>{{ row.SF ? (row.SF.seq || seq) : '-' }}</td>
+              <td>{{ row.SF ? row.SF.result : '-' }}</td><td>{{ row.SF ? row.SF.sp : '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. 图片预览弹窗 -->
+  <div v-if="previewUrl" class="modal-backdrop-custom" @click.self="previewUrl=null">
+    <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
+      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="previewUrl=null">✕ 关闭</button>
+      <img :src="previewUrl" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
+    </div>
+  </div>
+
 </div>
 {% endraw %}
 {% endblock %}
 {% block scripts %}
+<style>
+.modal-backdrop-custom {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  z-index: 1050; display: flex; align-items: center; justify-content: center;
+}
+.modal-box {
+  background: #fff; border-radius: 8px; padding: 1.5rem;
+  width: 95vw; max-width: 1000px; max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,.2);
+}
+.btn-xs { padding: .15rem .4rem; font-size: .75rem; }
+</style>
 <script>
 const { createApp } = Vue;
 createApp({
   data() {
     return {
+      // 中奖记录
       records: [], loading: false, page: 1, totalPages: 1, total: 0,
-      filterUsername: '', filterPeriod: '',
-      usernameOptions: [], periodOptions: [],
-      matchResults: [],
+      filterUsername: '', filterDate: '', filterLotteryType: '',
+      usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
+      // 上传赛果
+      resultFile: null, uploadPeriod: '', uploading: false, uploadMsg: '', uploadSuccess: false,
+      // 赛果计算状态
+      matchResults: [], mrFilterDate: '', mrDateOptions: [],
+      // 赛果详情弹窗
+      detailVisible: false, detailLoading: false,
+      detailPeriod: '', detailRows: {},
+      // 图片上传状态
+      uploadingImageId: null,
+      // 图片预览
+      previewUrl: null,
     };
   },
   mounted() {
@@ -119,34 +251,113 @@ createApp({
         const res = await fetch('/admin/api/winning/filter-options');
         const data = await res.json();
         this.usernameOptions = data.usernames || [];
-        this.periodOptions = data.periods || [];
+        this.winningDateOptions = data.dates || [];
+        this.lotteryTypeOptions = data.lottery_types || [];
       } catch(e) {}
     },
     async loadWinning() {
       this.loading = true;
       const params = new URLSearchParams({ page: this.page, per_page: 50 });
       if (this.filterUsername) params.set('username', this.filterUsername);
-      if (this.filterPeriod) params.set('period', this.filterPeriod);
+      if (this.filterDate) params.set('date', this.filterDate);
+      if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
       try {
         const res = await fetch(`/admin/api/winning?${params}`);
         const data = await res.json();
-        this.records = data.records;
-        this.total = data.total;
-        this.totalPages = data.pages;
+        this.records = data.records || [];
+        this.total = data.total || 0;
+        this.totalPages = data.pages || 1;
       } finally {
         this.loading = false;
       }
     },
+    onResultFileChange(e) {
+      this.resultFile = e.target.files[0] || null;
+    },
+    async uploadResultFile() {
+      if (!this.resultFile || !this.uploadPeriod) return;
+      this.uploading = true; this.uploadMsg = '';
+      const fd = new FormData();
+      fd.append('file', this.resultFile);
+      fd.append('detail_period', this.uploadPeriod);
+      try {
+        const res = await fetch('/admin/match-results/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        this.uploadSuccess = data.success;
+        this.uploadMsg = data.success
+          ? `上传成功，解析 ${data.count} 条赛果，中奖计算已提交`
+          : (data.error || '上传失败');
+        if (data.success) {
+          this.uploadPeriod = '';
+          this.$refs.resultFileInput.value = '';
+          this.resultFile = null;
+          setTimeout(() => { this.loadMatchResults(); this.loadWinning(); this.loadFilterOptions(); }, 2000);
+        }
+      } catch(e) {
+        this.uploadSuccess = false; this.uploadMsg = '网络错误';
+      } finally {
+        this.uploading = false;
+      }
+    },
     async loadMatchResults() {
-      const res = await fetch('/admin/api/match-results');
+      const params = new URLSearchParams();
+      if (this.mrFilterDate) params.set('date', this.mrFilterDate);
+      const res = await fetch(`/admin/api/match-results?${params}`);
       const data = await res.json();
       this.matchResults = data.results || [];
+      this.mrDateOptions = data.dates || [];
     },
     async recalc(id) {
       const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });
       const data = await res.json();
       showToast(data.success ? '重算任务已提交' : '提交失败', data.success ? 'success' : 'danger');
       setTimeout(() => this.loadMatchResults(), 2000);
+    },
+    previewImage(url) {
+      this.previewUrl = url;
+    },
+    async uploadImage(event, record) {
+      const file = event.target.files[0];
+      if (!file) return;
+      this.uploadingImageId = record.ticket_id;
+      try {
+        const fd = new FormData();
+        fd.append('image', file);
+        const res = await fetch(`/admin/api/winning/${record.ticket_id}/upload-image`, {
+          method: 'POST', body: fd,
+        });
+        const data = await res.json();
+        if (data.success) {
+          record.winning_image_url = data.image_url;
+          showToast('图片上传成功', 'success');
+        } else {
+          showToast(data.error || '上传失败', 'danger');
+        }
+      } catch(e) {
+        showToast('上传出错: ' + e.message, 'danger');
+      } finally {
+        this.uploadingImageId = null;
+        event.target.value = '';
+      }
+    },
+    async viewResultDetail(r) {
+      this.detailVisible = true;
+      this.detailLoading = true;
+      this.detailPeriod = r.detail_period;
+      this.detailRows = {};
+      try {
+        const res = await fetch(`/admin/api/match-results/${r.id}/detail`);
+        const data = await res.json();
+        // result_data: {"61": {"SPF": {result, sp}, ...}, ...}
+        // 按场次号排序
+        const sorted = {};
+        Object.keys(data.result_data || {}).sort((a, b) => Number(a) - Number(b)).forEach(k => {
+          sorted[k] = data.result_data[k];
+        });
+        this.detailRows = sorted;
+      } finally {
+        this.detailLoading = false;
+      }
     },
   }
 }).mount('#winning-app');

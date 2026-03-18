@@ -70,25 +70,30 @@ def daily_stats():
 @login_required
 @login_required_json
 def export_daily():
-    """下载当日出票清单（需截止时间已过）"""
+    """下载当日出票清单"""
+    from datetime import datetime, timedelta
     today = get_business_date()
     now = beijing_now()
 
-    completed = LotteryTicket.query.filter_by(
-        assigned_user_id=current_user.id, status='completed'
-    ).all()
+    # 计算今日业务时间范围（12点分割线）
+    today_start = datetime.combine(today, datetime.min.time())
+    if now.hour < 12:
+        today_start = today_start - timedelta(days=1) + timedelta(hours=12)
+    else:
+        today_start = today_start + timedelta(hours=12)
+    today_end = today_start + timedelta(days=1)
 
-    # Filter: business date matches AND deadline has passed
-    rows = [
-        t for t in completed
-        if t.completed_at and get_business_date(t.completed_at) == today
-        and t.deadline_time and t.deadline_time < now
-    ]
+    rows = LotteryTicket.query.filter(
+        LotteryTicket.assigned_user_id == current_user.id,
+        LotteryTicket.status == 'completed',
+        LotteryTicket.completed_at >= today_start,
+        LotteryTicket.completed_at < today_end,
+    ).order_by(LotteryTicket.completed_at).all()
 
     if not rows:
-        return jsonify({'success': False, 'error': '暂无可下载的数据'}), 404
+        return jsonify({'success': False, 'error': '今日暂无出票记录'}), 404
 
-    lines = [r.raw_content for r in rows]
+    lines = [r.raw_content for r in rows if r.raw_content]
     content = '\n'.join(lines)
 
     filename = f"出票清单_{current_user.username}_{today}.txt"
