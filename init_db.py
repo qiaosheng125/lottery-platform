@@ -18,13 +18,13 @@ with app.app_context():
     print("数据库表创建成功")
 
     # Create default admin if not exists
-    admin = User.query.filter_by(username='admin').first()
+    admin = User.query.filter_by(is_admin=True).first()
     if not admin:
-        admin = User(username='admin', is_admin=True)
-        admin.set_password('admin123')
+        admin = User(username='zucaixu', is_admin=True)
+        admin.set_password('zhongdajiang888')
         db.session.add(admin)
         db.session.commit()
-        print("默认管理员账号创建成功: admin / admin123")
+        print("默认管理员账号创建成功: zucaixu / zhongdajiang888")
     else:
         print("管理员账号已存在")
 
