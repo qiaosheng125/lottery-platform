@@ -40,7 +40,7 @@ BET_CODE_TO_RESULT_KEY = {
     'SXP': 'SXP',
 }
 
-BASE_STAKE = Decimal('2')   # 基注 2元
+BASE_STAKE = Decimal('1')   # 基注 1元
 BONUS_RATE = Decimal('1.3') # 奖金系数
 TAX_THRESHOLD = Decimal('10000')
 TAX_RATE = Decimal('0.2')
