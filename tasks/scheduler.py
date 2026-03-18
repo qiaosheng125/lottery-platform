@@ -1,0 +1,85 @@
+"""
+APScheduler 定时任务初始化
+"""
+
+import logging
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+logger = logging.getLogger(__name__)
+
+_scheduler = None
+
+
+def start_scheduler(app):
+    global _scheduler
+    if _scheduler is not None:
+        return _scheduler
+
+    scheduler = BackgroundScheduler(timezone='Asia/Shanghai', daemon=True)
+
+    # 超时票检测：每分钟
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.expire_tickets', 'expire_overdue_tickets'),
+        trigger=IntervalTrigger(minutes=1),
+        id='expire_tickets',
+        name='超时票检测',
+        replace_existing=True,
+    )
+
+    # 3小时无活动会话清理：每15分钟
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.clean_sessions', 'clean_inactive_sessions'),
+        trigger=IntervalTrigger(minutes=15),
+        id='clean_sessions',
+        name='清理不活跃会话',
+        replace_existing=True,
+    )
+
+    # 每日12点重置所有会话
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.daily_reset', 'daily_session_reset'),
+        trigger=CronTrigger(hour=12, minute=0, timezone='Asia/Shanghai'),
+        id='daily_reset',
+        name='每日会话重置',
+        replace_existing=True,
+    )
+
+    # DB 保活：每5分钟
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.expire_tickets', 'db_keepalive'),
+        trigger=IntervalTrigger(minutes=5),
+        id='db_keepalive',
+        name='数据库连接保活',
+        replace_existing=True,
+    )
+
+    # 数据归档：每周一凌晨6点，归档30天前的数据
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.archive', 'archive_old_tickets'),
+        trigger=CronTrigger(day_of_week='mon', hour=6, minute=0, timezone='Asia/Shanghai'),
+        id='archive_tickets',
+        name='数据归档',
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    _scheduler = scheduler
+    logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
+    return scheduler
+
+
+def _run_with_context(app, module_path: str, func_name: str):
+    """返回一个在 app context 中执行指定函数的包装函数"""
+    def wrapper():
+        with app.app_context():
+            import importlib
+            module = importlib.import_module(module_path)
+            func = getattr(module, func_name)
+            func()
+    return wrapper
+
+
+def get_scheduler():
+    return _scheduler

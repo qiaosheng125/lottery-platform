@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}登录 - 彩票管理平台{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-4">
+    <div class="card shadow">
+      <div class="card-header text-center fw-bold fs-5">
+        🎰 彩票管理平台
+      </div>
+      <div class="card-body p-4">
+        {% raw %}
+        <div id="login-app">
+          <div v-if="error" class="alert alert-danger">{{ error }}</div>
+          <form @submit.prevent="doLogin">
+            <div class="mb-3">
+              <label class="form-label">用户名</label>
+              <input v-model="username" type="text" class="form-control" placeholder="请输入用户名" required autofocus>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">密码</label>
+              <input v-model="password" type="password" class="form-control" placeholder="请输入密码" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100" :disabled="loading">
+              <span v-if="loading" class="spinner-border spinner-border-sm me-1"></span>
+              登录
+            </button>
+          </form>
+        </div>
+        {% endraw %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return { username: '', password: '', error: '', loading: false };
+  },
+  methods: {
+    async doLogin() {
+      this.loading = true; this.error = '';
+      const deviceId = getOrCreateDeviceId();
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: this.username, password: this.password, device_id: deviceId }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.location.href = data.redirect;
+        } else {
+          this.error = data.error || '登录失败';
+        }
+      } catch(e) {
+        this.error = '网络错误，请重试';
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+}).mount('#login-app');
+</script>
+{% endblock %}

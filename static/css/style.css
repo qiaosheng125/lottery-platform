@@ -1,0 +1,371 @@
+/* Lottery Platform CSS */
+
+body {
+  background-color: #f8f9fa;
+}
+
+.navbar {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Ticket display */
+.ticket-card {
+  border: 2px solid #0d6efd;
+  border-radius: 8px;
+}
+
+/* Countdown timer */
+#countdown {
+  font-size: 1.2rem;
+  font-family: monospace;
+}
+
+/* Status badges */
+.status-pending { background-color: #0d6efd; }
+.status-assigned { background-color: #ffc107; color: #000; }
+.status-completed { background-color: #198754; }
+.status-revoked { background-color: #dc3545; }
+.status-expired { background-color: #6c757d; }
+
+/* Table improvements */
+.table th {
+  white-space: nowrap;
+}
+
+/* File drop zone */
+.drop-zone {
+  border: 2px dashed #6c757d;
+  border-radius: 8px;
+  transition: border-color 0.2s;
+}
+.drop-zone:hover {
+  border-color: #0d6efd;
+}
+
+/* Spinner overlay */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+/* Pool stats cards */
+.pool-stat-card {
+  transition: transform 0.2s;
+}
+.pool-stat-card:hover {
+  transform: translateY(-2px);
+}
+
+/* ── 手机端适配 ── */
+@media (max-width: 768px) {
+  .container-fluid {
+    padding: 8px;
+  }
+  .card-body {
+    padding: 0.75rem;
+  }
+  /* 导航栏在手机端收起多余项 */
+  .navbar .nav-link {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.4rem;
+  }
+  /* 表格横向滚动 */
+  .table-responsive {
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 票面渲染适配 */
+  .ticket-render table {
+    font-size: 0.85rem;
+  }
+  /* 按钮在手机端更大，易于点击 */
+  .btn-mobile-lg {
+    font-size: 1.1rem;
+    padding: 0.6rem 1.5rem;
+    min-height: 48px;
+  }
+  /* 统计卡片字体缩小 */
+  .fs-4 { font-size: 1.1rem !important; }
+}
+
+/* 接单主按钮 — 大尺寸 */
+.btn-start-receiving {
+  font-size: 1.3rem;
+  font-weight: bold;
+  padding: 0.75rem 2.5rem;
+  min-height: 56px;
+  border-radius: 12px;
+  letter-spacing: 0.05em;
+}
+
+/* ticket-render 表格 */
+.ticket-render .table td {
+  padding: 0.2rem 0.4rem;
+  vertical-align: middle;
+}
+
+/* ── A模式手机端完整显示优化 ── */
+/* 确保整个票面（包括按钮、倒计时）在手机屏幕内完整显示，无需滚动 */
+/* 全屏铺满、大字体、防误触 */
+
+/* 全屏容器 - 铺满整个卡片区域 */
+.mode-a-fullscreen-container {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 300px); /* 减去顶部统计栏和标题栏 */
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* 倒计时栏 - 固定顶部，大字体 */
+.mode-a-countdown-bar {
+  flex-shrink: 0;
+  padding: 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.countdown-text {
+  font-size: 1.5rem !important;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.1em;
+}
+
+/* 票面滚动区域 - 占据剩余空间 */
+.mode-a-ticket-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.75rem;
+  background: #f8f9fa;
+}
+
+/* 操作按钮栏 - 固定底部，大按钮 */
+.mode-a-action-bar {
+  flex-shrink: 0;
+  padding: 1rem;
+  background: #fff;
+  border-top: 2px solid #e9ecef;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
+}
+
+.mode-a-btn {
+  font-size: 1.1rem !important;
+  font-weight: 600;
+  padding: 0.75rem 1.25rem !important;
+  min-height: 50px;
+  border-radius: 8px;
+  transition: all 0.2s;
+  flex: 1;
+  max-width: 120px;
+}
+
+.mode-a-btn-primary {
+  flex: 1.5;
+  max-width: 150px;
+  font-size: 1.2rem !important;
+}
+
+.mode-a-btn:active {
+  transform: scale(0.95);
+}
+
+.history-dot {
+  width: 8px;
+  height: 8px;
+  transition: all 0.2s;
+}
+
+/* 手机端优化（<768px） - 更大的字体和按钮 */
+@media (max-width: 768px) {
+  .mode-a-fullscreen-container {
+    min-height: calc(100vh - 250px);
+  }
+
+  .countdown-text {
+    font-size: 1.3rem !important;
+  }
+
+  .mode-a-ticket-scroll {
+    padding: 0.5rem;
+  }
+
+  .mode-a-btn {
+    font-size: 1rem !important;
+    padding: 0.7rem 1rem !important;
+    min-height: 48px;
+  }
+
+  .mode-a-btn-primary {
+    font-size: 1.1rem !important;
+  }
+
+  /* 票面内容字体适中 */
+  .mode-a-ticket-scroll .ticket-render {
+    font-size: 0.95rem;
+  }
+}
+
+/* 小屏手机（<375px） - 保持清晰可读 */
+@media (max-width: 375px) {
+  .mode-a-fullscreen-container {
+    min-height: calc(100vh - 230px);
+  }
+
+  .countdown-text {
+    font-size: 1.2rem !important;
+  }
+
+  .mode-a-btn {
+    font-size: 0.95rem !important;
+    padding: 0.65rem 0.9rem !important;
+    min-height: 46px;
+  }
+
+  .mode-a-btn-primary {
+    font-size: 1.05rem !important;
+  }
+}
+
+/* 防止误触 - 接单时禁用页面滚动 */
+body.mode-a-active {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+  height: 100%;
+}
+
+/* 统计栏在接单时缩小 */
+body.mode-a-active .row.g-3 {
+  display: none;
+}
+
+body.mode-a-active .mode-a-fullscreen-container {
+  min-height: calc(100vh - 150px);
+}
+
+@media (max-width: 768px) {
+  body.mode-a-active .mode-a-fullscreen-container {
+    min-height: calc(100vh - 120px);
+  }
+}
+
+@media (max-width: 375px) {
+  body.mode-a-active .mode-a-fullscreen-container {
+    min-height: calc(100vh - 100px);
+  }
+}
+
+/* ── 票面渲染响应式优化 ── */
+/* 默认样式（桌面端） */
+.ticket-render .ticket-type {
+  font-size: 1.3rem;
+  font-weight: bold;
+}
+
+.ticket-render .ticket-amount {
+  font-size: 1rem;
+  opacity: 0.95;
+}
+
+.ticket-render .match-number {
+  font-size: 1.15rem;
+}
+
+.ticket-render .ticket-badge {
+  font-size: 1.1rem;
+  padding: 0.4em 0.7em;
+  margin: 0.2rem !important;
+}
+
+.ticket-render .ticket-footer {
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.ticket-render .match-card {
+  margin-bottom: 0.75rem !important;
+}
+
+/* 手机端（<768px）- 大字体，易读 */
+@media (max-width: 768px) {
+  .ticket-render .ticket-type {
+    font-size: 1.2rem;
+  }
+
+  .ticket-render .ticket-amount {
+    font-size: 0.95rem;
+  }
+
+  .ticket-render .match-number {
+    font-size: 1.05rem;
+  }
+
+  .ticket-render .ticket-badge {
+    font-size: 1rem;
+    padding: 0.35em 0.6em;
+    margin: 0.2rem !important;
+  }
+
+  .ticket-render .ticket-footer {
+    font-size: 1.1rem;
+  }
+
+  .ticket-render .match-card {
+    margin-bottom: 0.6rem !important;
+  }
+
+  .ticket-render .ticket-header,
+  .ticket-render .ticket-footer {
+    padding: 0.75rem !important;
+  }
+
+  .ticket-render .match-header {
+    padding: 0.6rem !important;
+  }
+}
+
+/* 小屏手机（<375px）- 保持清晰 */
+@media (max-width: 375px) {
+  .ticket-render .ticket-type {
+    font-size: 1.1rem;
+  }
+
+  .ticket-render .ticket-amount {
+    font-size: 0.9rem;
+  }
+
+  .ticket-render .match-number {
+    font-size: 1rem;
+  }
+
+  .ticket-render .ticket-badge {
+    font-size: 0.95rem;
+    padding: 0.3em 0.55em;
+    margin: 0.15rem !important;
+  }
+
+  .ticket-render .ticket-footer {
+    font-size: 1.05rem;
+  }
+
+  .ticket-render .match-card {
+    margin-bottom: 0.5rem !important;
+  }
+
+  .ticket-render .ticket-header,
+  .ticket-render .ticket-footer {
+    padding: 0.6rem !important;
+  }
+
+  .ticket-render .match-header {
+    padding: 0.5rem !important;
+  }
+}

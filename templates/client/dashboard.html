@@ -1,0 +1,472 @@
+{% extends 'base.html' %}
+{% block title %}我的主页{% endblock %}
+{% block content %}
+<div id="client-dashboard">
+  <!-- Stats bar -->
+  {% raw %}
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card text-center border-primary">
+        <div class="card-body py-2">
+          <div class="fs-4 fw-bold text-primary">{{ stats.ticket_count }}</div>
+          <div class="small text-muted">今日出票张数</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center border-success">
+        <div class="card-body py-2">
+          <div class="fs-4 fw-bold text-success">¥{{ stats.total_amount.toFixed(0) }}</div>
+          <div class="small text-muted">今日出票金额</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center border-warning">
+        <div class="card-body py-2">
+          <div class="fs-4 fw-bold text-warning">{{ stats.pool_total_pending }}</div>
+          <div class="small text-muted">票池未出张数</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center border-info">
+        <div class="card-body py-2">
+          <div class="fs-4 fw-bold text-info">{{ stats.active_count }}</div>
+          <div class="small text-muted">正在出票</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Announcement -->
+  <div v-if="announcement" class="alert alert-info">
+    <i class="bi bi-megaphone"></i> {{ announcement }}
+  </div>
+  {% endraw %}
+
+  <!-- Mode A section -->
+  {% if current_user.client_mode == 'mode_a' %}
+  {% raw %}
+  <div id="mode-a" class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-play-circle"></i> A模式接单</span>
+      <div class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" v-model="modeAActive" @change="toggleModeA" id="modeASwitch" style="width:3em;height:1.5em">
+        <label class="form-check-label fw-bold fs-6" for="modeASwitch">{{ modeAActive ? '接单中' : '已停止' }}</label>
+      </div>
+    </div>
+    <div class="card-body text-center p-2">
+      <div v-if="!modeAActive" class="text-muted py-5 text-center">
+        <i class="bi bi-toggle-off" style="font-size:3rem"></i>
+        <div class="mt-3 mb-4">打开右上角开关开始接单</div>
+        <button class="btn btn-primary btn-start-receiving" @click="modeAActive=true; toggleModeA()">
+          <i class="bi bi-play-fill me-2"></i>开始接单
+        </button>
+      </div>
+      <div v-else-if="currentTicket" class="position-relative">
+        <!-- 全屏票面显示容器 -->
+        <div class="mode-a-fullscreen-container">
+          <!-- 倒计时 - 固定顶部 -->
+          <div class="mode-a-countdown-bar">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="text-muted small">期号: {{ currentTicket.detail_period }}</div>
+              <div class="text-end">
+                <div class="text-danger fw-bold countdown-text" id="countdown">{{ countdown }}</div>
+                <div class="small text-muted">截止 {{ deadlineStr }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 票面内容 - 可滚动区域 -->
+          <div class="mode-a-ticket-scroll">
+            <div v-html="renderTicket(currentTicket.raw_content)"></div>
+          </div>
+
+          <!-- 操作按钮 - 固定底部 -->
+          <div class="mode-a-action-bar">
+            <div class="d-flex gap-2 justify-content-center mb-2">
+              <button class="btn btn-outline-secondary mode-a-btn" @click="previousTicket" :disabled="historyOffset >= ticketHistory.length - 1">
+                <i class="bi bi-arrow-left"></i> 上一张
+              </button>
+              <button class="btn btn-primary mode-a-btn mode-a-btn-primary" @click="nextTicket" :disabled="loadingNext">
+                <span v-if="loadingNext" class="spinner-border spinner-border-sm me-1"></span>
+                下一张 <i class="bi bi-arrow-right"></i>
+              </button>
+              <button class="btn btn-danger mode-a-btn" @click="confirmStop">
+                <i class="bi bi-stop-circle"></i> 停止
+              </button>
+            </div>
+            <!-- History indicator -->
+            <div v-if="ticketHistory.length > 1" class="text-center">
+              <span v-for="(t, i) in ticketHistory" :key="i"
+                    class="d-inline-block rounded-circle me-1 history-dot"
+                    :class="i === historyOffset ? 'bg-primary' : 'bg-secondary'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-center py-4">
+        <div class="spinner-border text-primary" v-if="loadingNext"></div>
+        <div v-else class="text-muted">
+          <i class="bi bi-inbox fs-1"></i>
+          <div class="mt-2">票池暂时为空，等待新票...</div>
+          <button class="btn btn-outline-primary mt-2 btn-sm" @click="nextTicket">重试获取</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stop confirm dialog -->
+  <div v-if="showStopConfirm" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">确认停止</h5>
+        </div>
+        <div class="modal-body">确认停止接单？当前票将标记为已完成。</div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showStopConfirm=false">取消</button>
+          <button class="btn btn-danger" @click="doStop">确认停止</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endraw %}
+  {% endif %}
+
+  <!-- Mode B section -->
+  {% if current_user.client_mode == 'mode_b' %}
+  {% raw %}
+  <div id="mode-b" class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-download"></i> B模式批量下载</span>
+      <span class="badge bg-secondary">票池剩余: {{ poolStatus.total_pending || 0 }} 张</span>
+    </div>
+    <div class="card-body">
+      <!-- Pool overview -->
+      <div v-if="poolStatus.by_type && poolStatus.by_type.length > 0" class="mb-3">
+        <div class="small text-muted mb-1">当前票池概况（服务器自动按截止时间分配）：</div>
+        <div class="d-flex flex-wrap gap-1">
+          <span v-for="item in poolStatus.by_type" :key="item.lottery_type + item.deadline_time"
+                class="badge bg-light text-dark border">
+            {{ item.lottery_type }} {{ item.deadline_time ? item.deadline_time.substring(11,16) : '' }}
+            <span class="text-primary fw-bold">{{ item.count }}张</span>
+          </span>
+        </div>
+      </div>
+      <div v-else class="alert alert-warning py-2 mb-3">
+        <i class="bi bi-inbox"></i> 当前票池暂无可用票
+      </div>
+
+      <!-- Count selector -->
+      <div class="row g-3 align-items-end">
+        <div class="col-8 col-md-4">
+          <label class="form-label fw-bold">下载张数</label>
+          <select v-model.number="bCount" class="form-select form-select-lg" @change="previewBatch">
+            <option v-for="n in bOptions" :key="n" :value="n">{{ n }}张</option>
+          </select>
+        </div>
+        <div class="col-4 col-md-3">
+          <button class="btn btn-primary btn-lg w-100" @click="downloadBatch"
+                  :disabled="!poolStatus.total_pending || downloading">
+            <span v-if="downloading" class="spinner-border spinner-border-sm me-1"></span>
+            <i class="bi bi-download"></i> 下载
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview hint -->
+      <div v-if="bPreview" class="alert mt-3 py-2" :class="bPreview.sufficient ? 'alert-info' : 'alert-warning'">
+        <i class="bi bi-info-circle"></i>
+        <span v-if="bPreview.sufficient">
+          可下载 <strong>{{ bCount }}</strong> 张，服务器将按截止时间优先分配
+        </span>
+        <span v-else>
+          票池当前仅剩 <strong>{{ bPreview.available }}</strong> 张，将全部下载
+        </span>
+      </div>
+
+      <!-- 出票中列表 -->
+      <div v-if="bPendingBatches.length > 0" class="mt-3">
+        <div class="fw-bold mb-2"><i class="bi bi-hourglass-split text-warning"></i> 出票中</div>
+        <div v-for="(batch, index) in bPendingBatches" :key="index"
+             class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
+          <div>
+            <div class="small fw-bold">{{ batch.filename }}</div>
+            <div class="small text-muted">{{ batch.count }}张 / ¥{{ batch.amount.toFixed(0) }} / {{ batch.downloaded_at }}</div>
+          </div>
+          <button class="btn btn-success btn-sm" @click="confirmBatch(batch, index)">
+            <i class="bi bi-check-circle"></i> 已完成
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endraw %}
+  {% endif %}
+
+  <!-- Quick links -->
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-trophy text-warning"></i> 中奖记录</span>
+          <a href="/api/winning/my" class="btn btn-sm btn-outline-warning">查看</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-file-earmark-arrow-down text-info"></i> 今日出票清单</span>
+          <a href="/api/user/export-daily" class="btn btn-sm btn-outline-info">下载</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/ticket_renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mode_a.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mode_b.js') }}"></script>
+<script>
+const deviceId = getOrCreateDeviceId();
+// Register device and prompt for name if not set
+registerDeviceAndCheckName();
+
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      stats: { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0 },
+      announcement: '',
+      // Mode A
+      modeAActive: false,
+      currentTicket: null,
+      loadingNext: false,
+      ticketHistory: [],   // 已浏览过的票列表，index 0 = 最新
+      historyOffset: 0,    // 0=当前票, 1=上一张, 2=上上一张
+      countdown: '--:--',
+      countdownTimer: null,
+      deadlineStr: '',
+      showStopConfirm: false,
+      // Mode B
+      bCount: 100,
+      bOptions: [50, 100, 200, 300, 400, 500],      poolStatus: { total_pending: 0, by_type: [] },
+      bPreview: null,
+      downloading: false,
+      // 出票中列表：[{filename, ticket_ids, count, amount, downloaded_at}]
+      bPendingBatches: [],
+    };
+  },
+  mounted() {
+    this.loadStats();
+    this.loadPoolStatus();
+    setInterval(this.loadStats, 15000);
+    setInterval(this.loadPoolStatus, 15000);
+
+    // 心跳：每30秒更新会话活跃时间
+    setInterval(() => {
+      fetch('/auth/heartbeat', { method: 'POST' }).catch(() => {});
+    }, 30000);
+  },
+  methods: {
+    async loadStats() {
+      try {
+        const res = await fetch('/api/user/daily-stats');
+        const data = await res.json();
+        if (data.success) {
+          this.stats = data;
+          if (data.mode_b_options && data.mode_b_options.length > 0) {
+            this.bOptions = data.mode_b_options;
+            // 如果当前选的张数不在新选项里，重置为第一个
+            if (!this.bOptions.includes(this.bCount)) {
+              this.bCount = this.bOptions[0];
+            }
+          }
+        }
+      } catch(e) {}
+    },
+    // Mode A methods
+    async toggleModeA() {
+      if (this.modeAActive) {
+        // 开始接单 - 添加body class防止误触
+        document.body.classList.add('mode-a-active');
+        await this.nextTicket();
+      } else {
+        // 停止接单 - 移除body class
+        document.body.classList.remove('mode-a-active');
+        this.confirmStop();
+      }
+    },
+    async nextTicket() {
+      // 如果在看历史票，"下一张"只是在本地数组前进，不调 API
+      if (this.historyOffset > 0) {
+        this.historyOffset -= 1;
+        this.currentTicket = this.ticketHistory[this.historyOffset];
+        this.startCountdown(this.currentTicket.deadline_time);
+        return;
+      }
+      // historyOffset=0，已在最新票，才真正从服务器获取下一张
+      this.loadingNext = true;
+      try {
+        const res = await fetch('/api/mode-a/next', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ device_id: deviceId, device_name: getDeviceName() }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.modeAActive = true;
+          this.ticketHistory.unshift(data.ticket);
+          if (this.ticketHistory.length > 3) this.ticketHistory.pop();
+          this.historyOffset = 0;
+          this.currentTicket = data.ticket;
+          this.startCountdown(data.ticket.deadline_time);
+        } else {
+          this.currentTicket = null;
+          if (!this.modeAActive) this.modeAActive = false;
+          showToast(data.error || '暂无票', 'warning');
+        }
+      } finally {
+        this.loadingNext = false;
+      }
+    },
+    previousTicket() {
+      // 在本地历史数组中后退，完全不调 API
+      if (this.historyOffset >= this.ticketHistory.length - 1) return;
+      this.historyOffset += 1;
+      this.currentTicket = this.ticketHistory[this.historyOffset];
+      this.startCountdown(this.currentTicket.deadline_time);
+    },
+    confirmStop() {
+      if (this.currentTicket) {
+        this.showStopConfirm = true;
+      } else {
+        this.modeAActive = false;
+      }
+    },
+    async doStop() {
+      this.showStopConfirm = false;
+      // 移除防误触class
+      document.body.classList.remove('mode-a-active');
+      const res = await fetch('/api/mode-a/stop', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ device_id: deviceId }),
+      });
+      this.modeAActive = false;
+      this.currentTicket = null;
+      this.ticketHistory = [];
+      this.historyOffset = 0;
+      clearInterval(this.countdownTimer);
+      this.loadStats();
+    },
+    startCountdown(deadlineStr) {
+      clearInterval(this.countdownTimer);
+      if (!deadlineStr) return;
+      const deadline = new Date(deadlineStr);
+      this.deadlineStr = deadline.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'});
+      this.countdownTimer = setInterval(() => {
+        const now = new Date();
+        const diff = Math.floor((deadline - now) / 1000);
+        if (diff <= 0) {
+          this.countdown = '已截止';
+          clearInterval(this.countdownTimer);
+          return;
+        }
+        const h = Math.floor(diff / 3600);
+        const m = Math.floor((diff % 3600) / 60);
+        const s = diff % 60;
+        this.countdown = h > 0
+          ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+          : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      }, 1000);
+    },
+    renderTicket(raw) {
+      const lotteryType = this.currentTicket ? this.currentTicket.lottery_type : '';
+      if (typeof renderTicketHTML === 'function') return renderTicketHTML(raw, lotteryType);
+      return `<div class="font-monospace small" style="word-break:break-all">${raw}</div>`;
+    },
+    // Mode B methods
+    async loadPoolStatus() {
+      try {
+        const res = await fetch('/api/mode-b/pool-status');
+        const data = await res.json();
+        if (data.success) this.poolStatus = data;
+      } catch(e) {}
+    },
+    async previewBatch() {
+      const res = await fetch(`/api/mode-b/preview?count=${this.bCount}`);
+      const data = await res.json();
+      this.bPreview = data;
+    },
+    async downloadBatch() {
+      this.downloading = true;
+      try {
+        const actualCount = (this.bPreview && this.bPreview.available < this.bCount)
+          ? this.bPreview.available : this.bCount;
+        const res = await fetch('/api/mode-b/download', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            count: actualCount,
+            device_id: deviceId,
+            device_name: getDeviceName(),
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showToast(data.error || '下载失败', 'danger'); return;
+        }
+        // 按彩种分组，每个文件单独下载
+        if (!data.files || data.files.length === 0) {
+          showToast('无可用文件', 'warning'); return;
+        }
+        const downloadTime = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        for (const file of data.files) {
+          // 触发浏览器下载
+          const blob = new Blob([file.content], { type: 'text/plain' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = file.filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          // 加入出票中列表
+          this.bPendingBatches.push({
+            filename: file.filename,
+            ticket_ids: file.ticket_ids,
+            count: file.count,
+            amount: file.amount,
+            downloaded_at: downloadTime,
+          });
+        }
+        showToast(`已下载 ${data.files.length} 个文件，共 ${data.actual_count} 张，请出票后点击"已完成"`, 'success');
+        this.loadPoolStatus();
+        this.bPreview = null;
+      } finally {
+        this.downloading = false;
+      }
+    },
+    async confirmBatch(batch, index) {
+      const res = await fetch('/api/mode-b/confirm', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ ticket_ids: batch.ticket_ids }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        this.bPendingBatches.splice(index, 1);
+        this.loadStats();
+        showToast(`${batch.count} 张已完成`, 'success');
+      }
+    },
+  },
+  beforeUnmount() {
+    clearInterval(this.countdownTimer);
+  }
+}).mount('#client-dashboard');
+</script>
+{% endblock %}

@@ -1,0 +1,171 @@
+{% extends 'base.html' %}
+{% block title %}用户管理{% endblock %}
+{% block content %}
+{% raw %}
+<div id="users-app">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="bi bi-people"></i> 用户管理</h5>
+    <button class="btn btn-primary btn-sm" @click="showCreate=true"><i class="bi bi-plus"></i> 新建用户</button>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <table class="table table-hover mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>用户名</th><th>接单模式</th><th>最大设备数</th>
+            <th>账号状态</th><th>接单开关</th><th>创建时间</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="loading"><td colspan="7" class="text-center py-3">加载中...</td></tr>
+          <tr v-for="u in users" :key="u.id">
+            <td><strong>{{ u.username }}</strong></td>
+            <td>
+              <select class="form-select form-select-sm" v-model="u.client_mode" @change="updateUser(u)">
+                <option value="mode_a">A模式（逐单）</option>
+                <option value="mode_b">B模式（批量）</option>
+              </select>
+            </td>
+            <td>
+              <input type="number" class="form-control form-control-sm" style="width:70px"
+                     v-model.number="u.max_devices" min="1" max="10"
+                     @change="updateUser(u)">
+            </td>
+            <td>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" v-model="u.is_active" @change="updateUser(u)">
+              </div>
+            </td>
+            <td>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" v-model="u.can_receive" @change="updateUser(u)">
+              </div>
+            </td>
+            <td class="small">{{ u.created_at ? u.created_at.substring(0,10) : '' }}</td>
+            <td>
+              <button class="btn btn-xs btn-outline-warning me-1" @click="resetPassword(u)">改密</button>
+              <button class="btn btn-xs btn-outline-danger me-1" @click="forceLogout(u)">踢出</button>
+              <button class="btn btn-xs btn-outline-danger" @click="deleteUser(u)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Create modal -->
+  <div v-if="showCreate" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">新建用户</h5>
+          <button class="btn-close" @click="showCreate=false"></button>
+        </div>
+        <div class="modal-body">
+          <div v-if="createError" class="alert alert-danger">{{ createError }}</div>
+          <div class="mb-3">
+            <label class="form-label">用户名</label>
+            <input v-model="newUser.username" type="text" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">密码</label>
+            <input v-model="newUser.password" type="password" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">接单模式</label>
+            <select v-model="newUser.client_mode" class="form-select">
+              <option value="mode_a">A模式（逐单）</option>
+              <option value="mode_b">B模式（批量）</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">最大设备数</label>
+            <input v-model.number="newUser.max_devices" type="number" class="form-control" min="1" max="10">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showCreate=false">取消</button>
+          <button class="btn btn-primary" @click="createUser">创建</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      users: [], loading: true,
+      showCreate: false,
+      createError: '',
+      newUser: { username: '', password: '', client_mode: 'mode_a', max_devices: 1 },
+    };
+  },
+  mounted() { this.loadUsers(); },
+  methods: {
+    async loadUsers() {
+      this.loading = true;
+      const res = await fetch('/admin/api/users');
+      const data = await res.json();
+      this.users = data.users;
+      this.loading = false;
+    },
+    async updateUser(u) {
+      await fetch(`/admin/api/users/${u.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(u),
+      });
+    },
+    async createUser() {
+      this.createError = '';
+      if (!this.newUser.username || !this.newUser.password) {
+        this.createError = '请填写用户名和密码'; return;
+      }
+      const res = await fetch('/admin/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.newUser),
+      });
+      const data = await res.json();
+      if (data.success) {
+        this.showCreate = false;
+        this.newUser = { username: '', password: '', client_mode: 'mode_a', max_devices: 1 };
+        this.loadUsers();
+        showToast('用户创建成功', 'success');
+      } else {
+        this.createError = data.error;
+      }
+    },
+    async forceLogout(u) {
+      if (!confirm(`确认踢出 ${u.username}？`)) return;
+      const res = await fetch(`/admin/api/users/${u.id}/force-logout`, { method: 'POST' });
+      const data = await res.json();
+      showToast(data.success ? '已强制下线' : '操作失败', data.success ? 'success' : 'danger');
+    },
+    async resetPassword(u) {
+      const pwd = prompt(`请输入 ${u.username} 的新密码（至少6位）`);
+      if (!pwd || pwd.length < 6) { showToast('密码至少6位', 'warning'); return; }
+      const res = await fetch(`/admin/api/users/${u.id}`, {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ password: pwd }),
+      });
+      const data = await res.json();
+      showToast(data.success ? '密码已修改' : '修改失败', data.success ? 'success' : 'danger');
+    },
+    async deleteUser(u) {
+      if (!confirm(`确认删除用户 ${u.username}？此操作不可撤销！`)) return;
+      const res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) { this.loadUsers(); showToast('已删除', 'success'); }
+    },
+  }
+}).mount('#users-app');
+</script>
+{% endblock %}

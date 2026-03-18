@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}中奖管理{% endblock %}
+{% block content %}
+{% raw %}
+<div id="winning-app">
+  <div class="card mb-3">
+    <div class="card-header"><i class="bi bi-trophy"></i> 中奖记录管理</div>
+    <div class="card-body">
+      <div class="row g-2 mb-3">
+        <div class="col-md-3">
+          <select v-model="filterUsername" class="form-select form-select-sm">
+            <option value="">全部用户</option>
+            <option v-for="u in usernameOptions" :key="u" :value="u">{{ u }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select v-model="filterPeriod" class="form-select form-select-sm">
+            <option value="">全部期号</option>
+            <option v-for="p in periodOptions" :key="p" :value="p">{{ p }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
+          <button class="btn btn-sm btn-outline-secondary ms-1" @click="filterUsername=''; filterPeriod=''; page=1; loadWinning()">重置</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover">
+          <thead class="table-dark">
+            <tr>
+              <th>票ID</th><th>用户名</th><th>彩种</th><th>期号</th>
+              <th>中奖金额</th><th>图片</th><th>上传时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="7" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="records.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无记录</td></tr>
+            <tr v-for="r in records" :key="r.id">
+              <td>{{ r.ticket_id }}</td>
+              <td>{{ r.username || '-' }}</td>
+              <td>{{ r.lottery_type }}</td>
+              <td>{{ r.detail_period }}</td>
+              <td class="fw-bold text-success">¥{{ r.winning_amount }}</td>
+              <td>
+                <a v-if="r.winning_image_url" :href="r.winning_image_url" target="_blank" class="btn btn-xs btn-outline-info">查看</a>
+                <span v-else class="text-muted small">无</span>
+              </td>
+              <td class="small">{{ r.uploaded_at ? r.uploaded_at.substring(0,16) : '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="d-flex justify-content-between" v-if="totalPages > 1">
+        <span class="small text-muted">共 {{ total }} 条</span>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" @click="page--; loadWinning()" :disabled="page<=1">上一页</button>
+          <button class="btn btn-outline-secondary disabled">{{ page }}/{{ totalPages }}</button>
+          <button class="btn btn-outline-secondary" @click="page++; loadWinning()" :disabled="page>=totalPages">下一页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Match results -->
+  <div class="card">
+    <div class="card-header"><i class="bi bi-calculator"></i> 赛果计算状态</div>
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead class="table-dark">
+          <tr><th>期号</th><th>上传时间</th><th>计算状态</th><th>总票数</th><th>中奖数</th><th>总中奖金额</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr v-if="matchResults.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无赛果</td></tr>
+          <tr v-for="r in matchResults" :key="r.id">
+            <td>{{ r.detail_period }}</td>
+            <td class="small">{{ r.uploaded_at ? r.uploaded_at.substring(0,16) : '-' }}</td>
+            <td>
+              <span class="badge" :class="{
+                'bg-secondary': r.calc_status === 'pending',
+                'bg-warning text-dark': r.calc_status === 'processing',
+                'bg-success': r.calc_status === 'done',
+                'bg-danger': r.calc_status === 'error',
+              }">{{ {'pending':'待计算','processing':'计算中','done':'已完成','error':'出错'}[r.calc_status] || r.calc_status }}</span>
+            </td>
+            <td>{{ r.tickets_total }}</td>
+            <td>{{ r.tickets_winning }}</td>
+            <td class="text-success fw-bold">¥{{ r.total_winning_amount }}</td>
+            <td>
+              <button class="btn btn-xs btn-outline-secondary" @click="recalc(r.id)">重算</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      records: [], loading: false, page: 1, totalPages: 1, total: 0,
+      filterUsername: '', filterPeriod: '',
+      usernameOptions: [], periodOptions: [],
+      matchResults: [],
+    };
+  },
+  mounted() {
+    this.loadFilterOptions();
+    this.loadWinning();
+    this.loadMatchResults();
+  },
+  methods: {
+    async loadFilterOptions() {
+      try {
+        const res = await fetch('/admin/api/winning/filter-options');
+        const data = await res.json();
+        this.usernameOptions = data.usernames || [];
+        this.periodOptions = data.periods || [];
+      } catch(e) {}
+    },
+    async loadWinning() {
+      this.loading = true;
+      const params = new URLSearchParams({ page: this.page, per_page: 50 });
+      if (this.filterUsername) params.set('username', this.filterUsername);
+      if (this.filterPeriod) params.set('period', this.filterPeriod);
+      try {
+        const res = await fetch(`/admin/api/winning?${params}`);
+        const data = await res.json();
+        this.records = data.records;
+        this.total = data.total;
+        this.totalPages = data.pages;
+      } finally {
+        this.loading = false;
+      }
+    },
+    async loadMatchResults() {
+      const res = await fetch('/admin/api/match-results');
+      const data = await res.json();
+      this.matchResults = data.results || [];
+    },
+    async recalc(id) {
+      const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });
+      const data = await res.json();
+      showToast(data.success ? '重算任务已提交' : '提交失败', data.success ? 'success' : 'danger');
+      setTimeout(() => this.loadMatchResults(), 2000);
+    },
+  }
+}).mount('#winning-app');
+</script>
+{% endblock %}

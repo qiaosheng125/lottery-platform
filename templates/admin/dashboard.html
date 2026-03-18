@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}管理后台{% endblock %}
+{% block content %}
+<div id="admin-dashboard">
+  <div class="row g-3 mb-3">
+    <!-- Pool stats -->
+    <div class="col-md-3">
+      <div class="card border-primary">
+        <div class="card-body text-center">
+          <div class="fs-2 fw-bold text-primary" id="stat-pending">-</div>
+          <div class="text-muted small">待出票总数</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-success">
+        <div class="card-body text-center">
+          <div class="fs-2 fw-bold text-success" id="stat-assigned">-</div>
+          <div class="text-muted small">正在出票</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-info">
+        <div class="card-body text-center">
+          <div class="fs-2 fw-bold text-info" id="stat-completed">-</div>
+          <div class="text-muted small">今日已完成</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-warning">
+        <div class="card-body text-center">
+          <div class="fs-2 fw-bold text-warning" id="stat-online">-</div>
+          <div class="text-muted small">在线用户</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Online users table -->
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-people"></i> 在线客户</span>
+          <span class="badge bg-success" id="online-indicator">实时</span>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-dark">
+                <tr>
+                  <th>用户名</th><th>模式</th><th>设备数</th>
+                  <th>今日张数</th><th>今日金额</th><th>接单中</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="online-users-tbody">
+                <tr><td colspan="7" class="text-center text-muted py-3">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pool by type -->
+    <div class="col-lg-4">
+      <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-bar-chart"></i> 票池分布</div>
+        <div class="card-body p-0">
+          <div id="pool-by-type" class="p-2">
+            <div class="text-center text-muted py-3">加载中...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily stats for all users -->
+      <div class="card">
+        <div class="card-header"><i class="bi bi-clipboard-data"></i> 今日出票统计</div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>用户名</th><th>张数</th><th>金额</th>
+                </tr>
+              </thead>
+              <tbody id="daily-stats-tbody">
+                <tr><td colspan="3" class="text-center text-muted py-2">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+<script>
+// Dashboard auto-refresh
+async function refreshDashboard() {
+  try {
+    const res = await fetch('/admin/api/dashboard-data');
+    const data = await res.json();
+
+    // Update pool stats
+    if (data.pool) {
+      document.getElementById('stat-pending').textContent = data.pool.total_pending ?? 0;
+      document.getElementById('stat-assigned').textContent = data.pool.assigned ?? 0;
+      document.getElementById('stat-completed').textContent = data.pool.completed_today ?? 0;
+      document.getElementById('stat-online').textContent = (data.online_users || []).length;
+    }
+
+    // Update online users
+    const tbody = document.getElementById('online-users-tbody');
+    if (data.online_users && data.online_users.length > 0) {
+      tbody.innerHTML = data.online_users.map(u => `
+        <tr>
+          <td><strong>${u.username}</strong></td>
+          <td><i class="bi ${u.client_mode === 'mode_a' ? 'bi-image text-primary' : 'bi-download text-info'}" style="font-size:1.2rem" title="${u.client_mode === 'mode_a' ? 'A模式(图片)' : 'B模式(下载)'}"></i></td>
+          <td>${u.device_count}</td>
+          <td>${u.ticket_count}</td>
+          <td>¥${u.total_amount.toFixed(0)}</td>
+          <td><span class="badge bg-${u.active_count > 0 ? 'success' : 'secondary'}">${u.active_count}</span></td>
+          <td>
+            <button class="btn btn-xs btn-outline-danger" onclick="forceLogout(${u.id})">踢出</button>
+          </td>
+        </tr>
+      `).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">暂无在线用户</td></tr>';
+    }
+
+    // Update pool by type
+    const poolDiv = document.getElementById('pool-by-type');
+    if (data.pool && data.pool.by_type && data.pool.by_type.length > 0) {
+      poolDiv.innerHTML = data.pool.by_type.map(item => `
+        <div class="d-flex justify-content-between align-items-center py-1 px-2 border-bottom">
+          <span class="small">${item.lottery_type} <span class="text-muted">${item.deadline_time ? item.deadline_time.substring(11,16) : ''}</span></span>
+          <span class="badge bg-primary">${item.count}张</span>
+        </div>
+      `).join('');
+    } else {
+      poolDiv.innerHTML = '<div class="text-center text-muted py-3 small">暂无待出票</div>';
+    }
+
+    // Update daily all users stats
+    const dailyTbody = document.getElementById('daily-stats-tbody');
+    if (data.daily_all_users && data.daily_all_users.length > 0) {
+      dailyTbody.innerHTML = data.daily_all_users.map(u => `
+        <tr>
+          <td><strong>${u.username}</strong></td>
+          <td>${u.count}</td>
+          <td>¥${u.amount.toFixed(0)}</td>
+        </tr>
+      `).join('');
+    } else {
+      dailyTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">暂无数据</td></tr>';
+    }
+  } catch(e) {
+    console.error('Dashboard refresh error:', e);
+  }
+}
+
+async function forceLogout(userId) {
+  if (!confirm('确认踢出该用户？')) return;
+  const res = await fetch(`/admin/api/users/${userId}/force-logout`, { method: 'POST' });
+  const data = await res.json();
+  if (data.success) {
+    showToast('已强制下线', 'success');
+    refreshDashboard();
+  }
+}
+
+refreshDashboard();
+setInterval(refreshDashboard, 5000);
+
+// 心跳：每30秒更新会话活跃时间
+setInterval(() => {
+  fetch('/auth/heartbeat', { method: 'POST' }).catch(() => {});
+}, 30000);
+</script>
+{% endblock %}

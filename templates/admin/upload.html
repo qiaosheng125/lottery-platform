@@ -1,0 +1,211 @@
+{% extends 'base.html' %}
+{% block title %}文件管理{% endblock %}
+{% block content %}
+{% raw %}
+<div id="upload-app">
+  <!-- Upload area -->
+  <div class="card mb-3">
+    <div class="card-header"><i class="bi bi-cloud-upload"></i> 上传彩票数据文件</div>
+    <div class="card-body">
+      <div class="border border-dashed rounded p-4 text-center mb-3"
+           @dragover.prevent @drop.prevent="handleDrop"
+           style="cursor:pointer; border-style:dashed!important"
+           @click="$refs.fileInput.click()">
+        <i class="bi bi-file-earmark-arrow-up fs-1 text-muted"></i>
+        <div class="mt-2 text-muted">点击选择或拖拽 TXT 文件</div>
+        <div class="small text-muted">支持批量上传，文件名格式: 标识_代码彩种N倍投_金额X元_N张_HH.MM_期号.txt</div>
+        <input type="file" ref="fileInput" multiple accept=".txt" class="d-none" @change="handleFiles">
+      </div>
+
+      <div v-if="uploadQueue.length > 0" class="mb-3">
+        <div v-for="(item, i) in uploadQueue" :key="i" class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-file-text text-primary"></i>
+          <span class="small flex-grow-1 text-truncate">{{ item.name }}</span>
+          <span class="badge" :class="item.status === 'done' ? 'bg-success' : item.status === 'error' ? 'bg-danger' : 'bg-secondary'">
+            {{ item.status === 'done' ? '✓' : item.status === 'error' ? '✗' : '等待中' }}
+          </span>
+          <span class="small text-muted">{{ item.message }}</span>
+        </div>
+        <button class="btn btn-primary mt-2" @click="doUpload" :disabled="uploading">
+          <span v-if="uploading" class="spinner-border spinner-border-sm me-1"></span>
+          {{ uploading ? '上传中...' : '开始上传' }}
+        </button>
+        <button class="btn btn-outline-secondary mt-2 ms-2" @click="clearQueue" :disabled="uploading">清空</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- File list -->
+  <div class="card">
+    <div class="card-header d-flex justify-content-between">
+      <span><i class="bi bi-list-ul"></i> 文件列表</span>
+      <button class="btn btn-sm btn-outline-secondary" @click="loadFiles">刷新</button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>文件名</th><th>彩种</th><th>倍投</th><th>截止</th><th>期号</th>
+              <th>总张</th><th>待出</th><th>已完成</th><th>状态</th><th>上传时间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="11" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="files.length === 0"><td colspan="11" class="text-center py-3 text-muted">暂无文件</td></tr>
+            <tr v-for="f in files" :key="f.id">
+              <td class="text-truncate" style="max-width:200px" :title="f.original_filename">
+                <a href="#" @click.prevent="viewDetail(f.id)">{{ f.original_filename }}</a>
+              </td>
+              <td>{{ f.lottery_type }}</td>
+              <td>{{ f.multiplier }}倍</td>
+              <td>{{ f.deadline_time ? f.deadline_time.substring(11,16) : '-' }}</td>
+              <td>{{ f.detail_period }}</td>
+              <td>{{ f.total_tickets }}</td>
+              <td><span class="badge bg-primary">{{ f.pending_count }}</span></td>
+              <td><span class="badge bg-success">{{ f.completed_count }}</span></td>
+              <td>
+                <span class="badge" :class="{
+                  'bg-success': f.status === 'active',
+                  'bg-danger': f.status === 'revoked',
+                  'bg-secondary': f.status === 'expired' || f.status === 'exhausted'
+                }">{{ statusLabel(f.status) }}</span>
+              </td>
+              <td class="small">{{ f.uploaded_at ? f.uploaded_at.substring(0,16) : '' }}</td>
+              <td>
+                <button v-if="f.status === 'active'" class="btn btn-xs btn-outline-danger"
+                        @click="revokeFile(f.id, f.original_filename)">撤回</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Pagination -->
+      <div class="d-flex justify-content-between align-items-center p-2" v-if="totalPages > 1">
+        <span class="small text-muted">共 {{ total }} 条</span>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" @click="page--; loadFiles()" :disabled="page<=1">上一页</button>
+          <button class="btn btn-outline-secondary disabled">{{ page }} / {{ totalPages }}</button>
+          <button class="btn btn-outline-secondary" @click="page++; loadFiles()" :disabled="page>=totalPages">下一页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">文件详情</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="table-responsive" style="max-height:70vh;overflow-y:auto">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-dark sticky-top">
+                <tr>
+                  <th>行号</th><th>原始内容</th><th>金额</th><th>状态</th>
+                  <th>用户名</th><th>设备名</th><th>分配时间</th><th>完成时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in detailTickets" :key="t.id">
+                  <td>{{ t.line_number }}</td>
+                  <td class="font-monospace small" style="max-width:300px;word-break:break-all">{{ t.raw_content }}</td>
+                  <td>¥{{ t.ticket_amount }}</td>
+                  <td><span class="badge" :class="ticketStatusClass(t.status)">{{ ticketStatusLabel(t.status) }}</span></td>
+                  <td>{{ t.assigned_username || '-' }}</td>
+                  <td>{{ t.assigned_device_name || '-' }}</td>
+                  <td class="small">{{ t.assigned_at ? t.assigned_at.substring(0,16) : '-' }}</td>
+                  <td class="small">{{ t.completed_at ? t.completed_at.substring(0,16) : '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      files: [], loading: false, page: 1, totalPages: 1, total: 0,
+      uploadQueue: [], uploading: false,
+      detailTickets: [],
+    };
+  },
+  mounted() { this.loadFiles(); },
+  methods: {
+    async loadFiles() {
+      this.loading = true;
+      const res = await fetch(`/admin/api/files?page=${this.page}&per_page=20`);
+      const data = await res.json();
+      this.files = data.files;
+      this.total = data.total;
+      this.totalPages = data.pages;
+      this.loading = false;
+    },
+    statusLabel(s) {
+      return { active: '活跃', revoked: '已撤回', expired: '已过期', exhausted: '已出完' }[s] || s;
+    },
+    ticketStatusClass(s) {
+      return { pending:'bg-primary', assigned:'bg-warning text-dark', completed:'bg-success', revoked:'bg-danger', expired:'bg-secondary' }[s] || 'bg-secondary';
+    },
+    ticketStatusLabel(s) {
+      return { pending:'待出票', assigned:'出票中', completed:'已完成', revoked:'已撤回', expired:'已过期' }[s] || s;
+    },
+    handleDrop(e) {
+      const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.txt'));
+      files.forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
+    },
+    handleFiles(e) {
+      Array.from(e.target.files).forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
+      e.target.value = '';
+    },
+    clearQueue() { this.uploadQueue = []; },
+    async doUpload() {
+      this.uploading = true;
+      const fd = new FormData();
+      this.uploadQueue.filter(i => i.status === 'pending').forEach(i => fd.append('files', i.file));
+      try {
+        const res = await fetch('/admin/files/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.results) {
+          data.results.forEach((r, i) => {
+            const item = this.uploadQueue.find(q => q.name === (r.filename || this.uploadQueue[i]?.name));
+            if (item) {
+              item.status = r.success ? 'done' : 'error';
+              item.message = r.message || r.error || '';
+            }
+          });
+        }
+        this.loadFiles();
+      } catch(e) {
+        this.uploadQueue.forEach(i => { if(i.status==='pending') i.status='error'; i.message='上传失败'; });
+      }
+      this.uploading = false;
+    },
+    async revokeFile(id, name) {
+      if (!confirm(`确认撤回文件"${name}"？`)) return;
+      const res = await fetch(`/admin/api/files/${id}/revoke`, { method: 'POST' });
+      const data = await res.json();
+      showToast(data.message || (data.success ? '撤回成功' : '撤回失败'), data.success ? 'success' : 'danger');
+      if (data.success) this.loadFiles();
+    },
+    async viewDetail(fileId) {
+      const res = await fetch(`/admin/api/files/${fileId}/detail?per_page=100`);
+      const data = await res.json();
+      this.detailTickets = data.tickets;
+      new bootstrap.Modal(document.getElementById('detailModal')).show();
+    },
+  }
+}).mount('#upload-app');
+</script>
+{% endblock %}
