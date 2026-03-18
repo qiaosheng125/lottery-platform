@@ -37,9 +37,18 @@
 
   <!-- File list -->
   <div class="card">
-    <div class="card-header d-flex justify-content-between">
+    <div class="card-header d-flex justify-content-between align-items-center">
       <span><i class="bi bi-list-ul"></i> 文件列表</span>
-      <button class="btn btn-sm btn-outline-secondary" @click="loadFiles">刷新</button>
+      <div class="d-flex gap-2 align-items-center">
+        <select v-model="filterDate" class="form-select form-select-sm" style="width:auto" @change="page=1; loadFiles()">
+          <option value="">全部日期</option>
+          <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
+        </select>
+        <button class="btn btn-sm btn-outline-success" @click="exportByDate">
+          <i class="bi bi-download"></i> 导出CSV
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" @click="loadFiles">刷新</button>
+      </div>
     </div>
     <div class="card-body p-0">
       <div class="table-responsive">
@@ -65,11 +74,7 @@
               <td><span class="badge bg-primary">{{ f.pending_count }}</span></td>
               <td><span class="badge bg-success">{{ f.completed_count }}</span></td>
               <td>
-                <span class="badge" :class="{
-                  'bg-success': f.status === 'active',
-                  'bg-danger': f.status === 'revoked',
-                  'bg-secondary': f.status === 'expired' || f.status === 'exhausted'
-                }">{{ statusLabel(f.status) }}</span>
+                <span class="badge" :class="fileStatusClass(f)">{{ fileStatusLabel(f) }}</span>
               </td>
               <td class="small">{{ f.uploaded_at ? f.uploaded_at.substring(0,16) : '' }}</td>
               <td>
@@ -137,6 +142,7 @@ createApp({
   data() {
     return {
       files: [], loading: false, page: 1, totalPages: 1, total: 0,
+      filterDate: '', dateOptions: [],
       uploadQueue: [], uploading: false,
       detailTickets: [],
     };
@@ -145,15 +151,30 @@ createApp({
   methods: {
     async loadFiles() {
       this.loading = true;
-      const res = await fetch(`/admin/api/files?page=${this.page}&per_page=20`);
+      const params = new URLSearchParams({ page: this.page, per_page: 20 });
+      if (this.filterDate) params.set('date', this.filterDate);
+      const res = await fetch(`/admin/api/files?${params}`);
       const data = await res.json();
       this.files = data.files;
       this.total = data.total;
       this.totalPages = data.pages;
+      if (data.date_options) this.dateOptions = data.date_options;
       this.loading = false;
     },
     statusLabel(s) {
       return { active: '活跃', revoked: '已撤回', expired: '已过期', exhausted: '已出完' }[s] || s;
+    },
+    fileStatusClass(f) {
+      if (f.status === 'revoked') return 'bg-danger';
+      if (f.pending_count === 0) return 'bg-success';
+      if (f.deadline_time && new Date(f.deadline_time) < new Date()) return 'bg-secondary';
+      return 'bg-primary';
+    },
+    fileStatusLabel(f) {
+      if (f.status === 'revoked') return '已撤回';
+      if (f.pending_count === 0) return '已完成';
+      if (f.deadline_time && new Date(f.deadline_time) < new Date()) return '已过期';
+      return '出票中';
     },
     ticketStatusClass(s) {
       return { pending:'bg-primary', assigned:'bg-warning text-dark', completed:'bg-success', revoked:'bg-danger', expired:'bg-secondary' }[s] || 'bg-secondary';
@@ -191,6 +212,11 @@ createApp({
         this.uploadQueue.forEach(i => { if(i.status==='pending') i.status='error'; i.message='上传失败'; });
       }
       this.uploading = false;
+    },
+    exportByDate() {
+      const params = new URLSearchParams();
+      if (this.filterDate) params.set('date', this.filterDate);
+      window.location.href = `/admin/api/tickets/export-by-date?${params}`;
     },
     async revokeFile(id, name) {
       if (!confirm(`确认撤回文件"${name}"？`)) return;

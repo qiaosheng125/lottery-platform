@@ -68,14 +68,17 @@ def daily_stats():
 
 @user_bp.route('/export-daily')
 @login_required
-@login_required_json
 def export_daily():
-    """下载当日出票清单"""
+    """下载当日出票清单 XLSX（仅含已过截止时间的票）"""
+    import io as _io
+    from openpyxl import Workbook
     from datetime import datetime, timedelta
+    from urllib.parse import quote
+
     today = get_business_date()
     now = beijing_now()
 
-    # 计算今日业务时间范围（12点分割线）
+    # 今日业务时间范围（12点分割线）
     today_start = datetime.combine(today, datetime.min.time())
     if now.hour < 12:
         today_start = today_start - timedelta(days=1) + timedelta(hours=12)
@@ -88,19 +91,48 @@ def export_daily():
         LotteryTicket.status == 'completed',
         LotteryTicket.completed_at >= today_start,
         LotteryTicket.completed_at < today_end,
+        LotteryTicket.deadline_time <= now,   # 只含已过截止时间的
     ).order_by(LotteryTicket.completed_at).all()
 
     if not rows:
-        return jsonify({'success': False, 'error': '今日暂无出票记录'}), 404
+        from flask import abort
+        abort(404)
 
-    lines = [r.raw_content for r in rows if r.raw_content]
-    content = '\n'.join(lines)
+    ticket_count = len(rows)
+    total_amount = sum(float(r.ticket_amount or 0) for r in rows)
+    period_str = next((r.detail_period for r in rows if r.detail_period), '')
 
-    filename = f"出票清单_{current_user.username}_{today}.txt"
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['票ID', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间'])
+    status_map = {'pending': '待出票', 'assigned': '出票中', 'completed': '已完成',
+                  'revoked': '已撤回', 'expired': '已过期'}
+    for t in rows:
+        ws.append([
+            t.id,
+            t.raw_content or '',
+            t.lottery_type or '',
+            f"{t.multiplier}倍" if t.multiplier else '',
+            t.deadline_time.strftime('%Y-%m-%d %H:%M') if t.deadline_time else '',
+            t.detail_period or '',
+            float(t.ticket_amount or 0),
+            status_map.get(t.status, t.status),
+            t.assigned_username or '',
+            t.assigned_device_name or '',
+            t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
+            t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
+        ])
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"{today}_{period_str}_{ticket_count}张_{int(total_amount)}元.xlsx"
+    filename_encoded = quote(filename, encoding='utf-8')
     return Response(
-        content.encode('utf-8'),
-        mimetype='text/plain',
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        buf.read(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{filename_encoded}"},
     )
 
 

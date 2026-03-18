@@ -11,7 +11,8 @@
       <span class="badge bg-success">共 {{ total }} 条</span>
     </div>
     <div class="card-body">
-      <div class="row g-2 mb-3">
+      <!-- 筛选栏 -->
+      <div class="row g-2 mb-2">
         <div class="col-md-2">
           <select v-model="filterUsername" class="form-select form-select-sm">
             <option value="">全部用户</option>
@@ -30,11 +31,29 @@
             <option v-for="t in lotteryTypeOptions" :key="t" :value="t">{{ t }}</option>
           </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
+          <select v-model="filterImage" class="form-select form-select-sm">
+            <option value="">全部图片状态</option>
+            <option value="uploaded">已上传图片</option>
+            <option value="missing">未上传图片</option>
+          </select>
+        </div>
+        <div class="col-md-3 d-flex gap-1">
           <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
-          <button class="btn btn-sm btn-outline-secondary ms-1" @click="filterUsername=''; filterDate=''; filterLotteryType=''; page=1; loadWinning()">重置</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="filterUsername=''; filterDate=''; filterLotteryType=''; filterImage=''; page=1; loadWinning()">重置</button>
+          <button class="btn btn-sm btn-outline-success" @click="exportWinning">
+            <i class="bi bi-download"></i> 导出CSV
+          </button>
         </div>
       </div>
+      <!-- 汇总栏 -->
+      <div class="alert alert-info py-2 px-3 mb-2 d-flex gap-4 align-items-center" style="font-size:.9rem">
+        <span>当前筛选：<strong>{{ total }}</strong> 条</span>
+        <span>税后合计：<strong class="text-success">¥{{ summaryAmount.toFixed(2) }}</strong></span>
+        <span v-if="summaryTax > 0">税金合计：<strong class="text-warning">¥{{ summaryTax.toFixed(2) }}</strong></span>
+        <span>未上传图片：<strong class="text-danger">{{ summaryMissing }}</strong> 条</span>
+      </div>
+      <!-- 表格 -->
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle">
           <thead class="table-dark">
@@ -56,7 +75,7 @@
             <tr v-for="r in records" :key="r.ticket_id">
               <td class="fw-bold text-nowrap">#{{ r.ticket_id }}</td>
               <td>
-                <div class="small font-monospace text-nowrap" style="max-width:220px;overflow:hidden;text-overflow:ellipsis" :title="r.raw_content">{{ r.raw_content }}</div>
+                <div class="small font-monospace" style="white-space:nowrap">{{ r.raw_content }}</div>
               </td>
               <td class="text-nowrap">¥{{ r.ticket_amount }}</td>
               <td>{{ r.username }}</td>
@@ -69,6 +88,7 @@
                 </div>
               </td>
               <td style="white-space:nowrap">
+                <span v-if="r.winning_image_url" class="badge bg-success me-1">已上传</span>
                 <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewImage(r.winning_image_url)">查看</button>
                 <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingImageId === r.ticket_id}">
                   <span v-if="uploadingImageId === r.ticket_id" class="spinner-border spinner-border-sm"></span>
@@ -81,7 +101,7 @@
           </tbody>
         </table>
       </div>
-      <div class="d-flex justify-content-between align-items-center" v-if="totalPages > 1">
+      <div class="d-flex justify-content-between align-items-center mt-2" v-if="totalPages > 1">
         <span class="small text-muted">共 {{ total }} 条</span>
         <div class="btn-group btn-group-sm">
           <button class="btn btn-outline-secondary" @click="page--; loadWinning()" :disabled="page<=1">上一页</button>
@@ -225,8 +245,9 @@ createApp({
     return {
       // 中奖记录
       records: [], loading: false, page: 1, totalPages: 1, total: 0,
-      filterUsername: '', filterDate: '', filterLotteryType: '',
+      filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '',
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
+      summaryAmount: 0, summaryCount: 0,
       // 上传赛果
       resultFile: null, uploadPeriod: '', uploading: false, uploadMsg: '', uploadSuccess: false,
       // 赛果计算状态
@@ -261,12 +282,15 @@ createApp({
       if (this.filterUsername) params.set('username', this.filterUsername);
       if (this.filterDate) params.set('date', this.filterDate);
       if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
+      if (this.filterImage) params.set('image_filter', this.filterImage);
       try {
         const res = await fetch(`/admin/api/winning?${params}`);
         const data = await res.json();
         this.records = data.records || [];
         this.total = data.total || 0;
         this.totalPages = data.pages || 1;
+        this.summaryAmount = (data.summary && data.summary.amount) || 0;
+        this.summaryCount = (data.summary && data.summary.count) || 0;
       } finally {
         this.loading = false;
       }
@@ -306,6 +330,14 @@ createApp({
       const data = await res.json();
       this.matchResults = data.results || [];
       this.mrDateOptions = data.dates || [];
+    },
+    exportWinning() {
+      const params = new URLSearchParams();
+      if (this.filterUsername) params.set('username', this.filterUsername);
+      if (this.filterDate) params.set('date', this.filterDate);
+      if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
+      if (this.filterImage) params.set('image_filter', this.filterImage);
+      window.location.href = `/admin/api/winning/export?${params}`;
     },
     async recalc(id) {
       const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });

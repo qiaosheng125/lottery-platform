@@ -64,18 +64,6 @@
           <textarea v-model="s.announcement" class="form-control" rows="3" placeholder="公告内容"></textarea>
         </div>
 
-        <!-- OSS settings -->
-        <h6 class="border-bottom pb-2 mb-3">赛果上传</h6>
-        <div class="mb-4">
-          <label class="form-label">上传赛果文件</label>
-          <div class="input-group">
-            <input type="text" v-model="resultPeriod" class="form-control" placeholder="期号，如 26034">
-            <input type="file" ref="resultFile" accept=".txt" class="d-none" @change="uploadResult">
-            <button class="btn btn-outline-primary" @click="$refs.resultFile.click()">选择文件</button>
-          </div>
-          <div class="form-text">选择文件后自动上传并触发中奖计算</div>
-        </div>
-
         <button class="btn btn-primary" @click="saveSettings" :disabled="saving">
           <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
           保存设置
@@ -93,7 +81,6 @@ createApp({
     return {
       s: {}, saving: false, saved: false,
       modeBOptionsStr: '',
-      resultPeriod: '',
     };
   },
   async mounted() {
@@ -114,18 +101,6 @@ createApp({
         const data = await res.json();
         if (data.success) { this.saved = true; setTimeout(() => this.saved = false, 3000); }
       } finally { this.saving = false; }
-    },
-    async uploadResult(e) {
-      if (!this.resultPeriod.trim()) { showToast('请先输入期号', 'warning'); return; }
-      const file = e.target.files[0];
-      if (!file) return;
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('detail_period', this.resultPeriod.trim());
-      const res = await fetch('/admin/match-results/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      showToast(data.success ? `赛果上传成功，正在计算中奖...` : (data.error || '上传失败'), data.success ? 'success' : 'danger');
-      e.target.value = '';
     },
   }
 }).mount('#settings-app');

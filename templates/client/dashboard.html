@@ -221,7 +221,7 @@
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
           <span><i class="bi bi-file-earmark-arrow-down text-info"></i> 今日出票清单</span>
-          <a href="/api/user/export-daily" class="btn btn-sm btn-outline-info">下载</a>
+          <button class="btn btn-sm btn-outline-info" @click="exportDaily">下载</button>
         </div>
       </div>
     </div>
@@ -561,6 +561,7 @@ createApp({
       }
     },
     previewWinningImage(url) { this.winningPreviewUrl = url; },
+    exportDaily() { window.location.href = '/api/user/export-daily'; },
     async uploadWinningImage(event, record) {
       const file = event.target.files[0];
       if (!file) return;

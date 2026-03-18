@@ -156,13 +156,27 @@ def files_list():
 @login_required
 @admin_required
 def api_files_list():
+    from sqlalchemy import func
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     status_filter = request.args.get('status', '')
+    date_str = request.args.get('date', '').strip()
 
     q = UploadedFile.query.order_by(UploadedFile.uploaded_at.desc())
     if status_filter:
         q = q.filter_by(status=status_filter)
+    if date_str:
+        q = q.filter(
+            func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')) == date_str
+        )
+
+    # 日期选项（北京时间）
+    dates_raw = db.session.query(
+        func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours'))
+    ).distinct().order_by(
+        func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')).desc()
+    ).all()
+    date_options = [d[0] for d in dates_raw if d[0]]
 
     pagination = q.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify({
@@ -170,6 +184,7 @@ def api_files_list():
         'total': pagination.total,
         'pages': pagination.pages,
         'page': page,
+        'date_options': date_options,
     })
 
 
@@ -251,6 +266,80 @@ def export_tickets():
         output.getvalue().encode('utf-8-sig'),
         mimetype='text/csv',
         headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
+
+
+# ── User management ───────────────────────────────────────────────────
+
+@admin_bp.route('/api/tickets/export-by-date')
+@login_required
+@admin_required
+def export_tickets_by_date():
+    """按上传日期导出该日所有票数据 XLSX"""
+    import io as _io
+    from openpyxl import Workbook
+    from sqlalchemy import func
+    from urllib.parse import quote
+
+    date_str = request.args.get('date', '').strip()
+
+    q = LotteryTicket.query
+    if date_str:
+        file_ids = db.session.query(UploadedFile.id).filter(
+            func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')) == date_str
+        ).all()
+        file_ids = [r[0] for r in file_ids]
+        if not file_ids:
+            wb = Workbook()
+            ws = wb.active
+            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间', '来源文件名'])
+            buf = _io.BytesIO()
+            wb.save(buf)
+            buf.seek(0)
+            from flask import Response
+            return Response(buf.read(),
+                            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            headers={'Content-Disposition': 'attachment; filename="empty.xlsx"'})
+        q = q.filter(LotteryTicket.source_file_id.in_(file_ids))
+
+    tickets = q.order_by(LotteryTicket.source_file_id, LotteryTicket.line_number).all()
+
+    file_map = {f.id: f.original_filename for f in UploadedFile.query.all()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间', '来源文件名'])
+    status_map = {'pending': '待出票', 'assigned': '出票中', 'completed': '已完成',
+                  'revoked': '已撤回', 'expired': '已过期'}
+    for t in tickets:
+        ws.append([
+            t.line_number,
+            t.raw_content or '',
+            t.lottery_type or '',
+            f"{t.multiplier}倍" if t.multiplier else '',
+            t.deadline_time.strftime('%Y-%m-%d %H:%M') if t.deadline_time else '',
+            t.detail_period or '',
+            float(t.ticket_amount or 0),
+            status_map.get(t.status, t.status),
+            t.assigned_username or '',
+            t.assigned_device_name or '',
+            t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
+            t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
+            file_map.get(t.source_file_id, ''),
+        ])
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from flask import Response
+    period_str = next((t.detail_period for t in tickets if t.detail_period), '未知期号')
+    filename = f"{date_str or '全部'}_{period_str}投注内容详情.xlsx"
+    filename_encoded = quote(filename, encoding='utf-8')
+    return Response(
+        buf.read(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{filename_encoded}"},
     )
 
 
@@ -395,6 +484,7 @@ def api_winning_list():
     username = request.args.get('username', '').strip()
     date_str = request.args.get('date', '').strip()
     lottery_type = request.args.get('lottery_type', '').strip()
+    image_filter = request.args.get('image_filter', '').strip()  # 'uploaded' | 'missing'
 
     q = LotteryTicket.query.filter(LotteryTicket.is_winning == True)
     if username:
@@ -405,11 +495,31 @@ def api_winning_list():
         )
     if lottery_type:
         q = q.filter(LotteryTicket.lottery_type == lottery_type)
+    if image_filter == 'uploaded':
+        q = q.filter(LotteryTicket.winning_image_url.isnot(None),
+                     LotteryTicket.winning_image_url != '')
+    elif image_filter == 'missing':
+        q = q.filter(
+            (LotteryTicket.winning_image_url == None) |
+            (LotteryTicket.winning_image_url == '')
+        )
     q = q.order_by(LotteryTicket.completed_at.desc())
-    pagination = q.paginate(page=page, per_page=per_page, error_out=False)
+
+    # 汇总（全量，不分页）
+    all_items = q.all()
+    summary_amount = sum(float(t.winning_amount or 0) for t in all_items)
+    summary_gross  = sum(float(t.winning_gross  or 0) for t in all_items)
+    summary_tax    = sum(float(t.winning_tax    or 0) for t in all_items)
+    total = len(all_items)
+
+    # 分页切片
+    start = (page - 1) * per_page
+    page_items = all_items[start:start + per_page]
+    import math
+    pages = math.ceil(total / per_page) if total else 1
 
     records = []
-    for t in pagination.items:
+    for t in page_items:
         records.append({
             'ticket_id': t.id,
             'username': t.assigned_username or '-',
@@ -420,16 +530,98 @@ def api_winning_list():
             'winning_gross': float(t.winning_gross) if t.winning_gross else 0,
             'winning_amount': float(t.winning_amount) if t.winning_amount else 0,
             'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
-            'winning_image_url': t.winning_image_url,
+            'winning_image_url': t.winning_image_url or '',
             'raw_content': t.raw_content or '',
             'ticket_amount': float(t.ticket_amount) if t.ticket_amount else 0,
             'completed_at': (t.completed_at.isoformat() if t.completed_at else None),
         })
     return jsonify({
         'records': records,
-        'total': pagination.total,
-        'pages': pagination.pages,
+        'total': total,
+        'pages': pages,
+        'summary': {
+            'amount': round(summary_amount, 2),
+            'gross':  round(summary_gross,  2),
+            'tax':    round(summary_tax,    2),
+            'count':  total,
+        },
     })
+
+
+@admin_bp.route('/api/winning/export')
+@login_required
+@admin_required
+def api_winning_export():
+    """导出当前筛选条件下的所有中奖条目为 XLSX"""
+    import io as _io
+    from openpyxl import Workbook
+    from sqlalchemy import func
+
+    username     = request.args.get('username', '').strip()
+    date_str     = request.args.get('date', '').strip()
+    lottery_type = request.args.get('lottery_type', '').strip()
+    image_filter = request.args.get('image_filter', '').strip()
+
+    q = LotteryTicket.query.filter(LotteryTicket.is_winning == True)
+    if username:
+        q = q.filter(LotteryTicket.assigned_username == username)
+    if date_str:
+        q = q.filter(
+            func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')) == date_str
+        )
+    if lottery_type:
+        q = q.filter(LotteryTicket.lottery_type == lottery_type)
+    if image_filter == 'uploaded':
+        q = q.filter(LotteryTicket.winning_image_url.isnot(None),
+                     LotteryTicket.winning_image_url != '')
+    elif image_filter == 'missing':
+        q = q.filter(
+            (LotteryTicket.winning_image_url == None) |
+            (LotteryTicket.winning_image_url == '')
+        )
+    items = q.order_by(LotteryTicket.completed_at.desc()).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['票ID', '投注内容', '票面金额', '用户名', '设备名', '彩种', '期号',
+               '税前金额', '税后金额', '税金', '图片状态', '完成时间'])
+    for t in items:
+        ws.append([
+            t.id,
+            t.raw_content or '',
+            float(t.ticket_amount or 0),
+            t.assigned_username or '',
+            t.assigned_device_name or '',
+            t.lottery_type or '',
+            t.detail_period or '',
+            float(t.winning_gross or 0),
+            float(t.winning_amount or 0),
+            float(t.winning_tax or 0),
+            '已上传' if t.winning_image_url else '未上传',
+            t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
+        ])
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from flask import Response
+    from urllib.parse import quote
+    parts = ['中奖记录']
+    if username:     parts.append(username)
+    if date_str:     parts.append(date_str)
+    if lottery_type: parts.append(lottery_type)
+    if image_filter == 'uploaded':  parts.append('已上传')
+    elif image_filter == 'missing': parts.append('未上传')
+    from utils.time_utils import beijing_now
+    parts.append(beijing_now().strftime('%Y%m%d_%H%M%S'))
+    filename = '_'.join(parts) + '.xlsx'
+    filename_encoded = quote(filename, encoding='utf-8')
+    return Response(
+        buf.read(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{filename_encoded}"},
+    )
 
 
 @admin_bp.route('/api/winning/<int:ticket_id>/presign', methods=['POST'])
