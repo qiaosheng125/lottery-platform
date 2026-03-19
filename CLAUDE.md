@@ -62,5 +62,27 @@ FLASK_ENV=production
 - Gunicorn：单worker + gevent协程模式
 
 ## GitHub
-- 仓库：https://github.com/qiaosheng125/lottery-platform（待改名为 file-hub）
+- 仓库：https://github.com/qiaosheng125/file-hub
 - 分支：main
+
+## ⭐ 并发安全（最高优先级，绝不能破坏）
+
+**核心要求：同一张票永远只分配给一个设备，20设备并发接单不会重复分票。**
+
+### 实现层
+- **SQLite（开发）**：`services/ticket_pool.py` 模块级 `_sqlite_assign_lock = threading.Lock()`，所有分票操作在锁内串行执行，UPDATE 带 `WHERE status='pending'` 原子条件
+- **PostgreSQL（生产）**：`SELECT FOR UPDATE SKIP LOCKED` 行锁 + 条件 UPDATE
+
+### 关键约束
+- Gunicorn **必须** `workers = 1`，多 worker 会破坏 SQLite 进程锁
+- B 模式始终保留 20 张给 A 模式缓冲（`RESERVE = 20`，`ticket_pool.py`）
+- A 模式每台设备同时只持有 1 张票（点"下一张"才自动完成当前票）
+
+## 本次会话完成的功能（2026-03-19）
+
+1. **B模式保留20张** — `services/ticket_pool.py` `assign_tickets_batch()` 加 `RESERVE=20`，`get_pool_total_pending()` 返回 `max(0, total-20)`
+2. **中签记录显示设备** — `routes/winning.py` `my_winning()` 返回 `assigned_device_id/name`，`templates/client/dashboard.html` 中签卡片显示设备 badge
+3. **接单页显示设备名** — `dashboard.html` 标题区加 `device-name-badge`，JS 读取本地存储设备名填入
+4. **今日各设备出票统计** — `routes/user.py` `daily_stats()` 按 `assigned_device_id` 分组，`dashboard.html` 展示设备统计表（设备数>1时显示）
+5. **上传成功自动清空队列** — `templates/admin/upload.html` `doUpload()` 全部成功则清空，有失败则只保留失败项
+6. **20设备并发压力测试** — `tests/setup_test_env.py`（初始化测试账号）、`tests/test_concurrent_20devices.py`（10个A模式+10个B模式并发）
