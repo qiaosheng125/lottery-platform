@@ -67,7 +67,7 @@ FLASK_ENV=production
 
 ## ⭐ 并发安全（最高优先级，绝不能破坏）
 
-**核心要求：同一张票永远只分配给一个设备，20设备并发接单不会重复分票。**
+**核心要求：同一张票永远只分配给一个设备，任意数量设备并发接单均不会重复分票（20设备只是测试用例，实际不限数量）。**
 
 ### 实现层
 - **SQLite（开发）**：`services/ticket_pool.py` 模块级 `_sqlite_assign_lock = threading.Lock()`，所有分票操作在锁内串行执行，UPDATE 带 `WHERE status='pending'` 原子条件
