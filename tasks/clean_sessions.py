@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 def clean_inactive_sessions():
-    """清理3小时无活动的会话"""
+    """清理无活动超时的会话，超时时长从管理员设置读取"""
     try:
-        count = _clean(hours=3)
+        from models.settings import SystemSettings
+        hours = SystemSettings.get().session_lifetime_hours
+        count = _clean(hours=hours)
         if count:
-            logger.info(f"Cleaned {count} inactive sessions")
+            logger.info(f"Cleaned {count} inactive sessions (timeout={hours}h)")
     except Exception as e:
         logger.error(f"clean_inactive_sessions error: {e}")

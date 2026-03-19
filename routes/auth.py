@@ -2,6 +2,8 @@
 认证路由：登录、注册、登出
 """
 
+from datetime import timedelta
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 
@@ -11,6 +13,7 @@ from models.settings import SystemSettings
 from models.audit import AuditLog
 from services.session_service import create_session, delete_session
 from utils.decorators import get_client_ip
+from utils.time_utils import beijing_now
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -42,7 +45,11 @@ def login():
 
         # Check device limit (non-admin only)
         if not user.is_admin and device_id:
-            active_sessions = UserSession.query.filter_by(user_id=user.id).count()
+            settings = SystemSettings.get()
+            cutoff = beijing_now() - timedelta(hours=settings.session_lifetime_hours)
+            active_sessions = UserSession.query.filter_by(user_id=user.id).filter(
+                UserSession.last_seen >= cutoff
+            ).count()
             # Check if this device already has a session
             existing = UserSession.query.filter_by(user_id=user.id, device_id=device_id).first()
             if not existing and active_sessions >= user.max_devices:
