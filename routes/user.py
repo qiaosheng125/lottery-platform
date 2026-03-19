@@ -44,6 +44,21 @@ def daily_stats():
     ticket_count = len(today_tickets)
     total_amount = sum(float(t.ticket_amount or 0) for t in today_tickets)
 
+    # 按设备分组统计
+    device_stats = {}
+    for t in today_tickets:
+        key = t.assigned_device_id or 'unknown'
+        if key not in device_stats:
+            device_stats[key] = {
+                'device_id': t.assigned_device_id or '',
+                'device_name': t.assigned_device_name or t.assigned_device_id or '未知设备',
+                'count': 0,
+                'amount': 0.0,
+            }
+        device_stats[key]['count'] += 1
+        device_stats[key]['amount'] += float(t.ticket_amount or 0)
+    device_stats_list = sorted(device_stats.values(), key=lambda x: x['count'], reverse=True)
+
     # Active count
     active = LotteryTicket.query.filter_by(
         assigned_user_id=current_user.id, status='assigned'
@@ -63,6 +78,7 @@ def daily_stats():
         'active_count': active,
         'pool_total_pending': pool['total_pending'],
         'mode_b_options': settings.mode_b_options or [50, 100, 200, 300, 400, 500],
+        'device_stats': device_stats_list,
     })
 
 

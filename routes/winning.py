@@ -119,6 +119,8 @@ def my_winning():
             'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
             'winning_image_url': t.winning_image_url,
             'completed_at': t.completed_at.isoformat() if t.completed_at else None,
+            'assigned_device_id': t.assigned_device_id or '',
+            'assigned_device_name': t.assigned_device_name or '',
         })
 
     return jsonify({'success': True, 'grouped': grouped})

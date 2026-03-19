@@ -16,6 +16,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, List
+import threading
 
 from sqlalchemy import text
 from flask import current_app
@@ -24,6 +25,9 @@ from extensions import db
 from models.ticket import LotteryTicket
 from models.file import UploadedFile
 from utils.time_utils import beijing_now
+
+# SQLite 环境下用进程级互斥锁保证分票串行化
+_sqlite_assign_lock = threading.Lock()
 
 
 def _is_postgres() -> bool:
@@ -53,31 +57,56 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
 
     # ── SQLite dev path ──────────────────────────────────────────
     if not _is_postgres():
-        ticket = LotteryTicket.query.filter(
-            LotteryTicket.status == 'pending',
-            LotteryTicket.deadline_time > now,
-        ).order_by(LotteryTicket.id).first()
-
-        if not ticket:
-            return None
-
-        ticket.status = 'assigned'
-        ticket.assigned_user_id = user_id
-        ticket.assigned_username = username
-        ticket.assigned_device_id = device_id
-        ticket.assigned_device_name = device_name
-        ticket.assigned_at = now
-        ticket.locked_until = lock_until
-        ticket.version += 1
-
-        # Update file counters
-        file = UploadedFile.query.get(ticket.source_file_id)
-        if file and file.pending_count > 0:
-            file.pending_count -= 1
-            file.assigned_count += 1
-
-        db.session.commit()
-        return ticket
+        with _sqlite_assign_lock:
+            # 先找一张 pending 票的 id
+            row = db.session.execute(
+                text("""
+                    SELECT id FROM lottery_tickets
+                    WHERE status = 'pending'
+                      AND deadline_time > :now
+                    ORDER BY id
+                    LIMIT 1
+                """),
+                {'now': now}
+            ).fetchone()
+            if not row:
+                return None
+            ticket_id = row[0]
+            # 原子 UPDATE：只有 status='pending' 时才成功
+            updated = db.session.execute(
+                text("""
+                    UPDATE lottery_tickets
+                    SET status = 'assigned',
+                        assigned_user_id = :user_id,
+                        assigned_username = :username,
+                        assigned_device_id = :device_id,
+                        assigned_device_name = :device_name,
+                        assigned_at = :now,
+                        locked_until = :lock_until,
+                        version = version + 1
+                    WHERE id = :id AND status = 'pending'
+                """),
+                {
+                    'user_id': user_id, 'username': username,
+                    'device_id': device_id, 'device_name': device_name,
+                    'now': now, 'lock_until': lock_until, 'id': ticket_id,
+                }
+            ).rowcount
+            if not updated:
+                db.session.rollback()
+                return None
+            db.session.execute(
+                text("""
+                    UPDATE uploaded_files
+                    SET pending_count = pending_count - 1,
+                        assigned_count = assigned_count + 1
+                    WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
+                      AND pending_count > 0
+                """),
+                {'id': ticket_id}
+            )
+            db.session.commit()
+            return LotteryTicket.query.get(ticket_id)
 
     # ── PostgreSQL production path ────────────────────────────────
     MAX_ATTEMPTS = 10
@@ -229,29 +258,66 @@ def assign_tickets_batch(
     """
     now = beijing_now()
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
+    RESERVE = 20  # B模式至少保留20张给A模式/管理员上传缓冲
 
     if not _is_postgres():
-        tickets = LotteryTicket.query.filter(
-            LotteryTicket.status == 'pending',
-            LotteryTicket.deadline_time > now,
-        ).order_by(LotteryTicket.deadline_time, LotteryTicket.id).limit(count).all()
-
-        for t in tickets:
-            t.status = 'assigned'
-            t.assigned_user_id = user_id
-            t.assigned_username = username
-            t.assigned_device_id = device_id
-            t.assigned_device_name = device_name
-            t.assigned_at = now
-            t.locked_until = lock_until
-            t.version += 1
-            file = UploadedFile.query.get(t.source_file_id)
-            if file and file.pending_count > 0:
-                file.pending_count -= 1
-                file.assigned_count += 1
-
-        db.session.commit()
-        return tickets
+        with _sqlite_assign_lock:
+            total_pending = db.session.execute(
+                text("SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > :now"),
+                {'now': now}
+            ).scalar() or 0
+            available = max(0, total_pending - RESERVE)
+            if available <= 0:
+                return []
+            actual_count = min(count, available)
+            rows = db.session.execute(
+                text("""
+                    SELECT id FROM lottery_tickets
+                    WHERE status = 'pending'
+                      AND deadline_time > :now
+                    ORDER BY deadline_time, id
+                    LIMIT :count
+                """),
+                {'now': now, 'count': actual_count}
+            ).fetchall()
+            if not rows:
+                return []
+            ids = [r[0] for r in rows]
+            # 原子 UPDATE：WHERE status='pending' 防止重复分配
+            db.session.execute(
+                text("""
+                    UPDATE lottery_tickets
+                    SET status = 'assigned',
+                        assigned_user_id = :user_id,
+                        assigned_username = :username,
+                        assigned_device_id = :device_id,
+                        assigned_device_name = :device_name,
+                        assigned_at = :now,
+                        locked_until = :lock_until,
+                        version = version + 1
+                    WHERE id IN :ids
+                      AND status = 'pending'
+                """),
+                {
+                    'user_id': user_id, 'username': username,
+                    'device_id': device_id, 'device_name': device_name,
+                    'now': now, 'lock_until': lock_until,
+                    'ids': tuple(ids),
+                }
+            )
+            for tid in ids:
+                db.session.execute(
+                    text("""
+                        UPDATE uploaded_files
+                        SET pending_count = pending_count - 1,
+                            assigned_count = assigned_count + 1
+                        WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
+                          AND pending_count > 0
+                    """),
+                    {'id': tid}
+                )
+            db.session.commit()
+            return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
 
     rows = db.session.execute(
         text("""
@@ -260,7 +326,9 @@ def assign_tickets_batch(
               AND deadline_time > NOW()
             ORDER BY deadline_time, id
             FOR UPDATE SKIP LOCKED
-            LIMIT :count
+            LIMIT GREATEST(0, LEAST(:count,
+                (SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > NOW()) - 20
+            ))
         """),
         {'count': count}
     ).fetchall()
@@ -448,14 +516,16 @@ def get_pool_status() -> dict:
 
 
 def get_pool_total_pending() -> int:
-    """B模式预查询：当前票池全部可用（pending且未过期）票数"""
+    """B模式预查询：当前票池可供B模式使用的票数（总pending减去保留给A模式的20张）"""
     now = beijing_now()
+    RESERVE = 20  # 至少保留给A模式/管理员上传缓冲
 
     if not _is_postgres():
-        return LotteryTicket.query.filter(
+        total = LotteryTicket.query.filter(
             LotteryTicket.status == 'pending',
             LotteryTicket.deadline_time > now,
         ).count()
+        return max(0, total - RESERVE)
 
     result = db.session.execute(
         text("""
@@ -464,4 +534,4 @@ def get_pool_total_pending() -> int:
               AND deadline_time > NOW()
         """)
     ).scalar()
-    return result or 0
+    return max(0, (result or 0) - RESERVE)

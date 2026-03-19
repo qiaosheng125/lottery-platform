@@ -193,14 +193,15 @@ createApp({
     clearQueue() { this.uploadQueue = []; },
     async doUpload() {
       this.uploading = true;
+      const pendingItems = this.uploadQueue.filter(i => i.status === 'pending');
       const fd = new FormData();
-      this.uploadQueue.filter(i => i.status === 'pending').forEach(i => fd.append('files', i.file));
+      pendingItems.forEach(i => fd.append('files', i.file));
       try {
         const res = await fetch('/admin/files/upload', { method: 'POST', body: fd });
         const data = await res.json();
         if (data.results) {
           data.results.forEach((r, i) => {
-            const item = this.uploadQueue.find(q => q.name === (r.filename || this.uploadQueue[i]?.name));
+            const item = this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));
             if (item) {
               item.status = r.success ? 'done' : 'error';
               item.message = r.message || r.error || '';
@@ -208,8 +209,15 @@ createApp({
           });
         }
         this.loadFiles();
+        // 上传完成后自动清空队列（只清掉已成功的，失败的保留方便重试）
+        const hasError = this.uploadQueue.some(i => i.status === 'error');
+        if (!hasError) {
+          this.uploadQueue = [];
+        } else {
+          this.uploadQueue = this.uploadQueue.filter(i => i.status !== 'done');
+        }
       } catch(e) {
-        this.uploadQueue.forEach(i => { if(i.status==='pending') i.status='error'; i.message='上传失败'; });
+        this.uploadQueue.forEach(i => { if(i.status==='pending') { i.status='error'; i.message='上传失败'; } });
       }
       this.uploading = false;
     },

@@ -43,6 +43,23 @@
   <div v-if="announcement" class="alert alert-info">
     <i class="bi bi-megaphone"></i> {{ announcement }}
   </div>
+
+  <!-- 今日设备统计 -->
+  <div v-if="stats.device_stats && stats.device_stats.length > 1" class="card mb-3">
+    <div class="card-header py-2 small fw-bold"><i class="bi bi-phone"></i> 今日各设备出票统计</div>
+    <div class="card-body p-0">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light"><tr><th>设备</th><th class="text-end">张数</th><th class="text-end">金额</th></tr></thead>
+        <tbody>
+          <tr v-for="d in stats.device_stats" :key="d.device_id">
+            <td class="small">{{ d.device_name }}</td>
+            <td class="text-end small">{{ d.count }}</td>
+            <td class="text-end small text-success">¥{{ d.amount.toFixed(0) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
   {% endraw %}
 
   <!-- Mode A section -->
@@ -50,7 +67,7 @@
   {% raw %}
   <div id="mode-a" class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-play-circle"></i> A模式接单</span>
+      <span><i class="bi bi-play-circle"></i> A模式接单 <span class="badge bg-light text-dark border ms-1" id="device-name-badge" style="font-size:.75rem"></span></span>
       <div class="form-check form-switch mb-0">
         <input class="form-check-input" type="checkbox" v-model="modeAActive" @change="toggleModeA" id="modeASwitch" style="width:3em;height:1.5em">
         <label class="form-check-label fw-bold fs-6" for="modeASwitch">{{ modeAActive ? '接单中' : '已停止' }}</label>
@@ -140,7 +157,7 @@
   {% raw %}
   <div id="mode-b" class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-download"></i> B模式批量下载</span>
+      <span><i class="bi bi-download"></i> B模式批量下载 <span class="badge bg-light text-dark border ms-1" id="device-name-badge-b" style="font-size:.75rem"></span></span>
       <span class="badge bg-secondary">票池剩余: {{ poolStatus.total_pending || 0 }} 张</span>
     </div>
     <div class="card-body">
@@ -251,6 +268,8 @@
                 <span class="badge bg-secondary">票#{{ r.ticket_id }}</span>
                 <span class="badge bg-primary">{{ r.lottery_type }}</span>
                 <span class="badge bg-dark">编号 {{ r.detail_period }}</span>
+                <span v-if="r.assigned_device_name" class="badge bg-info text-dark">设备: {{ r.assigned_device_name }}</span>
+                <span v-else-if="r.assigned_device_id" class="badge bg-info text-dark">设备ID: {{ r.assigned_device_id.substring(0,8) }}</span>
               </div>
               <div class="winning-amount">
                 <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>
@@ -294,11 +313,21 @@ const deviceId = getOrCreateDeviceId();
 // Register device and prompt for name if not set
 registerDeviceAndCheckName();
 
+// 显示设备名到接单页面标题
+(function updateDeviceNameBadge() {
+  const name = getDeviceName();
+  const display = name ? name : (deviceId ? deviceId.substring(0, 8) + '...' : '');
+  ['device-name-badge', 'device-name-badge-b'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && display) el.textContent = '📱 ' + display;
+  });
+})();
+
 const { createApp } = Vue;
 createApp({
   data() {
     return {
-      stats: { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0 },
+      stats: { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] },
       announcement: '',
       // Mode A
       modeAActive: false,
