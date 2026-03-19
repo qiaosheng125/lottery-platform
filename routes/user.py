@@ -102,17 +102,21 @@ def export_daily():
         today_start = today_start + timedelta(hours=12)
     today_end = today_start + timedelta(days=1)
 
-    rows = LotteryTicket.query.filter(
+    all_rows = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
         LotteryTicket.status == 'completed',
         LotteryTicket.completed_at >= today_start,
         LotteryTicket.completed_at < today_end,
-        LotteryTicket.deadline_time <= now,   # 只含已过截止时间的
     ).order_by(LotteryTicket.completed_at).all()
 
+    rows = [r for r in all_rows if r.deadline_time and r.deadline_time <= now]
+    pending_count = len(all_rows) - len(rows)
+
     if not rows:
-        from flask import abort
-        abort(404)
+        msg = '今日暂无可下载记录'
+        if pending_count:
+            msg += f'，有 {pending_count} 张票尚未到截止时间，截止后即可下载'
+        return jsonify({'success': False, 'message': msg})
 
     ticket_count = len(rows)
     total_amount = sum(float(r.ticket_amount or 0) for r in rows)
@@ -145,10 +149,15 @@ def export_daily():
 
     filename = f"{today}_{period_str}_{ticket_count}张_{int(total_amount)}元.xlsx"
     filename_encoded = quote(filename, encoding='utf-8')
+    resp_headers = {
+        'Content-Disposition': f"attachment; filename*=UTF-8''{filename_encoded}",
+        'Access-Control-Expose-Headers': 'X-Pending-Count',
+        'X-Pending-Count': str(pending_count),
+    }
     return Response(
         buf.read(),
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{filename_encoded}"},
+        headers=resp_headers,
     )
 
 

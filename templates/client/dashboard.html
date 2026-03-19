@@ -590,7 +590,27 @@ createApp({
       }
     },
     previewWinningImage(url) { this.winningPreviewUrl = url; },
-    exportDaily() { window.location.href = '/api/user/export-daily'; },
+    async exportDaily() {
+      const res = await fetch('/api/user/export-daily');
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('spreadsheetml')) {
+        const pendingCount = parseInt(res.headers.get('X-Pending-Count') || '0');
+        const blob = await res.blob();
+        const cd = res.headers.get('content-disposition') || '';
+        const match = cd.match(/filename\*=UTF-8''(.+)/);
+        const filename = match ? decodeURIComponent(match[1]) : 'export.xlsx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+        if (pendingCount > 0) {
+          showToast(`另有 ${pendingCount} 张票尚未到截止时间，截止后可再次下载`, 'info');
+        }
+      } else {
+        const data = await res.json();
+        showToast(data.message || '暂无可下载记录', 'warning');
+      }
+    },
     async uploadWinningImage(event, record) {
       const file = event.target.files[0];
       if (!file) return;

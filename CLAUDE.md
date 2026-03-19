@@ -82,6 +82,7 @@ FLASK_ENV=production
 
 1. **修复设备限制检查** — `routes/auth.py` 登录时统计活跃设备数改为过滤 `last_seen` 超时的会话，过期会话不再占用设备名额
 2. **会话清理读取管理员设置** — `tasks/clean_sessions.py` 从 `SystemSettings.session_lifetime_hours` 读取超时时长，不再硬编码 3 小时
+3. **今日处理清单下载优化** — `routes/user.py` `export_daily()` 空结果不再返回 404，改为 JSON 提示；同时统计未到截止时间的票数，通过 `X-Pending-Count` 响应头传给前端；`dashboard.html` `exportDaily()` 改用 fetch 下载文件，有未到期票时弹 toast 提示
 
 ## 上次会话完成的功能（2026-03-19）
 
