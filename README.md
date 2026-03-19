@@ -15,6 +15,47 @@
 
 ---
 
+## 🔑 核心保证：并发安全，绝不重复分票
+
+> **这是本系统最重要的设计约束。**
+>
+> 无论多少设备同时接单，**同一张票永远只会分配给一个设备**，不会出现重复。
+
+### 实现机制
+
+**SQLite 环境（开发/测试）**
+
+```python
+# services/ticket_pool.py
+_sqlite_assign_lock = threading.Lock()   # 进程级互斥锁，强制串行化
+
+with _sqlite_assign_lock:
+    row = SELECT id FROM tickets WHERE status='pending' LIMIT 1
+    updated = UPDATE tickets SET status='assigned'
+              WHERE id=:id AND status='pending'   # 原子条件，防止重复
+    if not updated:
+        rollback(); return None   # 已被抢走，放弃
+```
+
+**PostgreSQL 环境（生产）**
+
+```sql
+SELECT id FROM tickets
+WHERE status = 'pending'
+FOR UPDATE SKIP LOCKED   -- 数据库行锁，天然防并发
+LIMIT 1
+```
+
+### 关键约束
+
+| 约束 | 说明 |
+|------|------|
+| Gunicorn 必须 `workers = 1` | 多 worker 会破坏 SQLite 进程锁 |
+| B 模式保留 20 张 | 始终为 A 模式和管理员上传预留缓冲 |
+| 每台设备同时只持有 1 张票 | A 模式点"下一张"才自动完成当前票 |
+
+---
+
 ## ✨ 功能特性
 
 ### 管理员功能
