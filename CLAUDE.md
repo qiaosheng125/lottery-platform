@@ -70,7 +70,7 @@ FLASK_ENV=production
 **核心要求：同一张票永远只分配给一个设备，任意数量设备并发接单均不会重复分票（20设备只是测试用例，实际不限数量）。**
 
 ### 实现层
-- **SQLite（开发）**：`services/ticket_pool.py` 模块级 `_sqlite_assign_lock = threading.Lock()`，所有分票操作在锁内串行执行，UPDATE 带 `WHERE status='pending'` 原子条件
+- **SQLite（开发）**：`services/ticket_pool.py` 模块级 `_sqlite_assign_lock = BoundedSemaphore(1)`（gevent 协程锁），所有分票操作在锁内串行执行，UPDATE 带 `WHERE status='pending'` 原子条件；持锁期间其他无关请求仍可正常响应
 - **PostgreSQL（生产）**：`SELECT FOR UPDATE SKIP LOCKED` 行锁 + 条件 UPDATE
 
 ### 关键约束

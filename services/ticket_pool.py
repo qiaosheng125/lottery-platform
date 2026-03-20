@@ -16,7 +16,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, List
-import threading
+from gevent.lock import BoundedSemaphore
 
 from sqlalchemy import text
 from flask import current_app
@@ -26,8 +26,8 @@ from models.ticket import LotteryTicket
 from models.file import UploadedFile
 from utils.time_utils import beijing_now
 
-# SQLite 环境下用进程级互斥锁保证分票串行化
-_sqlite_assign_lock = threading.Lock()
+# SQLite 环境下用 gevent 协程锁保证分票串行化，持锁期间其他协程可继续处理无关请求
+_sqlite_assign_lock = BoundedSemaphore(1)
 
 
 def _is_postgres() -> bool:
