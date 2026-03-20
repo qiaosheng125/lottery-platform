@@ -78,7 +78,11 @@ FLASK_ENV=production
 - B 模式始终保留 20 张给 A 模式缓冲（`RESERVE = 20`，`ticket_pool.py`）
 - A 模式每台设备同时只持有 1 张票（点"下一张"才自动完成当前票）
 
-## 本次会话完成的功能（2026-03-19 续）
+## 本次会话完成的功能（2026-03-20）
+
+1. **并发安全优化** — `services/ticket_pool.py` 将 `threading.Lock` 改为 `gevent.lock.BoundedSemaphore(1)`，持锁期间其他协程可继续响应无关请求，互斥性不变
+2. **README 更新** — 替换所有 `lottery-platform` 为 `file-hub`，追加本周开发周报
+3. **生成周报文件** — `docs/weekly-report-2026-03-20.md`
 
 1. **修复设备限制检查** — `routes/auth.py` 登录时统计活跃设备数改为过滤 `last_seen` 超时的会话，过期会话不再占用设备名额
 2. **会话清理读取管理员设置** — `tasks/clean_sessions.py` 从 `SystemSettings.session_lifetime_hours` 读取超时时长，不再硬编码 3 小时

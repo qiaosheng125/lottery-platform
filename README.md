@@ -113,8 +113,8 @@ LIMIT 1
 
 1. **克隆项目**
 ```bash
-git clone https://github.com/qiaosheng125/lottery-platform.git
-cd lottery-platform
+git clone https://github.com/qiaosheng125/file-hub.git
+cd file-hub
 ```
 
 2. **创建虚拟环境**
@@ -160,7 +160,7 @@ gunicorn -c gunicorn_config.py run:app
 ## 📁 项目结构
 
 ```
-lottery-platform/
+file-hub/
 ├── app.py                      # Flask应用工厂
 ├── config.py                   # 配置文件
 ├── extensions.py               # Flask扩展初始化
@@ -284,9 +284,9 @@ After=network.target redis.service
 
 [Service]
 User=root
-WorkingDirectory=/root/lottery-platform
-Environment=PATH=/root/lottery-platform/.venv/bin
-ExecStart=/root/lottery-platform/.venv/bin/gunicorn -c gunicorn_config.py run:app
+WorkingDirectory=/root/file-hub
+Environment=PATH=/root/file-hub/.venv/bin
+ExecStart=/root/file-hub/.venv/bin/gunicorn -c gunicorn_config.py run:app
 Restart=always
 
 [Install]
@@ -346,3 +346,30 @@ server {
 ## 📄 许可证
 
 本项目仅供内部使用。
+
+---
+
+## 📅 本周开发周报（2026-03-13 ~ 2026-03-20）
+
+### 核心功能完善
+
+1. **并发安全优化** — 将 SQLite 分票锁从 `threading.Lock` 改为 `gevent.lock.BoundedSemaphore`，持锁期间其他协程可继续响应无关请求，互斥性不变
+2. **设备管理增强** — 修复设备限制检查逻辑，过滤过期会话不占用设备名额；会话清理改为读取管理员配置的超时时长
+3. **B 模式资源保留** — B 模式始终为 A 模式保留 20 张票缓冲，防止 A 模式无票可接
+4. **数据导出优化** — 今日处理清单空结果返回友好提示；新增未到期票数量 toast 提示；修复导出乱码
+5. **统计功能增强** — 新增今日各设备出票统计，多设备时自动展示统计表
+6. **基础配置调整** — 基注金额从 2 元调整为 1 元；修复 `load_dotenv` 执行顺序问题
+
+### 文档与规范
+
+- 创建 `CLAUDE.md` 项目上下文文件，记录架构、部署、关键设计
+- 更新 README，统一项目名称为 file-hub，移除旧名称 lottery-platform
+- 补充并发安全说明和实现细节
+
+### 代码质量
+
+- 移除所有旧业务相关文字，统一改为通用业务术语
+- 清理临时测试文件和冗余文档
+- 完成 20 设备并发压力测试验证
+
+**本周提交数：** 21 commits
