@@ -443,12 +443,22 @@ def api_create_user():
     client_mode = data.get('client_mode', 'mode_a')
     max_devices = int(data.get('max_devices', 1))
 
+    # 验证 max_processing_b_mode
+    max_processing_b_mode = data.get('max_processing_b_mode')
+    if max_processing_b_mode is not None:
+        try:
+            max_processing_b_mode = int(max_processing_b_mode) if max_processing_b_mode else None
+            if max_processing_b_mode is not None and (max_processing_b_mode < 1 or max_processing_b_mode > 10000):
+                return jsonify({'success': False, 'error': 'B模式上限必须在1-10000之间'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'B模式上限必须是整数'}), 400
+
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({'success': False, 'error': '用户名已存在'}), 409
 
-    user = User(username=username, client_mode=client_mode, max_devices=max_devices)
+    user = User(username=username, client_mode=client_mode, max_devices=max_devices, max_processing_b_mode=max_processing_b_mode)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -466,6 +476,14 @@ def api_update_user(user_id):
         user.client_mode = data['client_mode']
     if 'max_devices' in data:
         user.max_devices = int(data['max_devices'])
+    if 'max_processing_b_mode' in data:
+        val = data['max_processing_b_mode']
+        try:
+            user.max_processing_b_mode = int(val) if val else None
+            if user.max_processing_b_mode is not None and (user.max_processing_b_mode < 1 or user.max_processing_b_mode > 10000):
+                return jsonify({'success': False, 'error': 'B模式上限必须在1-10000之间'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'B模式上限必须是整数'}), 400
     if 'is_active' in data:
         user.is_active = bool(data['is_active'])
     if 'can_receive' in data:

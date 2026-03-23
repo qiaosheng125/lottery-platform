@@ -41,15 +41,28 @@ def download_batch(
     if not settings.mode_b_enabled:
         return {'success': False, 'error': '模式B已被关闭'}
 
-    tickets = assign_tickets_batch(
+    # 获取用户的B模式处理中票数上限
+    from models.user import User
+    user = User.query.get(user_id)
+    max_processing = user.max_processing_b_mode if user else None
+
+    # 在 assign_tickets_batch 的锁内进行并发安全的检查和分配
+    tickets, adjustment_message = assign_tickets_batch(
         user_id=user_id,
         device_id=device_id,
         username=username,
         count=count,
         device_name=device_name,
+        max_processing=max_processing,
     )
 
     if not tickets:
+        # 如果是因为达到上限而返回空列表，返回友好的错误提示
+        if max_processing is not None:
+            return {
+                'success': False,
+                'error': f'已达到处理中票数上限（{max_processing}张），请先完成当前票据'
+            }
         return {'success': False, 'error': '当前票池无可用票'}
 
     now = beijing_now()
@@ -74,7 +87,7 @@ def download_batch(
     filename = f"{lottery_type}_{mult_str}倍_{len(tickets)}张_{int(total_amount)}元_{deadline_str}_{now_str}.txt"
 
     # 只返回一个文件
-    return {
+    result = {
         'success': True,
         'files': [{
             'filename': filename,
@@ -87,6 +100,12 @@ def download_batch(
         'actual_count': len(tickets),
         'total_amount': total_amount,
     }
+
+    # 如果有调整提示，添加到返回结果中
+    if adjustment_message:
+        result['adjustment_message'] = adjustment_message
+
+    return result
 
 
 def confirm_batch(ticket_ids: List[int], user_id: int) -> dict:

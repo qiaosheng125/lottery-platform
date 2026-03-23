@@ -4,7 +4,7 @@
 <div id="admin-dashboard">
   <div class="row g-3 mb-3">
     <!-- Pool stats -->
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card border-primary">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-primary" id="stat-pending">-</div>
@@ -12,7 +12,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card border-success">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-success" id="stat-assigned">-</div>
@@ -20,7 +20,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card border-info">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-info" id="stat-completed">-</div>
@@ -28,11 +28,27 @@
         </div>
       </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <div class="card border-warning">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-warning" id="stat-online">-</div>
           <div class="text-muted small">在线用户</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card border-secondary">
+        <div class="card-body text-center">
+          <div class="fs-4 fw-bold text-secondary" id="stat-speed">-</div>
+          <div class="text-muted small">总速度(张/分)</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card border-danger">
+        <div class="card-body text-center">
+          <div class="fs-5 fw-bold text-danger" id="stat-eta">-</div>
+          <div class="text-muted small">预估完成时间</div>
         </div>
       </div>
     </div>
@@ -41,7 +57,7 @@
   <div class="row g-3">
     <!-- Online users table -->
     <div class="col-lg-8">
-      <div class="card">
+      <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
           <span><i class="bi bi-people"></i> 在线客户</span>
           <span class="badge bg-success" id="online-indicator">实时</span>
@@ -57,6 +73,25 @@
               </thead>
               <tbody id="online-users-tbody">
                 <tr><td colspan="7" class="text-center text-muted py-3">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Device speed stats -->
+      <div class="card">
+        <div class="card-header"><i class="bi bi-speedometer2"></i> 设备处理速度统计</div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>用户名</th><th>设备名</th><th>速度(张/分)</th><th>最近票数</th><th>时间跨度</th>
+                </tr>
+              </thead>
+              <tbody id="device-speed-tbody">
+                <tr><td colspan="5" class="text-center text-muted py-2">加载中...</td></tr>
               </tbody>
             </table>
           </div>
@@ -114,6 +149,10 @@ async function refreshDashboard() {
       document.getElementById('stat-online').textContent = (data.online_users || []).length;
     }
 
+    // Update speed and ETA
+    document.getElementById('stat-speed').textContent = data.total_speed ? data.total_speed.toFixed(2) : '-';
+    document.getElementById('stat-eta').textContent = data.estimated_time || '-';
+
     // Update online users
     const tbody = document.getElementById('online-users-tbody');
     if (data.online_users && data.online_users.length > 0) {
@@ -159,6 +198,30 @@ async function refreshDashboard() {
       `).join('');
     } else {
       dailyTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">暂无数据</td></tr>';
+    }
+
+    // Update device speed stats (sort by username to group same user's devices together)
+    const speedTbody = document.getElementById('device-speed-tbody');
+    if (data.device_speed_stats && data.device_speed_stats.length > 0) {
+      // Sort by username first, then by device_id
+      const sortedStats = [...data.device_speed_stats].sort((a, b) => {
+        if (a.username !== b.username) {
+          return a.username.localeCompare(b.username);
+        }
+        return a.device_id.localeCompare(b.device_id);
+      });
+
+      speedTbody.innerHTML = sortedStats.map(d => `
+        <tr>
+          <td><strong>${d.username}</strong></td>
+          <td>${d.device_name}</td>
+          <td><span class="badge bg-primary">${d.speed_per_minute}</span></td>
+          <td>${d.recent_count}张</td>
+          <td>${d.time_span_minutes.toFixed(1)}分钟</td>
+        </tr>
+      `).join('');
+    } else {
+      speedTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2">暂无在线设备</td></tr>';
     }
   } catch(e) {
     console.error('Dashboard refresh error:', e);

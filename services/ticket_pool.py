@@ -251,7 +251,8 @@ def assign_tickets_batch(
     username: str,
     count: int,
     device_name: str = None,
-) -> List[LotteryTicket]:
+    max_processing: int = None,
+) -> tuple[List[LotteryTicket], str]:
     """
     B模式：按截止时间升序自动分配指定张数的票（服务器决定彩种和截止时间）
     每次只分配一种彩种的票。
@@ -260,6 +261,12 @@ def assign_tickets_batch(
     1. 按截止时间升序排列所有彩种
     2. 优先选择第一个彩种
     3. 如果第一个彩种票数 < 请求数量，且有其他截止时间相同的彩种，则选择票数最多的彩种
+
+    Args:
+        max_processing: B模式用户处理中票数上限，None表示不限制
+
+    Returns:
+        (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
     """
     now = beijing_now()
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
@@ -267,13 +274,30 @@ def assign_tickets_batch(
 
     if not _is_postgres():
         with _sqlite_assign_lock:
+            adjustment_message = None
+
+            # 在锁内检查B模式用户的处理中票数上限（并发安全）
+            if max_processing is not None:
+                current_processing = db.session.execute(
+                    text("SELECT COUNT(*) FROM lottery_tickets WHERE assigned_user_id = :user_id AND status = 'assigned'"),
+                    {'user_id': user_id}
+                ).scalar() or 0
+
+                if current_processing >= max_processing:
+                    return [], None  # 已达上限，返回空列表
+
+                # 自动调整请求数量为剩余额度
+                remaining = max_processing - current_processing
+                if count > remaining:
+                    count = remaining
+                    adjustment_message = f'已自动调整为{remaining}张（当前处理中{current_processing}张，上限{max_processing}张）'
             total_pending = db.session.execute(
                 text("SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > :now"),
                 {'now': now}
             ).scalar() or 0
             available = max(0, total_pending - RESERVE)
             if available <= 0:
-                return []
+                return [], None
             actual_count = min(count, available)
 
             # 查询所有可用彩种及其票数和截止时间
@@ -289,7 +313,7 @@ def assign_tickets_batch(
             ).fetchall()
 
             if not type_stats:
-                return []
+                return [], None
 
             # 选择彩种逻辑
             selected_type = None
@@ -339,7 +363,7 @@ def assign_tickets_batch(
                 {'now': now, 'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
             ).fetchall()
             if not rows:
-                return []
+                return [], None
             ids = [r[0] for r in rows]
             # 原子 UPDATE：WHERE status='pending' 防止重复分配
             # SQLite不支持直接绑定tuple到IN子句，需要动态生成占位符
@@ -379,7 +403,8 @@ def assign_tickets_batch(
                     {'id': tid}
                 )
             db.session.commit()
-            return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
+            tickets = LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
+            return tickets, adjustment_message
 
     # PostgreSQL: 查询所有可用彩种及其票数和截止时间
     type_stats = db.session.execute(
@@ -393,13 +418,13 @@ def assign_tickets_batch(
     ).fetchall()
 
     if not type_stats:
-        return []
+        return [], None
 
     # 计算可用票数（扣除保留）
     total_pending = sum(r.cnt for r in type_stats)
     available = max(0, total_pending - RESERVE)
     if available <= 0:
-        return []
+        return [], None
     actual_count = min(count, available)
 
     # 选择彩种逻辑
@@ -446,7 +471,7 @@ def assign_tickets_batch(
     ).fetchall()
 
     if not rows:
-        return []
+        return [], None
 
     ids = [r[0] for r in rows]
 
@@ -488,7 +513,7 @@ def assign_tickets_batch(
     )
 
     db.session.commit()
-    return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
+    return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all(), None
 
 
 def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:

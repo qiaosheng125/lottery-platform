@@ -80,6 +80,8 @@ FLASK_ENV=production
 
 ## 本次会话完成的功能（2026-03-23）
 
+### 上午会话
+
 1. **管理后台统计设备处理速度** — `routes/admin.py` `dashboard_data()` 添加设备速度统计，计算每个设备最近180分钟（3小时）的实际出票速度（每分钟张数）；使用实际出票时间跨度（第一张到最后一张的时间差）而非固定时间窗口，排除空闲时间；至少需要2张票才能计算速度；返回 `device_speed_stats` 数组（包含用户名、设备ID、设备名、速度、时间跨度）
 2. **管理后台预估完成时间** — 基于所有在线设备的总速度计算预估完成时间（剩余票数 / 当前在线总设备速度 = 预估分钟数）；添加除零保护（速度>0.01）和上限保护（超过7天显示"超过7天"）；返回格式化时间字符串（如"2小时30分钟"）
 3. **禁止接单用户隐藏票数** — `routes/user.py` `daily_stats()` 和 `routes/mode_b.py` `pool_status()` 检查 `current_user.can_receive`，为 False 时返回 `pool_total_pending=0`，B模式还隐藏彩种列表（`by_type=[]`）
@@ -92,6 +94,39 @@ FLASK_ENV=production
 - 速度计算逻辑优化（使用实际出票时间跨度，排除空闲时间，时间窗口扩大到180分钟）
 - 完善异常处理（日期格式验证、除零保护、上限保护）
 - 确认实际可用票数（防止B模式票数不足）
+
+### 下午会话
+
+7. **B模式处理中票数上限** — 在用户管理中增加 `max_processing_b_mode` 字段，限制B模式客户同时处理的票数上限（A模式不受限制）
+   - `models/user.py` — 添加 `max_processing_b_mode` 字段（整型，可为空，默认 None 表示不限制）
+   - `routes/admin.py` — 用户管理API支持创建和更新该字段，添加输入验证（1-10000范围）
+   - `services/ticket_pool.py` — `assign_tickets_batch()` 在锁内进行并发安全的检查和分配，支持 `max_processing` 参数
+   - `services/mode_b_service.py` — `download_batch()` 传递用户上限给 `assign_tickets_batch()`
+   - `templates/admin/users.html` — 用户管理界面添加"B模式上限"列，支持在线编辑
+   - `migrations/add_max_processing_b_mode.sql` — 数据库迁移脚本
+   - `instance/lottery_dev.db` — 数据库已迁移，添加 `max_processing_b_mode` 列
+
+**智能调整逻辑**：
+- 如果用户已达上限（如 100/100），完全拒绝，提示"已达到处理中票数上限"
+- 如果请求数量会超过上限（如当前100张，上限150张，请求100张），自动调整为剩余额度（50张），并返回调整提示消息
+- 如果请求数量在额度内，正常分配，无调整提示
+- 如果用户没有设置上限（`max_processing_b_mode = None`），不做任何限制
+
+**并发安全保证**：
+- 检查和分配操作在 `_sqlite_assign_lock` 锁内原子执行，防止竞态条件
+- 多个请求同时进入时，锁保证串行处理，确保不会超过上限
+- 返回值改为 `(tickets, adjustment_message)` 元组，支持调整提示
+
+**输入验证**：
+- 管理员API添加类型转换异常处理，防止500错误
+- 范围验证：1-10000之间，超出范围返回400错误
+- 空值处理：空字符串或 None 表示不限制
+
+8. **前端界面完善** — 补充用户管理和管理后台Dashboard的前端界面
+   - `templates/admin/users.html` — 添加"B模式上限"列，只在B模式时启用输入框，创建用户时可设置上限
+   - `templates/admin/dashboard.html` — 添加"总速度(张/分)"和"预估完成时间"统计卡片，添加"设备处理速度统计"表格
+   - 设备速度统计按用户名排序，同一用户的设备显示在相邻行
+   - 所有数据实时更新（每5秒刷新）
 
 ## 上次会话完成的功能（2026-03-20）
 
