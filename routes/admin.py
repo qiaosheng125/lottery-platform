@@ -69,6 +69,28 @@ def dashboard_data():
 
     # 在线用户统计
     user_stats = []
+    device_speed_stats = []  # 设备速度统计
+    total_speed = 0.0  # 总速度（每分钟张数）
+
+    # 计算最近10分钟的时间点（用于速度统计）
+    SPEED_WINDOW_MINUTES = 10
+    speed_window_start = beijing_now() - timedelta(minutes=SPEED_WINDOW_MINUTES)
+
+    # 优化：一次性查询所有在线用户的最近完成票（避免N+1查询）
+    online_user_ids = [ou.id for ou in online_users_objs]
+    all_recent_tickets = LotteryTicket.query.filter(
+        LotteryTicket.assigned_user_id.in_(online_user_ids),
+        LotteryTicket.status == 'completed',
+        LotteryTicket.completed_at >= speed_window_start
+    ).all() if online_user_ids else []
+
+    # 按 (user_id, device_id) 分组
+    from collections import defaultdict
+    tickets_by_device = defaultdict(list)
+    for t in all_recent_tickets:
+        key = (t.assigned_user_id, t.assigned_device_id)
+        tickets_by_device[key].append(t)
+
     for ou in online_users_objs:
         # 用数据库过滤今日完成票
         today_tickets = LotteryTicket.query.filter(
@@ -90,6 +112,42 @@ def dashboard_data():
             'total_amount': sum(float(t.ticket_amount or 0) for t in today_tickets),
             'active_count': active_count,
         })
+
+        # 统计该用户每个设备的处理速度
+        user_devices = {s.device_id for s in active_sessions if s.user_id == ou.id and s.device_id}
+        for device_id in user_devices:
+            # 从预加载的数据中获取该设备的最近完成票
+            recent_tickets = tickets_by_device.get((ou.id, device_id), [])
+
+            if recent_tickets:
+                # 计算速度：最近N分钟完成的票数 / N = 每分钟速度
+                speed_per_minute = len(recent_tickets) / float(SPEED_WINDOW_MINUTES)
+                total_speed += speed_per_minute
+
+                device_name = recent_tickets[0].assigned_device_name or device_id
+                device_speed_stats.append({
+                    'username': ou.username,
+                    'device_id': device_id,
+                    'device_name': device_name,
+                    'speed_per_minute': round(speed_per_minute, 2),
+                    'recent_count': len(recent_tickets),
+                })
+
+    # 计算预估完成时间
+    estimated_minutes = None
+    estimated_time_str = None
+    if total_speed > 0.01 and pool['total_pending'] > 0:  # 至少每分钟0.01张
+        estimated_minutes = pool['total_pending'] / total_speed
+        # 添加上限保护（超过7天显示提示）
+        if estimated_minutes > 10080:  # 7天 = 10080分钟
+            estimated_time_str = "超过7天"
+        else:
+            hours = int(estimated_minutes // 60)
+            minutes = int(estimated_minutes % 60)
+            if hours > 0:
+                estimated_time_str = f"{hours}小时{minutes}分钟"
+            else:
+                estimated_time_str = f"{minutes}分钟"
 
     # 今日所有用户出票统计（包括不在线的）
     daily_stats_query = db.session.query(
@@ -115,6 +173,10 @@ def dashboard_data():
         'pool': pool,
         'online_users': user_stats,
         'daily_all_users': daily_all_users,
+        'device_speed_stats': device_speed_stats,
+        'total_speed': round(total_speed, 2),
+        'estimated_time': estimated_time_str,
+        'estimated_minutes': round(estimated_minutes, 1) if estimated_minutes else None,
     })
 
 

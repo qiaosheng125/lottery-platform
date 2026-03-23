@@ -35,7 +35,7 @@ def download_batch(
     device_name: str = None,
 ) -> dict:
     """
-    服务器自动按截止时间升序分配指定张数的票，按彩种分组打包为多个TXT返回。
+    服务器自动按截止时间升序分配指定张数的票，每次只返回一个彩种的一个TXT文件。
     """
     settings = SystemSettings.get()
     if not settings.mode_b_enabled:
@@ -55,51 +55,36 @@ def download_batch(
     now = beijing_now()
     now_str = now.strftime('%Y-%m%d-%H%M%S')
 
-    # 按彩种分组
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for t in tickets:
-        groups[t.lottery_type or '未知'].append(t)
+    # 所有票应该是同一个彩种（由 assign_tickets_batch 保证）
+    lottery_type = tickets[0].lottery_type or '未知'
+    lines = [t.raw_content for t in tickets]
+    content = '\n'.join(lines)
 
-    files = []
-    all_ticket_ids = []
-    total_count = 0
-    total_amount = 0.0
+    total_amount = sum(float(t.ticket_amount or 0) for t in tickets)
+    ticket_ids = [t.id for t in tickets]
 
-    for lottery_type, group_tickets in groups.items():
-        lines = [t.raw_content for t in group_tickets]
-        content = '\n'.join(lines)
+    # 倍数（取第一张票的倍数，若不一致标为混合）
+    multipliers = list({t.multiplier for t in tickets if t.multiplier})
+    mult_str = str(multipliers[0]) if len(multipliers) == 1 else '混合'
 
-        group_amount = sum(float(t.ticket_amount or 0) for t in group_tickets)
-        group_ids = [t.id for t in group_tickets]
+    # 最早截止时间，格式 HH.MM
+    deadlines = [t.deadline_time for t in tickets if t.deadline_time]
+    deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
 
-        # 倍数（取第一张票的倍数，若不一致标为混合）
-        multipliers = list({t.multiplier for t in group_tickets if t.multiplier})
-        mult_str = str(multipliers[0]) if len(multipliers) == 1 else '混合'
+    filename = f"{lottery_type}_{mult_str}倍_{int(total_amount)}元_{deadline_str}_{now_str}.txt"
 
-        # 最早截止时间，格式 HH.MM
-        deadlines = [t.deadline_time for t in group_tickets if t.deadline_time]
-        deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
-
-        filename = f"{lottery_type}_{mult_str}倍_{int(group_amount)}元_{deadline_str}_{now_str}.txt"
-
-        files.append({
-            'filename': filename,
-            'content': content,
-            'ticket_ids': group_ids,
-            'count': len(group_tickets),
-            'amount': group_amount,
-        })
-
-        all_ticket_ids.extend(group_ids)
-        total_count += len(group_tickets)
-        total_amount += group_amount
-
+    # 只返回一个文件
     return {
         'success': True,
-        'files': files,
-        'ticket_ids': all_ticket_ids,
-        'actual_count': total_count,
+        'files': [{
+            'filename': filename,
+            'content': content,
+            'ticket_ids': ticket_ids,
+            'count': len(tickets),
+            'amount': total_amount,
+        }],
+        'ticket_ids': ticket_ids,
+        'actual_count': len(tickets),
         'total_amount': total_amount,
     }
 

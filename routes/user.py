@@ -70,13 +70,16 @@ def daily_stats():
     pool = get_pool_status()
     settings = SystemSettings.get()
 
+    # 被禁止接单的用户看到的待处理数量为0
+    pool_total_pending = pool['total_pending'] if current_user.can_receive else 0
+
     return jsonify({
         'success': True,
         'today': str(today),
         'ticket_count': ticket_count,
         'total_amount': total_amount,
         'active_count': active,
-        'pool_total_pending': pool['total_pending'],
+        'pool_total_pending': pool_total_pending,
         'mode_b_options': settings.mode_b_options or [50, 100, 200, 300, 400, 500],
         'device_stats': device_stats_list,
     })

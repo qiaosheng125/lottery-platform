@@ -254,7 +254,12 @@ def assign_tickets_batch(
 ) -> List[LotteryTicket]:
     """
     B模式：按截止时间升序自动分配指定张数的票（服务器决定彩种和截止时间）
-    优先分配截止时间最近的票，保证用户及时出票。
+    每次只分配一种彩种的票。
+
+    选择逻辑：
+    1. 按截止时间升序排列所有彩种
+    2. 优先选择第一个彩种
+    3. 如果第一个彩种票数 < 请求数量，且有其他截止时间相同的彩种，则选择票数最多的彩种
     """
     now = beijing_now()
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
@@ -270,15 +275,68 @@ def assign_tickets_batch(
             if available <= 0:
                 return []
             actual_count = min(count, available)
+
+            # 查询所有可用彩种及其票数和截止时间
+            type_stats = db.session.execute(
+                text("""
+                    SELECT lottery_type, deadline_time, COUNT(*) as cnt
+                    FROM lottery_tickets
+                    WHERE status = 'pending' AND deadline_time > :now
+                    GROUP BY lottery_type, deadline_time
+                    ORDER BY deadline_time, lottery_type
+                """),
+                {'now': now}
+            ).fetchall()
+
+            if not type_stats:
+                return []
+
+            # 选择彩种逻辑
+            selected_type = None
+            selected_deadline = None
+
+            # 第一个彩种（截止时间最早）
+            first_type = type_stats[0].lottery_type
+            first_deadline = type_stats[0].deadline_time
+            first_count = type_stats[0].cnt
+
+            # 如果第一个彩种票数足够，直接选择
+            if first_count >= actual_count:
+                selected_type = first_type
+                selected_deadline = first_deadline
+            else:
+                # 第一个彩种票数不足，查找截止时间相同的其他彩种
+                same_deadline_types = [
+                    (r.lottery_type, r.cnt) for r in type_stats
+                    if r.deadline_time == first_deadline
+                ]
+                # 选择票数最多的彩种
+                if same_deadline_types:
+                    selected_type, _ = max(same_deadline_types, key=lambda x: x[1])
+                    selected_deadline = first_deadline
+                else:
+                    # 没有其他截止时间相同的彩种，选择第一个
+                    selected_type = first_type
+                    selected_deadline = first_deadline
+
+            # 确认实际可用票数（防止票数不足）
+            selected_count = next((r.cnt for r in type_stats
+                                   if r.lottery_type == selected_type
+                                   and r.deadline_time == selected_deadline), 0)
+            actual_count = min(actual_count, selected_count)
+
+            # 从选中的彩种分配票
             rows = db.session.execute(
                 text("""
                     SELECT id FROM lottery_tickets
                     WHERE status = 'pending'
                       AND deadline_time > :now
-                    ORDER BY deadline_time, id
+                      AND lottery_type = :lottery_type
+                      AND deadline_time = :deadline_time
+                    ORDER BY id
                     LIMIT :count
                 """),
-                {'now': now, 'count': actual_count}
+                {'now': now, 'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
             ).fetchall()
             if not rows:
                 return []
@@ -319,18 +377,68 @@ def assign_tickets_batch(
             db.session.commit()
             return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
 
+    # PostgreSQL: 查询所有可用彩种及其票数和截止时间
+    type_stats = db.session.execute(
+        text("""
+            SELECT lottery_type, deadline_time, COUNT(*) as cnt
+            FROM lottery_tickets
+            WHERE status = 'pending' AND deadline_time > NOW()
+            GROUP BY lottery_type, deadline_time
+            ORDER BY deadline_time, lottery_type
+        """)
+    ).fetchall()
+
+    if not type_stats:
+        return []
+
+    # 计算可用票数（扣除保留）
+    total_pending = sum(r.cnt for r in type_stats)
+    available = max(0, total_pending - RESERVE)
+    if available <= 0:
+        return []
+    actual_count = min(count, available)
+
+    # 选择彩种逻辑
+    selected_type = None
+    selected_deadline = None
+
+    # 第一个彩种（截止时间最早）
+    first_type = type_stats[0].lottery_type
+    first_deadline = type_stats[0].deadline_time
+    first_count = type_stats[0].cnt
+
+    # 如果第一个彩种票数足够，直接选择
+    if first_count >= actual_count:
+        selected_type = first_type
+        selected_deadline = first_deadline
+    else:
+        # 第一个彩种票数不足，查找截止时间相同的其他彩种
+        same_deadline_types = [
+            (r.lottery_type, r.cnt) for r in type_stats
+            if r.deadline_time == first_deadline
+        ]
+        # 选择票数最多的彩种
+        if same_deadline_types:
+            selected_type, _ = max(same_deadline_types, key=lambda x: x[1])
+            selected_deadline = first_deadline
+        else:
+            # 没有其他截止时间相同的彩种，选择第一个
+            selected_type = first_type
+            selected_deadline = first_deadline
+
+    # 从选中的彩种分配票
     rows = db.session.execute(
         text("""
             SELECT id FROM lottery_tickets
             WHERE status = 'pending'
               AND deadline_time > NOW()
-            ORDER BY deadline_time, id
+              AND lottery_type = :lottery_type
+              AND deadline_time = :deadline_time
+            ORDER BY id
             FOR UPDATE SKIP LOCKED
-            LIMIT GREATEST(0, LEAST(:count,
-                (SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > NOW()) - 20
-            ))
+            LIMIT :count
         """),
-        {'count': count}
+        {'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
     ).fetchall()
 
     if not rows:

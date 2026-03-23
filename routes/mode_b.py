@@ -14,6 +14,10 @@ mode_b_bp = Blueprint('mode_b', __name__)
 def pool_status():
     """返回当前票池状态（按彩种+截止时间分组），供B模式用户参考"""
     status = get_pool_status()
+    # 被禁止接单的用户看到的待处理数量为0
+    if not current_user.can_receive:
+        status['total_pending'] = 0
+        status['by_type'] = []
     return jsonify({'success': True, **status})
 
 

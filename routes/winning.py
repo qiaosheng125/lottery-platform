@@ -97,11 +97,53 @@ def record_winning():
 @login_required
 @login_required_json
 def my_winning():
-    """用户中奖记录（从 LotteryTicket.is_winning=True 查询，按业务日期分类）"""
-    tickets = LotteryTicket.query.filter(
+    """用户中奖记录（从 LotteryTicket.is_winning=True 查询，按业务日期分类）
+    支持最近3天查询，日期和类型可组合筛选
+    """
+    from datetime import datetime, timedelta
+
+    # 获取查询参数
+    date_str = request.args.get('date', '').strip()  # 业务日期 YYYY-MM-DD
+    lottery_type = request.args.get('lottery_type', '').strip()  # 彩种类型
+
+    # 计算最近3天的业务日期范围
+    today = get_business_date()
+    three_days_ago = today - timedelta(days=2)  # 包含今天共3天
+
+    # 转换为时间戳范围（考虑12点分割线）
+    start_date = three_days_ago
+    end_date = today
+
+    # 计算时间范围
+    start_time = datetime.combine(start_date, datetime.min.time()) + timedelta(hours=12)
+    end_time = datetime.combine(end_date, datetime.min.time()) + timedelta(hours=12, days=1)
+
+    # 构建查询
+    q = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
         LotteryTicket.is_winning == True,
-    ).order_by(LotteryTicket.completed_at.desc()).limit(200).all()
+        LotteryTicket.completed_at >= start_time,
+        LotteryTicket.completed_at < end_time,
+    )
+
+    # 日期筛选
+    if date_str:
+        try:
+            filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            filter_start = datetime.combine(filter_date, datetime.min.time()) + timedelta(hours=12)
+            filter_end = filter_start + timedelta(days=1)
+            q = q.filter(
+                LotteryTicket.completed_at >= filter_start,
+                LotteryTicket.completed_at < filter_end,
+            )
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+
+    # 彩种类型筛选
+    if lottery_type:
+        q = q.filter(LotteryTicket.lottery_type == lottery_type)
+
+    tickets = q.order_by(LotteryTicket.completed_at.desc()).all()
 
     grouped = {}
     for t in tickets:
@@ -123,7 +165,19 @@ def my_winning():
             'assigned_device_name': t.assigned_device_name or '',
         })
 
-    return jsonify({'success': True, 'grouped': grouped})
+    # 返回可用的日期和彩种选项（用于前端筛选器）
+    from sqlalchemy import distinct
+    date_options = sorted(list(set(str(get_business_date(t.completed_at)) for t in tickets if t.completed_at)), reverse=True)
+    type_options = sorted(list(set(t.lottery_type for t in tickets if t.lottery_type)))
+
+    return jsonify({
+        'success': True,
+        'grouped': grouped,
+        'filter_options': {
+            'dates': date_options,
+            'lottery_types': type_options,
+        }
+    })
 
 
 @winning_bp.route('/upload-image/<int:ticket_id>', methods=['POST'])
