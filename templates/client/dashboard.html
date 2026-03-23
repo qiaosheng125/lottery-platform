@@ -256,6 +256,35 @@
         <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">✕ 关闭</button>
       </div>
     </div>
+
+    <!-- 筛选条件 -->
+    <div class="winning-filter-bar">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto">
+          <label class="form-label small mb-1">日期</label>
+          <select class="form-select form-select-sm" v-model="winningFilterDate" style="min-width:120px">
+            <option value="">全部</option>
+            <option v-for="date in winningFilterOptions.dates" :key="date" :value="date">{{ date }}</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <label class="form-label small mb-1">彩种</label>
+          <select class="form-select form-select-sm" v-model="winningFilterType" style="min-width:120px">
+            <option value="">全部</option>
+            <option v-for="type in winningFilterOptions.lottery_types" :key="type" :value="type">{{ type }}</option>
+          </select>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-sm btn-primary" @click="applyWinningFilter">
+            <i class="bi bi-funnel"></i> 筛选
+          </button>
+          <button class="btn btn-sm btn-outline-secondary ms-1" @click="resetWinningFilter" v-if="winningFilterDate || winningFilterType">
+            <i class="bi bi-x-circle"></i> 重置
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="winning-panel-body">
       <div v-if="winningLoading" class="text-center py-5">加载中...</div>
       <div v-else-if="Object.keys(winningGrouped).length === 0" class="text-center py-5 text-muted">暂无中签记录</div>
@@ -350,6 +379,10 @@ createApp({
       winningVisible: false, winningLoading: false, winningGrouped: {},
       winningPreviewUrl: null, uploadingWinningId: null,
       winningGroupBy: 'date', // 'date' | 'type'
+      // 中奖记录筛选
+      winningFilterDate: '',
+      winningFilterType: '',
+      winningFilterOptions: { dates: [], lottery_types: [] },
     };
   },
   mounted() {
@@ -557,17 +590,56 @@ createApp({
     async openWinning() {
       this.winningVisible = true;
       this.winningLoading = true;
+      // 重置筛选条件
+      this.winningFilterDate = '';
+      this.winningFilterType = '';
       try {
         const res = await fetch('/api/winning/my');
         const data = await res.json();
-        this.winningGrouped = data.grouped || {};
-        this._winningAll = Object.values(data.grouped || {}).flat(); // 缓存全部
+        if (data.success) {
+          this.winningGrouped = data.grouped || {};
+          this._winningAll = Object.values(data.grouped || {}).flat(); // 缓存全部
+          this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        } else {
+          this.winningGrouped = {};
+          this._winningAll = [];
+          this.winningFilterOptions = { dates: [], lottery_types: [] };
+        }
       } catch(e) {
         this.winningGrouped = {};
         this._winningAll = [];
+        this.winningFilterOptions = { dates: [], lottery_types: [] };
       } finally {
         this.winningLoading = false;
       }
+    },
+    async applyWinningFilter() {
+      this.winningLoading = true;
+      try {
+        const params = new URLSearchParams();
+        if (this.winningFilterDate) params.append('date', this.winningFilterDate);
+        if (this.winningFilterType) params.append('lottery_type', this.winningFilterType);
+
+        const res = await fetch(`/api/winning/my?${params.toString()}`);
+        const data = await res.json();
+        if (data.success) {
+          this.winningGrouped = data.grouped || {};
+          this._winningAll = Object.values(data.grouped || {}).flat();
+          // 筛选后更新选项（只显示当前结果中的选项）
+          this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        } else {
+          showToast(data.error || '筛选失败', 'danger');
+        }
+      } catch(e) {
+        showToast('筛选失败', 'danger');
+      } finally {
+        this.winningLoading = false;
+      }
+    },
+    async resetWinningFilter() {
+      this.winningFilterDate = '';
+      this.winningFilterType = '';
+      await this.applyWinningFilter(); // 重新加载全部数据
     },
     setWinningGroupBy(mode) {
       this.winningGroupBy = mode;
@@ -654,6 +726,11 @@ createApp({
   padding: .75rem 1rem; background: #fff;
   border-bottom: 1px solid #dee2e6; font-weight: 600; font-size: 1rem;
   position: sticky; top: 0; z-index: 10;
+}
+.winning-filter-bar {
+  background: #fff; padding: .75rem 1rem;
+  border-bottom: 1px solid #dee2e6;
+  position: sticky; top: 52px; z-index: 9;
 }
 .winning-panel-body {
   flex: 1; overflow-y: auto; padding: 1rem;
