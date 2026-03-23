@@ -72,8 +72,8 @@ def dashboard_data():
     device_speed_stats = []  # 设备速度统计
     total_speed = 0.0  # 总速度（每分钟张数）
 
-    # 计算最近10分钟的时间点（用于速度统计）
-    SPEED_WINDOW_MINUTES = 10
+    # 计算最近30分钟的时间点（用于速度统计，时间窗口更长更稳定）
+    SPEED_WINDOW_MINUTES = 30
     speed_window_start = beijing_now() - timedelta(minutes=SPEED_WINDOW_MINUTES)
 
     # 优化：一次性查询所有在线用户的最近完成票（避免N+1查询）
@@ -119,9 +119,19 @@ def dashboard_data():
             # 从预加载的数据中获取该设备的最近完成票
             recent_tickets = tickets_by_device.get((ou.id, device_id), [])
 
-            if recent_tickets:
-                # 计算速度：最近N分钟完成的票数 / N = 每分钟速度
-                speed_per_minute = len(recent_tickets) / float(SPEED_WINDOW_MINUTES)
+            if recent_tickets and len(recent_tickets) >= 2:  # 至少2张票才能计算速度
+                # 计算实际出票时间跨度（从第一张到最后一张的时间差）
+                sorted_tickets = sorted(recent_tickets, key=lambda t: t.completed_at)
+                first_time = sorted_tickets[0].completed_at
+                last_time = sorted_tickets[-1].completed_at
+                time_span_minutes = (last_time - first_time).total_seconds() / 60.0
+
+                # 如果时间跨度太短（<1分钟），使用固定1分钟避免速度过高
+                if time_span_minutes < 1.0:
+                    time_span_minutes = 1.0
+
+                # 计算速度：票数 / 实际出票时间跨度
+                speed_per_minute = len(recent_tickets) / time_span_minutes
                 total_speed += speed_per_minute
 
                 device_name = recent_tickets[0].assigned_device_name or device_id
@@ -131,6 +141,7 @@ def dashboard_data():
                     'device_name': device_name,
                     'speed_per_minute': round(speed_per_minute, 2),
                     'recent_count': len(recent_tickets),
+                    'time_span_minutes': round(time_span_minutes, 1),
                 })
 
     # 计算预估完成时间
