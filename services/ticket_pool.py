@@ -342,8 +342,12 @@ def assign_tickets_batch(
                 return []
             ids = [r[0] for r in rows]
             # 原子 UPDATE：WHERE status='pending' 防止重复分配
+            # SQLite不支持直接绑定tuple到IN子句，需要动态生成占位符
+            placeholders = ','.join([f':id{i}' for i in range(len(ids))])
+            id_params = {f'id{i}': tid for i, tid in enumerate(ids)}
+
             db.session.execute(
-                text("""
+                text(f"""
                     UPDATE lottery_tickets
                     SET status = 'assigned',
                         assigned_user_id = :user_id,
@@ -353,14 +357,14 @@ def assign_tickets_batch(
                         assigned_at = :now,
                         locked_until = :lock_until,
                         version = version + 1
-                    WHERE id IN :ids
+                    WHERE id IN ({placeholders})
                       AND status = 'pending'
                 """),
                 {
                     'user_id': user_id, 'username': username,
                     'device_id': device_id, 'device_name': device_name,
                     'now': now, 'lock_until': lock_until,
-                    'ids': tuple(ids),
+                    **id_params,
                 }
             )
             for tid in ids:
