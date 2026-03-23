@@ -70,10 +70,10 @@ def dashboard_data():
     # 在线用户统计
     user_stats = []
     device_speed_stats = []  # 设备速度统计
-    total_speed = 0.0  # 总速度（每分钟张数）
+    total_speed = 0.0  # 总速度（每分钟张数，只统计当前在线设备）
 
-    # 计算最近30分钟的时间点（用于速度统计，时间窗口更长更稳定）
-    SPEED_WINDOW_MINUTES = 30
+    # 计算最近180分钟（3小时）的时间点（用于速度统计，时间窗口更长更稳定）
+    SPEED_WINDOW_MINUTES = 180
     speed_window_start = beijing_now() - timedelta(minutes=SPEED_WINDOW_MINUTES)
 
     # 优化：一次性查询所有在线用户的最近完成票（避免N+1查询）
