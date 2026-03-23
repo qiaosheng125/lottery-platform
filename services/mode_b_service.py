@@ -71,7 +71,7 @@ def download_batch(
     deadlines = [t.deadline_time for t in tickets if t.deadline_time]
     deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
 
-    filename = f"{lottery_type}_{mult_str}倍_{int(total_amount)}元_{deadline_str}_{now_str}.txt"
+    filename = f"{lottery_type}_{mult_str}倍_{len(tickets)}张_{int(total_amount)}元_{deadline_str}_{now_str}.txt"
 
     # 只返回一个文件
     return {
