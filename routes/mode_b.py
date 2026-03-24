@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
 
-from services.mode_b_service import preview_batch, download_batch, confirm_batch
+from services.mode_b_service import preview_batch, download_batch, confirm_batch, get_processing_batches
 from services.ticket_pool import get_pool_status
 from utils.decorators import login_required_json, can_receive_required
 
@@ -55,6 +55,15 @@ def download():
         return jsonify(result), 400
 
     return jsonify(result)
+
+
+@mode_b_bp.route('/processing')
+@login_required
+@login_required_json
+def processing():
+    """返回当前用户处理中（assigned）的票，按批次分组"""
+    batches = get_processing_batches(current_user.id)
+    return jsonify({'success': True, 'batches': batches})
 
 
 @mode_b_bp.route('/confirm', methods=['POST'])

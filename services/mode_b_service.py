@@ -110,6 +110,59 @@ def download_batch(
     return result
 
 
+def get_processing_batches(user_id: int) -> list:
+    """
+    查询当前用户处理中（assigned）的票，按"彩种+截止时间+分配时间（分钟级）"分组，
+    恢复页面刷新后丢失的 bPendingBatches 列表。
+    """
+    tickets = LotteryTicket.query.filter_by(
+        assigned_user_id=user_id,
+        status='assigned',
+    ).order_by(LotteryTicket.assigned_at, LotteryTicket.id).all()
+
+    if not tickets:
+        return []
+
+    # 按 (lottery_type, deadline_time, assigned_at精确到分钟) 分组，还原每次下载批次
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for t in tickets:
+        # 用分钟精度作为批次key，同一次download_batch的票assigned_at完全相同
+        minute_key = t.assigned_at.strftime('%Y%m%d%H%M') if t.assigned_at else '000000000000'
+        lottery_key = t.lottery_type or '未知'
+        deadline_key = t.deadline_time.strftime('%H%M') if t.deadline_time else '0000'
+        key = f"{lottery_key}_{deadline_key}_{minute_key}"
+        groups[key].append(t)
+
+    batches = []
+    for key, group_tickets in groups.items():
+        lottery_type = group_tickets[0].lottery_type or '未知'
+        multipliers = list({t.multiplier for t in group_tickets if t.multiplier})
+        mult_str = str(multipliers[0]) if len(multipliers) == 1 else '混合'
+        total_amount = sum(float(t.ticket_amount or 0) for t in group_tickets)
+        ticket_ids = [t.id for t in group_tickets]
+        deadlines = [t.deadline_time for t in group_tickets if t.deadline_time]
+        deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
+        assigned_at = group_tickets[0].assigned_at
+        downloaded_at = assigned_at.strftime('%H:%M:%S') if assigned_at else '--:--:--'
+
+        # 还原文件名（尽量贴近原始格式）
+        filename = (
+            f"{lottery_type}_{mult_str}倍_{len(group_tickets)}张"
+            f"_{int(total_amount)}元_{deadline_str}_（已接单）.txt"
+        )
+
+        batches.append({
+            'filename': filename,
+            'ticket_ids': ticket_ids,
+            'count': len(group_tickets),
+            'amount': total_amount,
+            'downloaded_at': downloaded_at,
+        })
+
+    return batches
+
+
 def confirm_batch(ticket_ids: List[int], user_id: int) -> dict:
     """确认收到，批量改为 completed"""
     count = complete_tickets_batch(ticket_ids, user_id)

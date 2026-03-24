@@ -397,6 +397,7 @@ createApp({
   mounted() {
     this.loadStats();
     this.loadPoolStatus();
+    this.loadProcessingBatches();
     setInterval(this.loadStats, 15000);
     setInterval(this.loadPoolStatus, 15000);
 
@@ -532,6 +533,21 @@ createApp({
       return 0;
     },
     // Mode B methods
+    async loadProcessingBatches() {
+      try {
+        const res = await fetch('/api/mode-b/processing');
+        const data = await res.json();
+        if (data.success && data.batches.length > 0) {
+          // 只补充服务器上有但本地没有的批次（避免重复）
+          const localIds = new Set(this.bPendingBatches.flatMap(b => b.ticket_ids));
+          for (const batch of data.batches) {
+            if (!batch.ticket_ids.some(id => localIds.has(id))) {
+              this.bPendingBatches.push(batch);
+            }
+          }
+        }
+      } catch(e) {}
+    },
     async loadPoolStatus() {
       try {
         const res = await fetch('/api/mode-b/pool-status');
