@@ -40,7 +40,21 @@ def _get_redis():
     return rc
 
 
-def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None) -> Optional[LotteryTicket]:
+def _count_today_completed(user_id: int, business_date_start: datetime) -> int:
+    """统计用户当前业务日期内已完成（completed）的票数"""
+    return db.session.execute(
+        text("""
+            SELECT COUNT(*) FROM lottery_tickets
+            WHERE assigned_user_id = :user_id
+              AND status = 'completed'
+              AND completed_at >= :start
+        """),
+        {'user_id': user_id, 'start': business_date_start}
+    ).scalar() or 0
+
+
+def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None,
+                         daily_limit: int = None) -> Optional[LotteryTicket]:
     """
     原子性地从票池分配一张票给用户。
 
@@ -50,6 +64,9 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
       3. UPDATE status='assigned'
 
     开发（SQLite）：使用 ORM 简化路径（无并发安全保证）
+
+    Args:
+        daily_limit: 每日可处理票数上限，None表示不限制
     """
     rc = _get_redis()
     now = beijing_now()
@@ -58,6 +75,14 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
     # ── SQLite dev path ──────────────────────────────────────────
     if not _is_postgres():
         with _sqlite_assign_lock:
+            # 检查每日上限
+            if daily_limit is not None:
+                from utils.time_utils import get_today_noon
+                business_start = get_today_noon()
+                today_count = _count_today_completed(user_id, business_start)
+                if today_count >= daily_limit:
+                    return None
+
             # 先找一张 pending 票的 id
             row = db.session.execute(
                 text("""
@@ -109,6 +134,14 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
             return LotteryTicket.query.get(ticket_id)
 
     # ── PostgreSQL production path ────────────────────────────────
+    # 检查每日上限
+    if daily_limit is not None:
+        from utils.time_utils import get_today_noon
+        business_start = get_today_noon()
+        today_count = _count_today_completed(user_id, business_start)
+        if today_count >= daily_limit:
+            return None
+
     MAX_ATTEMPTS = 10
     for _ in range(MAX_ATTEMPTS):
         ticket_id = None
@@ -252,6 +285,7 @@ def assign_tickets_batch(
     count: int,
     device_name: str = None,
     max_processing: int = None,
+    daily_limit: int = None,
 ) -> tuple[List[LotteryTicket], str]:
     """
     B模式：按截止时间升序自动分配指定张数的票（服务器决定彩种和截止时间）
@@ -264,6 +298,7 @@ def assign_tickets_batch(
 
     Args:
         max_processing: B模式用户处理中票数上限，None表示不限制
+        daily_limit: 每日可处理票数上限，None表示不限制
 
     Returns:
         (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
@@ -275,6 +310,18 @@ def assign_tickets_batch(
     if not _is_postgres():
         with _sqlite_assign_lock:
             adjustment_message = None
+
+            # 检查每日上限（并发安全，在锁内）
+            if daily_limit is not None:
+                from utils.time_utils import get_today_noon
+                business_start = get_today_noon()
+                today_count = _count_today_completed(user_id, business_start)
+                if today_count >= daily_limit:
+                    return [], '已达到今日处理上限'
+                daily_remaining = daily_limit - today_count
+                if count > daily_remaining:
+                    count = daily_remaining
+                    adjustment_message = f'已自动调整为{daily_remaining}张（今日已处理{today_count}张，每日上限{daily_limit}张）'
 
             # 在锁内检查B模式用户的处理中票数上限（并发安全）
             if max_processing is not None:
@@ -405,6 +452,17 @@ def assign_tickets_batch(
             db.session.commit()
             tickets = LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
             return tickets, adjustment_message
+
+    # PostgreSQL: 检查每日上限
+    if daily_limit is not None:
+        from utils.time_utils import get_today_noon
+        business_start = get_today_noon()
+        today_count = _count_today_completed(user_id, business_start)
+        if today_count >= daily_limit:
+            return [], '已达到今日处理上限'
+        daily_remaining = daily_limit - today_count
+        if count > daily_remaining:
+            count = daily_remaining
 
     # PostgreSQL: 查询所有可用彩种及其票数和截止时间
     type_stats = db.session.execute(

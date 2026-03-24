@@ -126,13 +126,6 @@ function renderTicketHTML(raw, lotteryType) {
 
   return `
     <div class="ticket-render" style="background:#1a1a2e;border-radius:6px;overflow:hidden;padding-bottom:4px">
-      <div class="text-center py-2 px-3 ticket-header" style="background:#6f42c1;color:#fff">
-        <div class="ticket-type">${typeName}${finalMult}倍投</div>
-        <div class="ticket-amount">金额 ${amount} 元</div>
-      </div>
-      <div class="px-2 pt-2">${matchRows}</div>
-      <div class="text-center py-2 ticket-footer" style="color:#2ecc71">
-        总金额: ${amount} 元
-      </div>
+      <div class="px-2 pt-2 pb-1">${matchRows}</div>
     </div>`;
 }

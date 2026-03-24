@@ -22,6 +22,7 @@ class User(UserMixin, db.Model):
     client_mode = db.Column(db.String(10), default='mode_a', nullable=False)  # 'mode_a' | 'mode_b'
     max_devices = db.Column(db.Integer, default=1, nullable=False)
     max_processing_b_mode = db.Column(db.Integer, nullable=True)  # B模式处理中票数上限，None表示不限制
+    daily_ticket_limit = db.Column(db.Integer, nullable=True)  # 每日可处理票数上限，None表示不限制
     is_active = db.Column(db.Boolean, default=True, nullable=False)  # account active
     can_receive = db.Column(db.Boolean, default=True, nullable=False)  # admin-controlled receive switch
     created_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
@@ -53,6 +54,7 @@ class User(UserMixin, db.Model):
             'client_mode': self.client_mode,
             'max_devices': self.max_devices,
             'max_processing_b_mode': self.max_processing_b_mode,
+            'daily_ticket_limit': self.daily_ticket_limit,
             'is_active': self.is_active,
             'can_receive': self.can_receive,
             'created_at': self.created_at.isoformat() if self.created_at else None,

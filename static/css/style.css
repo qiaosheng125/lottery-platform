@@ -123,60 +123,126 @@ body {
   overflow: hidden;
 }
 
-/* 倒计时栏 - 固定顶部，大字体 */
-.mode-a-countdown-bar {
+/* 信息栏 - 固定顶部（包含编号、玩法类型、倒计时、截止时间） */
+.mode-a-info-bar {
   flex-shrink: 0;
-  padding: 1rem;
+  padding: 0.6rem 1rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: #fff;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-.countdown-text {
-  font-size: 1.5rem !important;
-  font-family: 'Courier New', monospace;
-  letter-spacing: 0.1em;
+.mode-a-info-bar .info-left,
+.mode-a-info-bar .info-center,
+.mode-a-info-bar .info-right {
+  flex: 1;
+  color: #fff;
 }
 
-/* 票面滚动区域 - 占据剩余空间，内容超出时可滚动 */
-.mode-a-ticket-scroll {
+.mode-a-info-bar .info-left {
+  text-align: left;
+  font-size: 1rem;
+}
+
+.mode-a-info-bar .info-center {
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.mode-a-info-bar .info-amount {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
+  color: rgba(255,255,255,0.95);
+}
+
+.mode-a-info-bar .info-right {
+  text-align: right;
+}
+
+.countdown-text {
+  font-size: 1.3rem !important;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.05em;
+  color: #fff !important;
+  font-weight: 700;
+}
+
+.deadline-text {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.9);
+  margin-top: 0.1rem;
+}
+
+/* 主内容区 - 左右按钮 + 中间票面 */
+.mode-a-main-area {
   flex: 1;
-  min-height: 0;        /* 关键：让 flex 子元素可以收缩到 0，overflow 才能生效 */
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding: 0.75rem;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
   background: #f8f9fa;
 }
 
-/* 操作按钮栏 - 固定底部，大按钮 */
-.mode-a-action-bar {
+/* 左右两侧按钮 */
+.mode-a-side-btn {
   flex-shrink: 0;
-  padding: 1rem;
+  width: 50px;
+  background: rgba(102, 126, 234, 0.1);
+  border: none;
+  color: #667eea;
+  font-size: 1.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mode-a-side-btn:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.2);
+}
+
+.mode-a-side-btn:active:not(:disabled) {
+  background: rgba(102, 126, 234, 0.3);
+}
+
+.mode-a-side-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.mode-a-side-btn-left {
+  border-right: 1px solid #e9ecef;
+}
+
+.mode-a-side-btn-right {
+  border-left: 1px solid #e9ecef;
+}
+
+/* 票面滚动区域 - 占据剩余空间 */
+.mode-a-ticket-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.5rem;
+}
+
+/* 底部操作栏 - 停止按钮 */
+.mode-a-bottom-bar {
+  flex-shrink: 0;
+  padding: 0.6rem 1rem;
   background: #fff;
   border-top: 2px solid #e9ecef;
   box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
 }
 
-.mode-a-btn {
-  font-size: 1.1rem !important;
+.mode-a-stop-btn {
+  font-size: 1rem !important;
   font-weight: 600;
-  padding: 0.75rem 1.25rem !important;
-  min-height: 50px;
+  padding: 0.6rem !important;
   border-radius: 8px;
-  transition: all 0.2s;
-  flex: 1;
-  max-width: 120px;
-}
-
-.mode-a-btn-primary {
-  flex: 1.5;
-  max-width: 150px;
-  font-size: 1.2rem !important;
-}
-
-.mode-a-btn:active {
-  transform: scale(0.95);
 }
 
 .history-dot {
@@ -185,38 +251,97 @@ body {
   transition: all 0.2s;
 }
 
-/* 手机端优化（<768px） - 更大的字体和按钮 */
+/* ── 紧凑场次样式 - 减小行高和间距 ── */
+/* 场次卡片（match-card）减小内边距和外边距 */
+.ticket-render .match-card {
+  margin-bottom: 0.35rem !important;
+}
+
+.ticket-render .match-header {
+  padding: 0.3rem 0.5rem !important;
+  font-size: 0.85rem !important;
+}
+
+.ticket-render .match-body {
+  padding: 0.3rem 0.5rem !important;
+}
+
+/* 场次标题字体缩小 */
+.ticket-render .match-number {
+  font-size: 0.9rem !important;
+}
+
+/* 场次内容 badge 间距减小 */
+.ticket-render .ticket-badge {
+  padding: 0.2em 0.45em !important;
+  margin: 0.1rem !important;
+  font-size: 0.85rem !important;
+}
+
+/* 票面头尾区域紧凑化 */
+.ticket-render .ticket-header {
+  padding: 0.4rem 0.6rem !important;
+}
+
+.ticket-render .ticket-footer {
+  padding: 0.4rem 0.6rem !important;
+  font-size: 0.95rem !important;
+}
+
+/* 表格行高压缩 */
+.ticket-render .table td,
+.ticket-render .table th {
+  padding: 0.15rem 0.35rem !important;
+  font-size: 0.85rem !important;
+  line-height: 1.3 !important;
+}
+
+/* 手机端优化（<768px） */
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
     height: calc(100vh - 250px);
     min-height: 350px;
   }
 
+  .mode-a-info-bar {
+    padding: 0.5rem 0.75rem;
+  }
+
   .countdown-text {
-    font-size: 1.3rem !important;
+    font-size: 1.1rem !important;
+  }
+
+  .mode-a-side-btn {
+    width: 42px;
+    font-size: 1.5rem;
   }
 
   .mode-a-ticket-scroll {
-    padding: 0.5rem;
-  }
-
-  .mode-a-btn {
-    font-size: 1rem !important;
-    padding: 0.7rem 1rem !important;
-    min-height: 48px;
-  }
-
-  .mode-a-btn-primary {
-    font-size: 1.1rem !important;
+    padding: 0.4rem;
   }
 
   /* 票面内容字体适中 */
   .mode-a-ticket-scroll .ticket-render {
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+  }
+
+  /* 手机端场次更紧凑 */
+  .ticket-render .match-card {
+    margin-bottom: 0.25rem !important;
+  }
+
+  .ticket-render .match-header {
+    padding: 0.25rem 0.4rem !important;
+    font-size: 0.8rem !important;
+  }
+
+  .ticket-render .ticket-badge {
+    font-size: 0.8rem !important;
+    padding: 0.15em 0.4em !important;
   }
 }
 
-/* 小屏手机（<375px） - 保持清晰可读 */
+/* 小屏手机（<375px） */
 @media (max-width: 375px) {
   .mode-a-fullscreen-container {
     height: calc(100vh - 230px);
@@ -224,17 +349,20 @@ body {
   }
 
   .countdown-text {
-    font-size: 1.2rem !important;
+    font-size: 1rem !important;
   }
 
-  .mode-a-btn {
-    font-size: 0.95rem !important;
-    padding: 0.65rem 0.9rem !important;
-    min-height: 46px;
+  .mode-a-side-btn {
+    width: 36px;
+    font-size: 1.3rem;
   }
 
-  .mode-a-btn-primary {
-    font-size: 1.05rem !important;
+  .ticket-render .match-header {
+    font-size: 0.78rem !important;
+  }
+
+  .ticket-render .ticket-badge {
+    font-size: 0.78rem !important;
   }
 }
 

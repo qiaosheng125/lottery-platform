@@ -41,10 +41,11 @@ def download_batch(
     if not settings.mode_b_enabled:
         return {'success': False, 'error': '模式B已被关闭'}
 
-    # 获取用户的B模式处理中票数上限
+    # 获取用户的B模式处理中票数上限和每日上限
     from models.user import User
     user = User.query.get(user_id)
     max_processing = user.max_processing_b_mode if user else None
+    daily_limit = user.daily_ticket_limit if user else None
 
     # 在 assign_tickets_batch 的锁内进行并发安全的检查和分配
     tickets, adjustment_message = assign_tickets_batch(
@@ -54,6 +55,7 @@ def download_batch(
         count=count,
         device_name=device_name,
         max_processing=max_processing,
+        daily_limit=daily_limit,
     )
 
     if not tickets:

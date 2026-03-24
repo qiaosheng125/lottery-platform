@@ -453,12 +453,23 @@ def api_create_user():
         except (ValueError, TypeError):
             return jsonify({'success': False, 'error': 'B模式上限必须是整数'}), 400
 
+    # 验证 daily_ticket_limit
+    daily_ticket_limit = data.get('daily_ticket_limit')
+    if daily_ticket_limit is not None:
+        try:
+            daily_ticket_limit = int(daily_ticket_limit) if daily_ticket_limit else None
+            if daily_ticket_limit is not None and (daily_ticket_limit < 1 or daily_ticket_limit > 100000):
+                return jsonify({'success': False, 'error': '每日上限必须在1-100000之间'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': '每日上限必须是整数'}), 400
+
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({'success': False, 'error': '用户名已存在'}), 409
 
-    user = User(username=username, client_mode=client_mode, max_devices=max_devices, max_processing_b_mode=max_processing_b_mode)
+    user = User(username=username, client_mode=client_mode, max_devices=max_devices,
+                max_processing_b_mode=max_processing_b_mode, daily_ticket_limit=daily_ticket_limit)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -484,6 +495,14 @@ def api_update_user(user_id):
                 return jsonify({'success': False, 'error': 'B模式上限必须在1-10000之间'}), 400
         except (ValueError, TypeError):
             return jsonify({'success': False, 'error': 'B模式上限必须是整数'}), 400
+    if 'daily_ticket_limit' in data:
+        val = data['daily_ticket_limit']
+        try:
+            user.daily_ticket_limit = int(val) if val else None
+            if user.daily_ticket_limit is not None and (user.daily_ticket_limit < 1 or user.daily_ticket_limit > 100000):
+                return jsonify({'success': False, 'error': '每日上限必须在1-100000之间'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': '每日上限必须是整数'}), 400
     if 'is_active' in data:
         user.is_active = bool(data['is_active'])
     if 'can_receive' in data:

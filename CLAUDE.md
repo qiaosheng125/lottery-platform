@@ -78,7 +78,17 @@ FLASK_ENV=production
 - B 模式始终保留 20 张给 A 模式缓冲（`RESERVE = 20`，`ticket_pool.py`）
 - A 模式每台设备同时只持有 1 张票（点"下一张"才自动完成当前票）
 
-## 本次会话完成的功能（2026-03-23）
+## 本次会话完成的功能（2026-03-24）
+
+1. **每日处理票数上限** — 用户管理新增 `daily_ticket_limit` 字段，限制用户每个业务日期（12点分割）可处理的总票数，A/B模式均生效
+   - `models/user.py` — 添加 `daily_ticket_limit` 字段（整型，可为空，默认 None 表示不限制），`to_dict()` 同步返回
+   - `routes/admin.py` — 创建和更新用户 API 支持该字段，范围验证 1-100000
+   - `services/ticket_pool.py` — 新增 `_count_today_completed()` 辅助函数；`assign_ticket_atomic()`（A模式）和 `assign_tickets_batch()`（B模式）均在分配前检查每日上限，SQLite 路径在锁内原子检查，PostgreSQL 路径在循环前检查
+   - `services/mode_a_service.py` — `get_next_ticket()` 读取用户 `daily_ticket_limit` 并传入 `assign_ticket_atomic()`
+   - `services/mode_b_service.py` — `download_batch()` 读取用户 `daily_ticket_limit` 并传入 `assign_tickets_batch()`
+   - `templates/admin/users.html` — 表头"B模式上限"改为"B模式同时处理上限"；新增"每日处理上限"列（行内编辑）；新建用户弹窗新增每日上限输入框
+
+## 上次会话完成的功能（2026-03-23）
 
 ### 上午会话
 
