@@ -112,8 +112,14 @@
             </div>
 
             <!-- 右侧按钮 -->
-            <button class="mode-a-side-btn mode-a-side-btn-right" @click="nextTicket" :disabled="loadingNext">
+            <button class="mode-a-side-btn mode-a-side-btn-right"
+                    @click="nextTicket"
+                    :disabled="loadingNext || (historyOffset === 0 && nextCooldownSec > 0)"
+                    :title="historyOffset === 0 && nextCooldownSec > 0 ? `冷却中，还需等待 ${nextCooldownSec} 秒` : '下一张'">
               <span v-if="loadingNext" class="spinner-border spinner-border-sm"></span>
+              <template v-else-if="historyOffset === 0 && nextCooldownSec > 0">
+                <span class="mode-a-cooldown-sec">{{ nextCooldownSec }}</span>
+              </template>
               <i v-else class="bi bi-arrow-right"></i>
             </button>
           </div>
@@ -417,6 +423,10 @@ createApp({
       countdownTimer: null,
       deadlineStr: '',
       showStopConfirm: false,
+      // 下一张冷却：7秒内不能再次调用 API 获取新票
+      nextCooldownUntil: 0,   // 冷却结束时间戳（ms）
+      nextCooldownSec: 0,     // 当前剩余冷却秒数（整数，用于显示）
+      cooldownTimer: null,    // 每秒刷新剩余秒数的定时器
       // Mode B
       bCount: 100,
       bOptions: [50, 100, 200, 300, 400, 500],      poolStatus: { total_pending: 0, by_type: [] },
@@ -480,7 +490,7 @@ createApp({
       }
     },
     async nextTicket() {
-      // 如果在看历史票，"下一张"只是在本地数组前进，不调 API
+      // 如果在看历史票，"下一张"只是在本地数组前进，不调 API（不受冷却限制）
       if (this.historyOffset > 0) {
         this.historyOffset -= 1;
         this.currentTicket = this.ticketHistory[this.historyOffset];
@@ -488,6 +498,13 @@ createApp({
         return;
       }
       // historyOffset=0，已在最新票，才真正从服务器获取下一张
+      // 检查冷却时间（7秒）
+      const now = Date.now();
+      if (now < this.nextCooldownUntil) {
+        const remaining = Math.ceil((this.nextCooldownUntil - now) / 1000);
+        showToast(`请等待 ${remaining} 秒后再获取下一张`, 'warning');
+        return;
+      }
       this.loadingNext = true;
       try {
         const res = await fetch('/api/mode-a/next', {
@@ -504,6 +521,8 @@ createApp({
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
+          // 成功获取后启动7秒冷却
+          this.startNextCooldown();
         } else {
           this.currentTicket = null;
           if (!this.modeAActive) this.modeAActive = false;
@@ -512,6 +531,22 @@ createApp({
       } finally {
         this.loadingNext = false;
       }
+    },
+    startNextCooldown() {
+      const COOLDOWN_MS = 7000;
+      this.nextCooldownUntil = Date.now() + COOLDOWN_MS;
+      this.nextCooldownSec = 7;
+      clearInterval(this.cooldownTimer);
+      this.cooldownTimer = setInterval(() => {
+        const remaining = Math.ceil((this.nextCooldownUntil - Date.now()) / 1000);
+        if (remaining <= 0) {
+          this.nextCooldownSec = 0;
+          clearInterval(this.cooldownTimer);
+          this.cooldownTimer = null;
+        } else {
+          this.nextCooldownSec = remaining;
+        }
+      }, 200); // 200ms 刷新，确保倒计时精准
     },
     previousTicket() {
       // 在本地历史数组中后退，完全不调 API
@@ -541,6 +576,11 @@ createApp({
       this.ticketHistory = [];
       this.historyOffset = 0;
       clearInterval(this.countdownTimer);
+      // 清理冷却定时器，重置冷却状态
+      clearInterval(this.cooldownTimer);
+      this.cooldownTimer = null;
+      this.nextCooldownUntil = 0;
+      this.nextCooldownSec = 0;
       this.loadStats();
     },
     startCountdown(deadlineStr) {
@@ -873,5 +913,15 @@ createApp({
 }
 .winning-img-actions { display: flex; align-items: center; gap: .25rem; }
 .btn-xs { padding: .15rem .4rem; font-size: .75rem; }
+/* A模式下一张冷却倒计时数字 */
+.mode-a-cooldown-sec {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #adb5bd;
+  line-height: 1;
+  min-width: 1.4em;
+  display: inline-block;
+  text-align: center;
+}
 </style>
 {% endblock %}
