@@ -437,11 +437,8 @@ def api_users_list():
 @login_required
 @admin_required
 def api_lottery_types():
-    from sqlalchemy import distinct
-    types_raw = db.session.query(distinct(LotteryTicket.lottery_type))\
-        .filter(LotteryTicket.lottery_type.isnot(None))\
-        .order_by(LotteryTicket.lottery_type).all()
-    return jsonify({'lottery_types': [t[0] for t in types_raw if t[0]]})
+    """返回固定的彩种列表"""
+    return jsonify({'lottery_types': ['胜平负', '比分', '上下盘', '总进球', '半全场', '混合过关']})
 
 
 @admin_bp.route('/api/users', methods=['POST'])

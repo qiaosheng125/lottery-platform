@@ -120,9 +120,8 @@
             <input v-model.number="newUser.daily_ticket_limit" type="number" class="form-control" min="1" max="100000" placeholder="不限制">
           </div>
           <div class="mb-3">
-            <label class="form-label">禁止彩种 <small class="text-muted">(勾选的彩种不会分配给该用户)</small></label>
-            <div v-if="lotteryTypes.length === 0" class="text-muted small">暂无彩种数据</div>
-            <div v-else class="d-flex flex-wrap gap-2">
+            <label class="form-label">禁止彩种 <small class="text-muted">(勾选的彩种不会分配给该用户，可多选)</small></label>
+            <div class="d-flex flex-wrap gap-2">
               <div v-for="t in lotteryTypes" :key="t" class="form-check">
                 <input class="form-check-input" type="checkbox" :id="'new-' + t" :value="t" v-model="newUser.blocked_lottery_types">
                 <label class="form-check-label small" :for="'new-' + t">{{ t }}</label>
@@ -147,9 +146,8 @@
           <button class="btn-close" @click="showBlockedTypes=false"></button>
         </div>
         <div class="modal-body">
-          <p class="text-muted small mb-2">勾选的彩种将不会分配给该用户</p>
-          <div v-if="lotteryTypes.length === 0" class="text-muted">暂无彩种数据</div>
-          <div v-else class="d-flex flex-wrap gap-2">
+          <p class="text-muted small mb-2">勾选的彩种将不会分配给该用户（可多选）</p>
+          <div class="d-flex flex-wrap gap-2">
             <div v-for="t in lotteryTypes" :key="t" class="form-check">
               <input class="form-check-input" type="checkbox" :id="'edit-' + t" :value="t" v-model="editingBlockedTypes">
               <label class="form-check-label" :for="'edit-' + t">{{ t }}</label>
@@ -176,13 +174,13 @@ createApp({
       showCreate: false,
       createError: '',
       newUser: { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null, blocked_lottery_types: [] },
-      lotteryTypes: [],
+      lotteryTypes: ['胜平负', '比分', '上下盘', '总进球', '半全场', '混合过关'],
       showBlockedTypes: false,
       editingUser: null,
       editingBlockedTypes: [],
     };
   },
-  mounted() { this.loadUsers(); this.loadLotteryTypes(); },
+  mounted() { this.loadUsers(); },
   methods: {
     async loadUsers() {
       this.loading = true;
@@ -190,11 +188,6 @@ createApp({
       const data = await res.json();
       this.users = data.users;
       this.loading = false;
-    },
-    async loadLotteryTypes() {
-      const res = await fetch('/admin/api/lottery-types');
-      const data = await res.json();
-      this.lotteryTypes = data.lottery_types || [];
     },
     async updateUser(u) {
       await fetch(`/admin/api/users/${u.id}`, {
