@@ -14,11 +14,11 @@
         <thead class="table-dark">
           <tr>
             <th>用户名</th><th>接单模式</th><th>最大设备数</th><th>B模式同时处理上限</th><th>每日处理上限</th>
-            <th>账号状态</th><th>接单开关</th><th>创建时间</th><th>操作</th>
+            <th>禁止彩种</th><th>账号状态</th><th>接单开关</th><th>创建时间</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading"><td colspan="9" class="text-center py-3">加载中...</td></tr>
+          <tr v-if="loading"><td colspan="10" class="text-center py-3">加载中...</td></tr>
           <tr v-for="u in users" :key="u.id">
             <td><strong>{{ u.username }}</strong></td>
             <td>
@@ -46,6 +46,19 @@
                      placeholder="不限制"
                      @change="updateUser(u)"
                      title="每日可处理票数上限（A/B模式均生效）">
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-1">
+                <span v-if="u.blocked_lottery_types && u.blocked_lottery_types.length > 0"
+                      class="badge bg-danger" style="cursor:pointer" @click="openBlockedTypesModal(u)"
+                      :title="u.blocked_lottery_types.join(', ')">
+                  {{ u.blocked_lottery_types.length }}种
+                </span>
+                <span v-else class="text-muted small">无</span>
+                <button class="btn btn-xs btn-outline-secondary" @click="openBlockedTypesModal(u)" title="设置禁止彩种">
+                  <i class="bi bi-gear"></i>
+                </button>
+              </div>
             </td>
             <td>
               <div class="form-check form-switch">
@@ -106,10 +119,46 @@
             <label class="form-label">每日处理上限 <small class="text-muted">(可选，留空表示不限制，A/B模式均生效)</small></label>
             <input v-model.number="newUser.daily_ticket_limit" type="number" class="form-control" min="1" max="100000" placeholder="不限制">
           </div>
+          <div class="mb-3">
+            <label class="form-label">禁止彩种 <small class="text-muted">(勾选的彩种不会分配给该用户)</small></label>
+            <div v-if="lotteryTypes.length === 0" class="text-muted small">暂无彩种数据</div>
+            <div v-else class="d-flex flex-wrap gap-2">
+              <div v-for="t in lotteryTypes" :key="t" class="form-check">
+                <input class="form-check-input" type="checkbox" :id="'new-' + t" :value="t" v-model="newUser.blocked_lottery_types">
+                <label class="form-check-label small" :for="'new-' + t">{{ t }}</label>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="showCreate=false">取消</button>
           <button class="btn btn-primary" @click="createUser">创建</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocked Types Modal -->
+  <div v-if="showBlockedTypes" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">设置禁止彩种 - {{ editingUser ? editingUser.username : '' }}</h5>
+          <button class="btn-close" @click="showBlockedTypes=false"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-2">勾选的彩种将不会分配给该用户</p>
+          <div v-if="lotteryTypes.length === 0" class="text-muted">暂无彩种数据</div>
+          <div v-else class="d-flex flex-wrap gap-2">
+            <div v-for="t in lotteryTypes" :key="t" class="form-check">
+              <input class="form-check-input" type="checkbox" :id="'edit-' + t" :value="t" v-model="editingBlockedTypes">
+              <label class="form-check-label" :for="'edit-' + t">{{ t }}</label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showBlockedTypes=false">取消</button>
+          <button class="btn btn-primary" @click="saveBlockedTypes">保存</button>
         </div>
       </div>
     </div>
@@ -126,10 +175,14 @@ createApp({
       users: [], loading: true,
       showCreate: false,
       createError: '',
-      newUser: { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null },
+      newUser: { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null, blocked_lottery_types: [] },
+      lotteryTypes: [],
+      showBlockedTypes: false,
+      editingUser: null,
+      editingBlockedTypes: [],
     };
   },
-  mounted() { this.loadUsers(); },
+  mounted() { this.loadUsers(); this.loadLotteryTypes(); },
   methods: {
     async loadUsers() {
       this.loading = true;
@@ -137,6 +190,11 @@ createApp({
       const data = await res.json();
       this.users = data.users;
       this.loading = false;
+    },
+    async loadLotteryTypes() {
+      const res = await fetch('/admin/api/lottery-types');
+      const data = await res.json();
+      this.lotteryTypes = data.lottery_types || [];
     },
     async updateUser(u) {
       await fetch(`/admin/api/users/${u.id}`, {
@@ -158,11 +216,32 @@ createApp({
       const data = await res.json();
       if (data.success) {
         this.showCreate = false;
-        this.newUser = { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null };
+        this.newUser = { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null, blocked_lottery_types: [] };
         this.loadUsers();
         showToast('用户创建成功', 'success');
       } else {
         this.createError = data.error;
+      }
+    },
+    openBlockedTypesModal(u) {
+      this.editingUser = u;
+      this.editingBlockedTypes = [...(u.blocked_lottery_types || [])];
+      this.showBlockedTypes = true;
+    },
+    async saveBlockedTypes() {
+      if (!this.editingUser) return;
+      const res = await fetch(`/admin/api/users/${this.editingUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked_lottery_types: this.editingBlockedTypes }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        this.editingUser.blocked_lottery_types = this.editingBlockedTypes;
+        this.showBlockedTypes = false;
+        showToast('禁止彩种已更新', 'success');
+      } else {
+        showToast(data.error || '更新失败', 'danger');
       }
     },
     async forceLogout(u) {

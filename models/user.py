@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import json
 from flask_login import UserMixin
 from extensions import db, login_manager
 
@@ -23,6 +24,7 @@ class User(UserMixin, db.Model):
     max_devices = db.Column(db.Integer, default=1, nullable=False)
     max_processing_b_mode = db.Column(db.Integer, nullable=True)  # B模式处理中票数上限，None表示不限制
     daily_ticket_limit = db.Column(db.Integer, nullable=True)  # 每日可处理票数上限，None表示不限制
+    blocked_lottery_types = db.Column(db.Text, nullable=True)  # JSON数组，禁止接收的彩种列表
     is_active = db.Column(db.Boolean, default=True, nullable=False)  # account active
     can_receive = db.Column(db.Boolean, default=True, nullable=False)  # admin-controlled receive switch
     created_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
@@ -46,6 +48,26 @@ class User(UserMixin, db.Model):
     def session_count(self):
         return UserSession.query.filter_by(user_id=self.id).count()
 
+    def get_blocked_lottery_types(self):
+        if not self.blocked_lottery_types:
+            return []
+        try:
+            return json.loads(self.blocked_lottery_types)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def set_blocked_lottery_types(self, types_list):
+        if types_list is None or len(types_list) == 0:
+            self.blocked_lottery_types = None
+        else:
+            self.blocked_lottery_types = json.dumps(list(types_list))
+
+    def is_lottery_type_blocked(self, lottery_type):
+        if not lottery_type:
+            return False
+        blocked = self.get_blocked_lottery_types()
+        return lottery_type in blocked
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -55,6 +77,7 @@ class User(UserMixin, db.Model):
             'max_devices': self.max_devices,
             'max_processing_b_mode': self.max_processing_b_mode,
             'daily_ticket_limit': self.daily_ticket_limit,
+            'blocked_lottery_types': self.get_blocked_lottery_types(),
             'is_active': self.is_active,
             'can_receive': self.can_receive,
             'created_at': self.created_at.isoformat() if self.created_at else None,

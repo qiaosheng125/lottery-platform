@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"fix: 修复设备限制检查不过滤过期会话 + 会话清理读取管理员设置:*)",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(cp:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(curl -s http://127.0.0.1:5000/admin/api/dashboard-data)",
+      "Bash(iconv -f gbk -t utf-8)",
+      "Bash(curl -s http://127.0.0.1:5000/api/mode-b/pool-status)",
+      "Bash(rm:*)",
+      "Read(//mnt/c/Users/xuyifei/Desktop/file-hub/templates/**)",
+      "Bash(dir \"C:\\\\Users\\\\徐逸飞\\\\Desktop\\\\file-hub\\\\templates\\\\client\")"
+    ]
+  }
+}

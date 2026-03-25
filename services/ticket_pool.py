@@ -40,6 +40,16 @@ def _get_redis():
     return rc
 
 
+def _build_blocked_condition(blocked_types: List[str]) -> tuple[str, dict]:
+    """构建排除禁止彩种的SQL条件片段和参数"""
+    if not blocked_types:
+        return "", {}
+    placeholders = ','.join([f':bt{i}' for i in range(len(blocked_types))])
+    condition = f"AND (lottery_type IS NULL OR lottery_type NOT IN ({placeholders}))"
+    params = {f'bt{i}': t for i, t in enumerate(blocked_types)}
+    return condition, params
+
+
 def _count_today_completed(user_id: int, business_date_start: datetime) -> int:
     """统计用户当前业务日期内已完成（completed）的票数"""
     return db.session.execute(
@@ -54,7 +64,7 @@ def _count_today_completed(user_id: int, business_date_start: datetime) -> int:
 
 
 def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None,
-                         daily_limit: int = None) -> Optional[LotteryTicket]:
+                         daily_limit: int = None, blocked_lottery_types: List[str] = None) -> Optional[LotteryTicket]:
     """
     原子性地从票池分配一张票给用户。
 
@@ -67,10 +77,13 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
 
     Args:
         daily_limit: 每日可处理票数上限，None表示不限制
+        blocked_lottery_types: 禁止接收的彩种列表，None或空列表表示不限制
     """
     rc = _get_redis()
     now = beijing_now()
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
+
+    blocked_types = blocked_lottery_types or []
 
     # ── SQLite dev path ──────────────────────────────────────────
     if not _is_postgres():
@@ -83,16 +96,19 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 if today_count >= daily_limit:
                     return None
 
-            # 先找一张 pending 票的 id
+            blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+
+            # 先找一张 pending 票的 id（排除禁止的彩种）
             row = db.session.execute(
-                text("""
+                text(f"""
                     SELECT id FROM lottery_tickets
                     WHERE status = 'pending'
                       AND deadline_time > :now
+                      {blocked_condition}
                     ORDER BY id
                     LIMIT 1
                 """),
-                {'now': now}
+                {'now': now, **blocked_params}
             ).fetchone()
             if not row:
                 return None
@@ -142,6 +158,8 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
         if today_count >= daily_limit:
             return None
 
+    blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+
     MAX_ATTEMPTS = 10
     for _ in range(MAX_ATTEMPTS):
         ticket_id = None
@@ -155,14 +173,16 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
             ticket_id = int(ticket_id)
         else:
             result = db.session.execute(
-                text("""
+                text(f"""
                     SELECT id FROM lottery_tickets
                     WHERE status = 'pending'
                       AND deadline_time > NOW()
+                      {blocked_condition}
                     ORDER BY id
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
-                """)
+                """),
+                blocked_params
             ).fetchone()
             if not result:
                 return None
@@ -187,6 +207,15 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     {'id': ticket_id}
                 )
                 db.session.commit()
+                continue
+
+            if ticket.lottery_type and ticket.lottery_type in blocked_types:
+                # 该票属于禁止彩种，放回 Redis 队列供其他用户使用
+                if rc:
+                    try:
+                        rc.rpush('pool:pending', ticket_id)
+                    except Exception:
+                        pass
                 continue
 
             db.session.execute(
@@ -286,6 +315,7 @@ def assign_tickets_batch(
     device_name: str = None,
     max_processing: int = None,
     daily_limit: int = None,
+    blocked_lottery_types: List[str] = None,
 ) -> tuple[List[LotteryTicket], str]:
     """
     B模式：按截止时间升序自动分配指定张数的票（服务器决定彩种和截止时间）
@@ -299,6 +329,7 @@ def assign_tickets_batch(
     Args:
         max_processing: B模式用户处理中票数上限，None表示不限制
         daily_limit: 每日可处理票数上限，None表示不限制
+        blocked_lottery_types: 禁止接收的彩种列表，None或空列表表示不限制
 
     Returns:
         (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
@@ -306,6 +337,8 @@ def assign_tickets_batch(
     now = beijing_now()
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
     RESERVE = 20  # B模式至少保留20张给A模式/管理员上传缓冲
+
+    blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
         with _sqlite_assign_lock:
@@ -338,25 +371,29 @@ def assign_tickets_batch(
                 if count > remaining:
                     count = remaining
                     adjustment_message = f'已自动调整为{remaining}张（当前处理中{current_processing}张，上限{max_processing}张）'
+
+            blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+
             total_pending = db.session.execute(
-                text("SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > :now"),
-                {'now': now}
+                text(f"SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > :now {blocked_condition}"),
+                {'now': now, **blocked_params}
             ).scalar() or 0
             available = max(0, total_pending - RESERVE)
             if available <= 0:
                 return [], None
             actual_count = min(count, available)
 
-            # 查询所有可用彩种及其票数和截止时间
+            # 查询所有可用彩种及其票数和截止时间（排除禁止的彩种）
             type_stats = db.session.execute(
-                text("""
+                text(f"""
                     SELECT lottery_type, deadline_time, COUNT(*) as cnt
                     FROM lottery_tickets
                     WHERE status = 'pending' AND deadline_time > :now
+                    {blocked_condition}
                     GROUP BY lottery_type, deadline_time
                     ORDER BY deadline_time, lottery_type
                 """),
-                {'now': now}
+                {'now': now, **blocked_params}
             ).fetchall()
 
             if not type_stats:
@@ -464,15 +501,19 @@ def assign_tickets_batch(
         if count > daily_remaining:
             count = daily_remaining
 
-    # PostgreSQL: 查询所有可用彩种及其票数和截止时间
+    blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+
+    # PostgreSQL: 查询所有可用彩种及其票数和截止时间（排除禁止的彩种）
     type_stats = db.session.execute(
-        text("""
+        text(f"""
             SELECT lottery_type, deadline_time, COUNT(*) as cnt
             FROM lottery_tickets
             WHERE status = 'pending' AND deadline_time > NOW()
+            {blocked_condition}
             GROUP BY lottery_type, deadline_time
             ORDER BY deadline_time, lottery_type
-        """)
+        """),
+        blocked_params
     ).fetchall()
 
     if not type_stats:

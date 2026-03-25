@@ -433,6 +433,17 @@ def api_users_list():
     return jsonify({'users': [u.to_dict() for u in users]})
 
 
+@admin_bp.route('/api/lottery-types')
+@login_required
+@admin_required
+def api_lottery_types():
+    from sqlalchemy import distinct
+    types_raw = db.session.query(distinct(LotteryTicket.lottery_type))\
+        .filter(LotteryTicket.lottery_type.isnot(None))\
+        .order_by(LotteryTicket.lottery_type).all()
+    return jsonify({'lottery_types': [t[0] for t in types_raw if t[0]]})
+
+
 @admin_bp.route('/api/users', methods=['POST'])
 @login_required
 @admin_required
@@ -463,6 +474,14 @@ def api_create_user():
         except (ValueError, TypeError):
             return jsonify({'success': False, 'error': '每日上限必须是整数'}), 400
 
+    # 验证 blocked_lottery_types
+    blocked_lottery_types = data.get('blocked_lottery_types')
+    if blocked_lottery_types is not None:
+        if not isinstance(blocked_lottery_types, list):
+            return jsonify({'success': False, 'error': '禁止彩种必须是数组'}), 400
+        if not all(isinstance(t, str) for t in blocked_lottery_types):
+            return jsonify({'success': False, 'error': '禁止彩种列表中的每项必须是字符串'}), 400
+
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
     if User.query.filter_by(username=username).first():
@@ -471,6 +490,8 @@ def api_create_user():
     user = User(username=username, client_mode=client_mode, max_devices=max_devices,
                 max_processing_b_mode=max_processing_b_mode, daily_ticket_limit=daily_ticket_limit)
     user.set_password(password)
+    if blocked_lottery_types is not None:
+        user.set_blocked_lottery_types(blocked_lottery_types)
     db.session.add(user)
     db.session.commit()
     return jsonify({'success': True, 'user': user.to_dict()})
@@ -509,6 +530,13 @@ def api_update_user(user_id):
         user.can_receive = bool(data['can_receive'])
     if 'password' in data and data['password']:
         user.set_password(data['password'])
+    if 'blocked_lottery_types' in data:
+        blocked_types = data['blocked_lottery_types']
+        if blocked_types is not None and not isinstance(blocked_types, list):
+            return jsonify({'success': False, 'error': '禁止彩种必须是数组'}), 400
+        if isinstance(blocked_types, list) and not all(isinstance(t, str) for t in blocked_types):
+            return jsonify({'success': False, 'error': '禁止彩种列表中的每项必须是字符串'}), 400
+        user.set_blocked_lottery_types(blocked_types)
 
     db.session.commit()
     return jsonify({'success': True, 'user': user.to_dict()})

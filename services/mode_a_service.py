@@ -71,10 +71,11 @@ def get_next_ticket(user_id: int, device_id: str, username: str, device_name: st
     if not settings.mode_a_enabled:
         return {'success': False, 'error': '模式A已被关闭'}
 
-    # 获取用户每日上限
+    # 获取用户每日上限和禁止彩种
     from models.user import User
     user = User.query.get(user_id)
     daily_limit = user.daily_ticket_limit if user else None
+    blocked_lottery_types = user.get_blocked_lottery_types() if user else []
 
     # Check if user already has an assigned ticket from this device
     current_ticket = LotteryTicket.query.filter_by(
@@ -89,7 +90,7 @@ def get_next_ticket(user_id: int, device_id: str, username: str, device_name: st
         _push_history(user_id, device_id, current_ticket.id)
 
     # Assign next ticket
-    ticket = assign_ticket_atomic(user_id, device_id, username, device_name, daily_limit=daily_limit)
+    ticket = assign_ticket_atomic(user_id, device_id, username, device_name, daily_limit=daily_limit, blocked_lottery_types=blocked_lottery_types)
     if not ticket:
         return {'success': False, 'error': '暂无可用票'}
 

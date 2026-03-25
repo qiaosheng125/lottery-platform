@@ -7,16 +7,16 @@ import sys
 from dotenv import load_dotenv
 load_dotenv()
 
-# 删除旧的数据库文件
-db_file = 'lottery_dev.db'
-if os.path.exists(db_file):
-    try:
-        os.remove(db_file)
-        print(f"[OK] 已删除旧数据库文件: {db_file}")
-    except Exception as e:
-        print(f"[ERROR] 无法删除数据库文件: {e}")
-        print("请手动删除 lottery_dev.db 文件后重试")
-        sys.exit(1)
+# 删除旧的数据库文件（Flask 默认在 instance/ 下创建）
+db_files = ['lottery_dev.db', os.path.join('instance', 'lottery_dev.db')]
+for db_file in db_files:
+    if os.path.exists(db_file):
+        try:
+            os.remove(db_file)
+            print(f"[OK] 已删除旧数据库文件: {db_file}")
+        except Exception as e:
+            print(f"[ERROR] 无法删除数据库文件 {db_file}: {e}")
+            sys.exit(1)
 
 from app import create_app
 from extensions import db
