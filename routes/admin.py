@@ -438,7 +438,7 @@ def api_users_list():
 @admin_required
 def api_lottery_types():
     """返回固定的彩种列表"""
-    return jsonify({'lottery_types': ['胜平负', '比分', '上下盘', '总进球', '半全场', '混合过关']})
+    return jsonify({'lottery_types': ['胜平负', '胜负', '比分', '上下盘', '总进球', '半全场']})
 
 
 @admin_bp.route('/api/users', methods=['POST'])
