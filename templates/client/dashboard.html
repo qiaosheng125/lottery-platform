@@ -251,6 +251,46 @@
         </div>
       </div>
     </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-key text-secondary"></i> 修改密码</span>
+          <button class="btn btn-sm btn-outline-secondary" @click="openChangePassword">修改</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 修改密码弹窗 -->
+  <div v-if="pwdModalVisible" class="modal-backdrop-custom" @click.self="pwdModalVisible=false">
+    <div class="card" style="width:100%;max-width:380px">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-key"></i> 修改密码</span>
+        <button type="button" class="btn-close" @click="pwdModalVisible=false"></button>
+      </div>
+      <div class="card-body">
+        <div v-if="pwdError" class="alert alert-danger py-2 small">{{ pwdError }}</div>
+        <div v-if="pwdSuccess" class="alert alert-success py-2 small">{{ pwdSuccess }}</div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">当前密码</label>
+          <input type="password" class="form-control" v-model="pwdOld" placeholder="请输入当前密码" @keyup.enter="submitChangePassword">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">新密码</label>
+          <input type="password" class="form-control" v-model="pwdNew" placeholder="至少6位" @keyup.enter="submitChangePassword">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">确认新密码</label>
+          <input type="password" class="form-control" v-model="pwdConfirm" placeholder="再次输入新密码" @keyup.enter="submitChangePassword">
+        </div>
+        <div class="d-grid">
+          <button class="btn btn-primary" @click="submitChangePassword" :disabled="pwdLoading">
+            <span v-if="pwdLoading" class="spinner-border spinner-border-sm me-1"></span>
+            {{ pwdLoading ? '提交中...' : '确认修改' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 中奖记录全屏面板 -->
@@ -392,6 +432,10 @@ createApp({
       winningFilterDate: '',
       winningFilterType: '',
       winningFilterOptions: { dates: [], lottery_types: [] },
+      // 修改密码弹窗
+      pwdModalVisible: false,
+      pwdOld: '', pwdNew: '', pwdConfirm: '',
+      pwdError: '', pwdSuccess: '', pwdLoading: false,
     };
   },
   mounted() {
@@ -714,6 +758,43 @@ createApp({
       } else {
         const data = await res.json();
         showToast(data.message || '暂无可下载记录', 'warning');
+      }
+    },
+    openChangePassword() {
+      this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
+      this.pwdError = ''; this.pwdSuccess = '';
+      this.pwdModalVisible = true;
+    },
+    async submitChangePassword() {
+      this.pwdError = ''; this.pwdSuccess = '';
+      if (!this.pwdOld || !this.pwdNew || !this.pwdConfirm) {
+        this.pwdError = '请填写所有字段'; return;
+      }
+      if (this.pwdNew.length < 6) {
+        this.pwdError = '新密码至少6位'; return;
+      }
+      if (this.pwdNew !== this.pwdConfirm) {
+        this.pwdError = '两次输入的新密码不一致'; return;
+      }
+      this.pwdLoading = true;
+      try {
+        const res = await fetch('/user/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_password: this.pwdOld, new_password: this.pwdNew }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.pwdSuccess = data.message || '密码修改成功';
+          this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
+          setTimeout(() => { this.pwdModalVisible = false; this.pwdSuccess = ''; }, 1500);
+        } else {
+          this.pwdError = data.error || '修改失败，请重试';
+        }
+      } catch(e) {
+        this.pwdError = '网络错误，请重试';
+      } finally {
+        this.pwdLoading = false;
       }
     },
     async uploadWinningImage(event, record) {
