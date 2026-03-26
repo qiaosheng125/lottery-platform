@@ -119,30 +119,38 @@ def dashboard_data():
             # 从预加载的数据中获取该设备的最近完成票
             recent_tickets = tickets_by_device.get((ou.id, device_id), [])
 
-            if recent_tickets and len(recent_tickets) >= 2:  # 至少2张票才能计算速度
-                # 计算实际出票时间跨度（从第一张到最后一张的时间差）
-                sorted_tickets = sorted(recent_tickets, key=lambda t: t.completed_at)
-                first_time = sorted_tickets[0].completed_at
-                last_time = sorted_tickets[-1].completed_at
-                time_span_minutes = (last_time - first_time).total_seconds() / 60.0
+            if recent_tickets and len(recent_tickets) >= 1:  # 至少1张票才能计算速度
+                # 筛选有效票（有分配和完成时间）
+                valid_tickets = [t for t in recent_tickets if t.assigned_at and t.completed_at]
 
-                # 如果时间跨度太短（<1分钟），使用固定1分钟避免速度过高
-                if time_span_minutes < 1.0:
-                    time_span_minutes = 1.0
+                if valid_tickets:
+                    # 计算实际时间跨度：从最早分配到最晚完成
+                    sorted_by_assigned = sorted(valid_tickets, key=lambda t: t.assigned_at)
+                    sorted_by_completed = sorted(valid_tickets, key=lambda t: t.completed_at)
 
-                # 计算速度：票数 / 实际出票时间跨度
-                speed_per_minute = len(recent_tickets) / time_span_minutes
-                total_speed += speed_per_minute
+                    earliest_assigned = sorted_by_assigned[0].assigned_at
+                    latest_completed = sorted_by_completed[-1].completed_at
 
-                device_name = recent_tickets[0].assigned_device_name or device_id
-                device_speed_stats.append({
-                    'username': ou.username,
-                    'device_id': device_id,
-                    'device_name': device_name,
-                    'speed_per_minute': round(speed_per_minute, 2),
-                    'recent_count': len(recent_tickets),
-                    'time_span_minutes': round(time_span_minutes, 1),
-                })
+                    time_span_seconds = (latest_completed - earliest_assigned).total_seconds()
+                    time_span_minutes = time_span_seconds / 60.0
+
+                    # 如果时间跨度太短（<0.1分钟），使用0.1分钟避免速度过高
+                    if time_span_minutes < 0.1:
+                        time_span_minutes = 0.1
+
+                    # 速度 = 票数 / 时间跨度（分钟）
+                    speed_per_minute = len(valid_tickets) / time_span_minutes
+                    total_speed += speed_per_minute
+
+                    device_name = valid_tickets[0].assigned_device_name or device_id
+                    device_speed_stats.append({
+                        'username': ou.username,
+                        'device_id': device_id,
+                        'device_name': device_name,
+                        'speed_per_minute': round(speed_per_minute, 2),
+                        'recent_count': len(valid_tickets),
+                        'time_span_minutes': round(time_span_minutes, 1),
+                    })
 
     # 计算预估完成时间
     estimated_minutes = None
