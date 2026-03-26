@@ -18,15 +18,16 @@ class ModeBClient:
         self.root = root
         self.root.title("FileHub B模式 客户端")
         self.root.geometry("450x600")
-        
+
         self.session = requests.Session()
         self.username = ""
         self.device_id = ""
         self.is_logged_in = False
-        
+        self.mode_b_options = [50, 100, 200, 300, 400, 500]  # 默认值，登录后会从服务器获取
+
         self.load_config()
         self.setup_login_ui()
-        
+
         # 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -143,7 +144,10 @@ class ModeBClient:
 
     def on_login_success(self):
         self.is_logged_in = True
-        
+
+        # 获取服务器配置（包括 mode_b_options）
+        self.fetch_server_config()
+
         # 如果配置中已有设备ID，直接使用
         if self.config.get("device_id"):
             self.device_id = self.config["device_id"]
@@ -156,14 +160,25 @@ class ModeBClient:
             messagebox.showwarning("提示", "必须输入设备ID才能继续")
             self.setup_login_ui()
             return
-        
+
         self.device_id = device_id
         # 保存设备ID到配置
         self.config["device_id"] = device_id
         with open(CONFIG_FILE, "w") as f:
             json.dump(self.config, f)
-            
+
         self.setup_main_ui()
+
+    def fetch_server_config(self):
+        """从服务器获取配置（包括 mode_b_options）"""
+        try:
+            resp = self.session.get(f"{BASE_URL}/api/user/daily-stats", timeout=5)
+            data = resp.json()
+            if data.get("success") and data.get("mode_b_options"):
+                self.mode_b_options = data["mode_b_options"]
+                print(f"[信息] 已从服务器获取下载张数选项: {self.mode_b_options}")
+        except Exception as e:
+            print(f"[警告] 获取服务器配置失败，使用默认值: {e}")
 
     def setup_main_ui(self):
         for widget in self.root.winfo_children():
@@ -186,9 +201,10 @@ class ModeBClient:
         download_frame.pack(fill="x", pady=5)
 
         tk.Label(download_frame, text="下载张数:").grid(row=0, column=0, sticky="w")
-        self.count_var = tk.IntVar(value=100)
-        count_options = [50, 100, 200, 300, 400, 500]
-        self.count_combo = ttk.Combobox(download_frame, textvariable=self.count_var, values=count_options, width=10)
+        # 使用从服务器获取的选项，如果第一个选项存在则作为默认值，否则使用100
+        default_count = self.mode_b_options[0] if self.mode_b_options else 100
+        self.count_var = tk.IntVar(value=default_count)
+        self.count_combo = ttk.Combobox(download_frame, textvariable=self.count_var, values=self.mode_b_options, width=10)
         self.count_combo.grid(row=0, column=1, padx=5, pady=5)
 
         self.download_btn = tk.Button(download_frame, text="获取文件并下载", command=self.download_file, bg="#2196F3", fg="white")
