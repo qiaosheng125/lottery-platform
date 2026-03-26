@@ -630,6 +630,7 @@ def api_winning_list():
     date_str = request.args.get('date', '').strip()
     lottery_type = request.args.get('lottery_type', '').strip()
     image_filter = request.args.get('image_filter', '').strip()  # 'uploaded' | 'missing'
+    checked_status = request.args.get('checked_status', '').strip()  # 'all' | 'checked' | 'unchecked'
 
     q = LotteryTicket.query.filter(LotteryTicket.is_winning == True)
     if username:
@@ -648,6 +649,27 @@ def api_winning_list():
             (LotteryTicket.winning_image_url == None) |
             (LotteryTicket.winning_image_url == '')
         )
+
+    # 审核状态筛选（使用 EXISTS 子查询，避免丢失数据）
+    if checked_status == 'checked':
+        q = q.filter(
+            db.exists().where(
+                db.and_(
+                    WinningRecord.ticket_id == LotteryTicket.id,
+                    WinningRecord.is_checked == True
+                )
+            )
+        )
+    elif checked_status == 'unchecked':
+        q = q.filter(
+            ~db.exists().where(
+                db.and_(
+                    WinningRecord.ticket_id == LotteryTicket.id,
+                    WinningRecord.is_checked == True
+                )
+            )
+        )
+
     q = q.order_by(LotteryTicket.completed_at.desc())
 
     # 汇总（全量，不分页）
@@ -663,8 +685,16 @@ def api_winning_list():
     import math
     pages = math.ceil(total / per_page) if total else 1
 
+    # 批量查询 WinningRecord，避免 N+1 查询问题
+    ticket_ids = [t.id for t in page_items]
+    winning_records_map = {
+        wr.ticket_id: wr
+        for wr in WinningRecord.query.filter(WinningRecord.ticket_id.in_(ticket_ids)).all()
+    }
+
     records = []
     for t in page_items:
+        winning_record = winning_records_map.get(t.id)
         records.append({
             'ticket_id': t.id,
             'username': t.assigned_username or '-',
@@ -679,6 +709,10 @@ def api_winning_list():
             'raw_content': t.raw_content or '',
             'ticket_amount': float(t.ticket_amount) if t.ticket_amount else 0,
             'completed_at': (t.completed_at.isoformat() if t.completed_at else None),
+            'is_checked': winning_record.is_checked if winning_record else False,
+            'checked_at': winning_record.checked_at.isoformat() if (winning_record and winning_record.checked_at) else None,
+            'checked_by_username': winning_record.checker.username if (winning_record and winning_record.checker) else None,
+            'winning_record_id': winning_record.id if winning_record else None,
         })
     return jsonify({
         'records': records,

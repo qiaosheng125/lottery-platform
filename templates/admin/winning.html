@@ -38,9 +38,16 @@
             <option value="missing">未上传图片</option>
           </select>
         </div>
-        <div class="col-md-3 d-flex gap-1">
+        <div class="col-md-2">
+          <select v-model="filterChecked" class="form-select form-select-sm">
+            <option value="">全部审核状态</option>
+            <option value="checked">已检查</option>
+            <option value="unchecked">未检查</option>
+          </select>
+        </div>
+        <div class="col-md-2 d-flex gap-1">
           <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
-          <button class="btn btn-sm btn-outline-secondary" @click="filterUsername=''; filterDate=''; filterLotteryType=''; filterImage=''; page=1; loadWinning()">重置</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="filterUsername=''; filterDate=''; filterLotteryType=''; filterImage=''; filterChecked=''; page=1; loadWinning()">重置</button>
           <button class="btn btn-sm btn-outline-success" @click="exportWinning">
             <i class="bi bi-download"></i> 导出CSV
           </button>
@@ -66,12 +73,13 @@
               <th>编号</th>
               <th>中签金额</th>
               <th>图片</th>
+              <th>审核状态</th>
               <th>完成时间</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="9" class="text-center py-3">加载中...</td></tr>
-            <tr v-else-if="records.length === 0"><td colspan="9" class="text-center py-3 text-muted">暂无记录</td></tr>
+            <tr v-if="loading"><td colspan="10" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="records.length === 0"><td colspan="10" class="text-center py-3 text-muted">暂无记录</td></tr>
             <tr v-for="r in records" :key="r.ticket_id">
               <td class="fw-bold text-nowrap">#{{ r.ticket_id }}</td>
               <td>
@@ -90,11 +98,19 @@
               <td style="white-space:nowrap">
                 <span v-if="r.winning_image_url" class="badge bg-success me-1">已上传</span>
                 <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewImage(r.winning_image_url)">查看</button>
-                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingImageId === r.ticket_id}">
+                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingImageId === r.ticket_id || r.is_checked}" :title="r.is_checked ? '已检查的记录不能更换图片' : ''">
                   <span v-if="uploadingImageId === r.ticket_id" class="spinner-border spinner-border-sm"></span>
                   <span v-else>{{ r.winning_image_url ? '换图' : '上传' }}</span>
-                  <input type="file" accept="image/*" class="d-none" :disabled="uploadingImageId === r.ticket_id" @change="uploadImage($event, r)">
+                  <input type="file" accept="image/*" class="d-none" :disabled="uploadingImageId === r.ticket_id || r.is_checked" @change="uploadImage($event, r)">
                 </label>
+              </td>
+              <td style="white-space:nowrap">
+                <span v-if="r.is_checked" class="badge bg-success" :title="'检查人: ' + (r.checked_by_username || '未知') + '\n检查时间: ' + (r.checked_at ? r.checked_at.substring(0,16) : '未知')">✓ 已检查</span>
+                <button v-else-if="r.winning_image_url && r.winning_record_id" class="btn btn-xs btn-outline-warning" @click="markChecked(r)" :disabled="markingCheckedId === r.winning_record_id">
+                  <span v-if="markingCheckedId === r.winning_record_id" class="spinner-border spinner-border-sm"></span>
+                  <span v-else>标记已检查</span>
+                </button>
+                <span v-else class="text-muted small">-</span>
               </td>
               <td class="small text-nowrap">{{ r.completed_at ? r.completed_at.substring(0,16) : '-' }}</td>
             </tr>
@@ -245,9 +261,10 @@ createApp({
     return {
       // 中奖记录
       records: [], loading: false, page: 1, totalPages: 1, total: 0,
-      filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '',
+      filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '', filterChecked: '',
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
       summaryAmount: 0, summaryCount: 0,
+      markingCheckedId: null,
       // 上传赛果
       resultFile: null, uploadPeriod: '', uploading: false, uploadMsg: '', uploadSuccess: false,
       // 赛果计算状态
@@ -283,6 +300,7 @@ createApp({
       if (this.filterDate) params.set('date', this.filterDate);
       if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
       if (this.filterImage) params.set('image_filter', this.filterImage);
+      if (this.filterChecked) params.set('checked_status', this.filterChecked);
       try {
         const res = await fetch(`/admin/api/winning?${params}`);
         const data = await res.json();
@@ -293,6 +311,32 @@ createApp({
         this.summaryCount = (data.summary && data.summary.count) || 0;
       } finally {
         this.loading = false;
+      }
+    },
+    async markChecked(record) {
+      if (!record.winning_record_id) {
+        showToast('该记录没有对应的中签记录', 'danger');
+        return;
+      }
+      if (!confirm('确认标记该中签记录为已检查？标记后将无法更换图片。')) return;
+
+      this.markingCheckedId = record.winning_record_id;
+      try {
+        const res = await fetch(`/winning/admin/mark-checked/${record.winning_record_id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('已标记为已检查', 'success');
+          await this.loadWinning();  // 重新加载列表
+        } else {
+          showToast(data.error || '标记失败', 'danger');
+        }
+      } catch(e) {
+        showToast('标记出错: ' + e.message, 'danger');
+      } finally {
+        this.markingCheckedId = null;
       }
     },
     onResultFileChange(e) {
@@ -351,6 +395,8 @@ createApp({
     async uploadImage(event, record) {
       const file = event.target.files[0];
       if (!file) return;
+
+      // 按钮已禁用 + 后端有验证，移除前端重复检查
       this.uploadingImageId = record.ticket_id;
       try {
         const fd = new FormData();

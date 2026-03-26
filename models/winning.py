@@ -24,9 +24,15 @@ class WinningRecord(db.Model):
     verified_at = db.Column(db.DateTime, nullable=True)
     notes = db.Column(db.Text, nullable=True)
 
+    # 审核标记字段
+    is_checked = db.Column(db.Boolean, default=False, nullable=False)
+    checked_at = db.Column(db.DateTime, nullable=True)
+    checked_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
     ticket = db.relationship('LotteryTicket', backref=db.backref('winning_record', uselist=False))
     uploader = db.relationship('User', foreign_keys=[uploaded_by])
     verifier = db.relationship('User', foreign_keys=[verified_by])
+    checker = db.relationship('User', foreign_keys=[checked_by])
 
     def to_dict(self):
         return {
@@ -40,4 +46,8 @@ class WinningRecord(db.Model):
             'uploaded_by': self.uploaded_by,
             'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
             'notes': self.notes,
+            'is_checked': self.is_checked,
+            'checked_at': self.checked_at.isoformat() if self.checked_at else None,
+            'checked_by': self.checked_by,
+            'checked_by_username': self.checker.username if self.checker else None,
         }

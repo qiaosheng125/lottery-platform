@@ -180,6 +180,36 @@ def my_winning():
     })
 
 
+@winning_bp.route('/admin/mark-checked/<int:record_id>', methods=['POST'])
+@login_required
+@login_required_json
+def mark_checked(record_id):
+    """管理员标记中签记录为已检查（原子更新，避免并发问题）"""
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'error': '权限不足'}), 403
+
+    # 使用原子更新，避免竞态条件
+    rows_updated = db.session.query(WinningRecord)\
+        .filter(WinningRecord.id == record_id, WinningRecord.is_checked == False)\
+        .update({
+            'is_checked': True,
+            'checked_at': beijing_now(),
+            'checked_by': current_user.id
+        }, synchronize_session=False)
+
+    db.session.commit()
+
+    if rows_updated == 0:
+        # 记录不存在或已被标记
+        record = WinningRecord.query.get(record_id)
+        if not record:
+            return jsonify({'success': False, 'error': '记录不存在'}), 404
+        return jsonify({'success': False, 'error': '该记录已经标记为已检查'}), 400
+
+    record = WinningRecord.query.get(record_id)
+    return jsonify({'success': True, 'record': record.to_dict()})
+
+
 @winning_bp.route('/upload-image/<int:ticket_id>', methods=['POST'])
 @login_required
 @login_required_json
@@ -192,6 +222,11 @@ def upload_winning_image(ticket_id):
     ticket = LotteryTicket.query.get_or_404(ticket_id)
     if ticket.assigned_user_id != current_user.id:
         return jsonify({'success': False, 'error': '权限不足'}), 403
+
+    # 检查是否已被标记为已检查，已检查的记录不能更换图片
+    record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+    if record and record.is_checked:
+        return jsonify({'success': False, 'error': '该中签记录已被管理员标记为已检查，无法更换图片'}), 403
 
     if 'image' not in request.files:
         return jsonify({'success': False, 'error': '请选择图片'}), 400
