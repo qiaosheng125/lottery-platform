@@ -49,3 +49,6 @@ Thumbs.db
 
 # Scripts directory (auto upload and monitoring scripts)
 scripts/
+
+# Client configuration (contains sensitive data)
+client_config.json

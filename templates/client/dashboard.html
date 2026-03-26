@@ -619,7 +619,7 @@ createApp({
     // Mode B methods
     async loadProcessingBatches() {
       try {
-        const res = await fetch('/api/mode-b/processing');
+        const res = await fetch(`/api/mode-b/processing?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
         if (data.success && data.batches.length > 0) {
           // 只补充服务器上有但本地没有的批次（避免重复）

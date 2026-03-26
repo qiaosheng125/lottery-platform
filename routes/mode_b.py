@@ -37,11 +37,9 @@ def preview():
 def download():
     data = request.get_json()
     count = int(data.get('count', 100))
-    device_id = data.get('device_id', '')
-    device_name = data.get('device_name', '')
-
-    if not device_id:
-        return jsonify({'success': False, 'error': '缺少设备ID'}), 400
+    # 如果没传 device_id，默认为 'Web' 这样可以和软件区分开
+    device_id = data.get('device_id') or 'Web'
+    device_name = data.get('device_name') or '网页浏览器'
 
     result = download_batch(
         user_id=current_user.id,
@@ -62,7 +60,14 @@ def download():
 @login_required_json
 def processing():
     """返回当前用户处理中（assigned）的票，按批次分组"""
-    batches = get_processing_batches(current_user.id)
+    # 统一默认值：如果没传 device_id，默认为 'Web'（与 download 接口保持一致）
+    device_id = request.args.get('device_id') or 'Web'
+
+    # 验证 device_id：最大50字符，只允许字母数字和-_
+    if device_id and (len(device_id) > 50 or not all(c.isalnum() or c in '-_' for c in device_id)):
+        return jsonify({'success': False, 'error': '无效的设备ID'}), 400
+
+    batches = get_processing_batches(current_user.id, device_id)
     return jsonify({'success': True, 'batches': batches})
 
 

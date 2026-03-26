@@ -20,6 +20,11 @@
               <label class="form-label">密码</label>
               <input v-model="password" type="password" class="form-control" placeholder="请输入密码" required>
             </div>
+            <div class="mb-3">
+              <label class="form-label">设备ID (如 D01) <span class="text-danger">*</span></label>
+              <input v-model="deviceId" type="text" class="form-control" placeholder="请输入设备ID" maxlength="20" required>
+              <div class="form-text small">设置后将记住该设备 ID，便于统计出票速度。</div>
+            </div>
             <button type="submit" class="btn btn-primary w-100" :disabled="loading">
               <span v-if="loading" class="spinner-border spinner-border-sm me-1"></span>
               登录
@@ -37,17 +42,37 @@
 const { createApp } = Vue;
 createApp({
   data() {
-    return { username: '', password: '', error: '', loading: false };
+    return {
+      username: '',
+      password: '',
+      deviceId: getOrCreateDeviceId(), // 从本地存储读取已有的ID
+      error: '',
+      loading: false
+    };
   },
   methods: {
     async doLogin() {
       this.loading = true; this.error = '';
-      const deviceId = getOrCreateDeviceId();
+
+      // 如果用户没填设备ID，要求必须输入
+      if (!this.deviceId || !this.deviceId.trim()) {
+        this.error = '请输入设备ID';
+        this.loading = false;
+        return;
+      }
+
+      // 保存 ID 到本地存储
+      saveDeviceId(this.deviceId.trim());
+
       try {
         const res = await fetch('/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: this.username, password: this.password, device_id: deviceId }),
+          body: JSON.stringify({
+            username: this.username,
+            password: this.password,
+            device_id: this.deviceId
+          }),
         });
         const data = await res.json();
         if (data.success) {

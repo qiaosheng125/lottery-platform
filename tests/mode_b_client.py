@@ -26,6 +26,36 @@ class ModeBClient:
         
         self.load_config()
         self.setup_login_ui()
+        
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        """关闭软件时触发退出登录"""
+        if self.is_logged_in:
+            # 弹窗确认（可选，根据用户习惯，这里直接尝试后台登出并关闭）
+            # 如果想强制直接关，可以去掉提示
+            try:
+                # 同步请求，确保在窗口关闭前发出
+                self.session.post(f"{BASE_URL}/auth/logout", timeout=2)
+            except:
+                pass
+        self.root.destroy()
+
+    def logout(self):
+        if messagebox.askyesno("登出", "确定要登出并清除所有保存的信息吗？"):
+            # 清除所有敏感信息
+            self.config = {"username": "", "password": "", "remember": False, "auto_login": False, "device_id": ""}
+            self.save_config("", "", False, False)
+
+            # 清除服务器 session
+            try:
+                self.session.post(f"{BASE_URL}/auth/logout", timeout=2)
+            except:
+                pass
+
+            self.is_logged_in = False
+            self.setup_login_ui()
 
     def load_config(self):
         self.config = {"username": "", "password": "", "remember": False, "auto_login": False}
@@ -88,10 +118,13 @@ class ModeBClient:
         
         def do_login():
             try:
-                # 登录不需要 device_id，登记设备在登录后
+                # 尝试从配置加载 device_id 以便登录时同步清理旧 session
+                device_id = self.config.get("device_id", "")
+                
                 resp = self.session.post(f"{BASE_URL}/auth/login", json={
                     "username": username,
-                    "password": password
+                    "password": password,
+                    "device_id": device_id
                 }, timeout=10)
                 
                 data = resp.json()
@@ -110,6 +143,13 @@ class ModeBClient:
 
     def on_login_success(self):
         self.is_logged_in = True
+        
+        # 如果配置中已有设备ID，直接使用
+        if self.config.get("device_id"):
+            self.device_id = self.config["device_id"]
+            self.setup_main_ui()
+            return
+
         # 弹窗输入设备ID
         device_id = simpledialog.askstring("设备登记", "请输入设备ID (例如: D01):", parent=self.root)
         if not device_id:
@@ -118,6 +158,11 @@ class ModeBClient:
             return
         
         self.device_id = device_id
+        # 保存设备ID到配置
+        self.config["device_id"] = device_id
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(self.config, f)
+            
         self.setup_main_ui()
 
     def setup_main_ui(self):
@@ -175,6 +220,8 @@ class ModeBClient:
         self.refresh_btn = tk.Button(btn_frame, text="刷新列表", command=self.load_processing)
         self.refresh_btn.pack(side="left", padx=5)
 
+        tk.Button(btn_frame, text="切换账号/清除设备ID", command=self.logout, fg="red").pack(side="left", padx=20)
+
         # 数据存储
         self.processing_batches = []
         
@@ -187,6 +234,14 @@ class ModeBClient:
         
         def run():
             try:
+                # 发送心跳保持 session 在线，以便管理后台统计设备速度
+                try:
+                    resp_heartbeat = self.session.post(f"{BASE_URL}/auth/heartbeat", timeout=5)
+                    if resp_heartbeat.status_code != 200:
+                        print(f"[警告] 心跳失败: HTTP {resp_heartbeat.status_code}")
+                except Exception as e:
+                    print(f"[警告] 心跳请求异常: {e}")
+
                 resp = self.session.get(f"{BASE_URL}/api/mode-b/pool-status", timeout=5)
                 data = resp.json()
                 if data.get("success"):
@@ -202,11 +257,15 @@ class ModeBClient:
         threading.Thread(target=run, daemon=True).start()
 
     def load_processing(self):
-        if not self.is_logged_in: return
+        if not self.is_logged_in or not self.device_id: return
 
         def run():
             try:
-                resp = self.session.get(f"{BASE_URL}/api/mode-b/processing", timeout=5)
+                # 传入当前设备ID，只查询本设备的票
+                # 使用 quote 确保 device_id 安全
+                from urllib.parse import quote
+                safe_device_id = quote(self.device_id)
+                resp = self.session.get(f"{BASE_URL}/api/mode-b/processing?device_id={safe_device_id}", timeout=5)
                 data = resp.json()
                 if data.get("success"):
                     self.processing_batches = data.get("batches", [])
