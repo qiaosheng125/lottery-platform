@@ -166,13 +166,15 @@ createApp({
     },
     fileStatusClass(f) {
       if (f.status === 'revoked') return 'bg-danger';
-      if (f.pending_count === 0) return 'bg-success';
+      // 已完成：completed_count 等于 total_tickets
+      if (f.completed_count === f.total_tickets && f.total_tickets > 0) return 'bg-success';
       if (f.deadline_time && new Date(f.deadline_time) < new Date()) return 'bg-secondary';
       return 'bg-primary';
     },
     fileStatusLabel(f) {
       if (f.status === 'revoked') return '已撤回';
-      if (f.pending_count === 0) return '已完成';
+      // 已完成：completed_count 等于 total_tickets
+      if (f.completed_count === f.total_tickets && f.total_tickets > 0) return '已完成';
       if (f.deadline_time && new Date(f.deadline_time) < new Date()) return '已过期';
       return '处理中';
     },

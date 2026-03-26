@@ -112,15 +112,22 @@ def download_batch(
     return result
 
 
-def get_processing_batches(user_id: int) -> list:
+def get_processing_batches(user_id: int, device_id: str = None) -> list:
     """
     查询当前用户处理中（assigned）的票，按"彩种+截止时间+分配时间（分钟级）"分组，
     恢复页面刷新后丢失的 bPendingBatches 列表。
+    如果提供了 device_id，则只返回该设备的票。
     """
-    tickets = LotteryTicket.query.filter_by(
+    query = LotteryTicket.query.filter_by(
         assigned_user_id=user_id,
         status='assigned',
-    ).order_by(LotteryTicket.assigned_at, LotteryTicket.id).all()
+    )
+    # 如果传入了非空的 device_id，则只返回该设备的票
+    # 如果 device_id 为 None 或空字符串，返回所有设备的票
+    if device_id:
+        query = query.filter_by(assigned_device_id=device_id)
+        
+    tickets = query.order_by(LotteryTicket.assigned_at, LotteryTicket.id).all()
 
     if not tickets:
         return []

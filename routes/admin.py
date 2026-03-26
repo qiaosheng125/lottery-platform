@@ -125,6 +125,8 @@ def dashboard_data():
 
                 if valid_tickets:
                     # 计算实际时间跨度：从最早分配到最晚完成
+                    # 对于 B 模式，同一批次的 assigned_at 是相同的
+                    # 如果只有一批次，速度会根据单张票的时间计算（如果 span 为 0 会有保护值）
                     sorted_by_assigned = sorted(valid_tickets, key=lambda t: t.assigned_at)
                     sorted_by_completed = sorted(valid_tickets, key=lambda t: t.completed_at)
 
@@ -134,8 +136,8 @@ def dashboard_data():
                     time_span_seconds = (latest_completed - earliest_assigned).total_seconds()
                     time_span_minutes = time_span_seconds / 60.0
 
-                    # 如果时间跨度太短（<0.1分钟），使用0.1分钟避免速度过高
-                    if time_span_minutes < 0.1:
+                    # 统一保护值：如果时间跨度太短（<=0 或 <0.1分钟即6秒），使用0.1分钟避免速度过高
+                    if time_span_minutes <= 0 or time_span_minutes < 0.1:
                         time_span_minutes = 0.1
 
                     # 速度 = 票数 / 时间跨度（分钟）
