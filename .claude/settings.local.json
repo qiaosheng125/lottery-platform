@@ -17,7 +17,9 @@
       "Bash(dir \"C:\\\\Users\\\\徐逸飞\\\\Desktop\\\\file-hub\\\\templates\\\\client\")",
       "Bash(sqlite3:*)",
       "Bash(ssh:*)",
-      "Bash(grep -E \"\\\\.\\(html|jinja2\\)$\")"
+      "Bash(grep -E \"\\\\.\\(html|jinja2\\)$\")",
+      "Bash(pytest -q tests/test_bug_fixes.py)",
+      "Bash(pytest:*)"
     ]
   }
 }

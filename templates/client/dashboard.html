@@ -78,8 +78,7 @@
         <i class="bi bi-toggle-off" style="font-size:3rem"></i>
         <div class="mt-3 mb-4">打开右上角开关开始接单</div>
         <button class="btn btn-primary btn-start-receiving" @click="modeAActive=true; toggleModeA()">
-          <i class="bi bi-play-fill me-2"></i>开始接单
-        </button>
+          <i class="bi bi-play-fill me-2"></i>开始接单</button>
       </div>
       <div v-else-if="currentTicket" class="position-relative">
         <!-- 全屏票面显示容器 -->
@@ -178,7 +177,7 @@
     <div class="card-body">
       <!-- Pool overview -->
       <div v-if="poolStatus.by_type && poolStatus.by_type.length > 0" class="mb-3">
-        <div class="small text-muted mb-1">当前票池概况（服务器自动按截止时间分配）：</div>
+        <div class="small text-muted mb-1">当前票池概况（服务器自动按截止时间分配）</div>
         <div class="d-flex flex-wrap gap-1">
           <span v-for="item in poolStatus.by_type" :key="item.lottery_type + item.deadline_time"
                 class="badge bg-light text-dark border">
@@ -188,8 +187,7 @@
         </div>
       </div>
       <div v-else class="alert alert-warning py-2 mb-3">
-        <i class="bi bi-inbox"></i> 当前票池暂无可用票
-      </div>
+        <i class="bi bi-inbox"></i> 当前票池暂无可用票</div>
 
       <!-- Count selector -->
       <div class="row g-3 align-items-end">
@@ -212,11 +210,9 @@
       <div v-if="bPreview" class="alert mt-3 py-2" :class="bPreview.sufficient ? 'alert-info' : 'alert-warning'">
         <i class="bi bi-info-circle"></i>
         <span v-if="bPreview.sufficient">
-          可下载 <strong>{{ bCount }}</strong> 张，服务器将按截止时间优先分配
-        </span>
+          可下载 <strong>{{ bCount }}</strong> 张，服务器将按截止时间优先分配</span>
         <span v-else>
-          票池当前仅剩 <strong>{{ bPreview.available }}</strong> 张，将全部下载
-        </span>
+          票池当前仅剩 <strong>{{ bPreview.available }}</strong> 张，将全部下载</span>
       </div>
 
       <!-- 出票中列表 -->
@@ -229,8 +225,7 @@
             <div class="small text-muted">{{ batch.count }}张 / ¥{{ batch.amount.toFixed(0) }} / {{ batch.downloaded_at }}</div>
           </div>
           <button class="btn btn-success btn-sm" @click="confirmBatch(batch, index)">
-            <i class="bi bi-check-circle"></i> 已完成
-          </button>
+            <i class="bi bi-check-circle"></i> 已完成</button>
         </div>
       </div>
     </div>
@@ -308,7 +303,7 @@
           <button class="btn" :class="winningGroupBy==='date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日期</button>
           <button class="btn" :class="winningGroupBy==='type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按类型</button>
         </div>
-        <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">✕ 关闭</button>
+        <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">关闭</button>
       </div>
     </div>
 
@@ -331,8 +326,7 @@
         </div>
         <div class="col-auto">
           <button class="btn btn-sm btn-primary" @click="applyWinningFilter">
-            <i class="bi bi-funnel"></i> 筛选
-          </button>
+            <i class="bi bi-funnel"></i> 筛选</button>
           <button class="btn btn-sm btn-outline-secondary ms-1" @click="resetWinningFilter" v-if="winningFilterDate || winningFilterType">
             <i class="bi bi-x-circle"></i> 重置
           </button>
@@ -349,14 +343,14 @@
           <div v-for="r in items" :key="r.ticket_id" class="winning-card">
             <div class="winning-card-top">
               <div class="winning-badges">
-                <span class="badge bg-secondary">票#{{ r.ticket_id }}</span>
+                <span class="badge bg-secondary">#{{ r.ticket_id }}</span>
                 <span class="badge bg-primary">{{ r.lottery_type }}</span>
                 <span class="badge bg-dark">编号 {{ r.detail_period }}</span>
                 <span v-if="r.assigned_device_name" class="badge bg-info text-dark">设备: {{ r.assigned_device_name }}</span>
                 <span v-else-if="r.assigned_device_id" class="badge bg-info text-dark">设备ID: {{ r.assigned_device_id.substring(0,8) }}</span>
               </div>
               <div class="winning-amount">
-                <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>
+                <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税 ¥{{ r.winning_tax }}）</span>
                 <span v-else>¥{{ r.winning_amount }}</span>
               </div>
             </div>
@@ -381,7 +375,7 @@
   <!-- 图片预览弹窗 -->
   <div v-if="winningPreviewUrl" class="modal-backdrop-custom" @click.self="winningPreviewUrl=null" style="z-index:2000">
     <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
-      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl=null">✕ 关闭</button>
+      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl=null">关闭</button>
       <img :src="winningPreviewUrl" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
     </div>
   </div>
@@ -417,19 +411,20 @@ createApp({
       modeAActive: false,
       currentTicket: null,
       loadingNext: false,
-      ticketHistory: [],   // 已浏览过的票列表，index 0 = 最新
-      historyOffset: 0,    // 0=当前票, 1=上一张, 2=上上一张
+      ticketHistory: [],
+      historyOffset: 0,
       countdown: '--:--',
       countdownTimer: null,
       deadlineStr: '',
       showStopConfirm: false,
       // 下一张冷却：7秒内不能再次调用 API 获取新票
-      nextCooldownUntil: 0,   // 冷却结束时间戳（ms）
-      nextCooldownSec: 0,     // 当前剩余冷却秒数（整数，用于显示）
-      cooldownTimer: null,    // 每秒刷新剩余秒数的定时器
+      nextCooldownUntil: 0,
+      nextCooldownSec: 0,
+      cooldownTimer: null,
       // Mode B
       bCount: 100,
-      bOptions: [50, 100, 200, 300, 400, 500],      poolStatus: { total_pending: 0, by_type: [] },
+      bOptions: [50, 100, 200, 300, 400, 500],
+      poolStatus: { total_pending: 0, by_type: [] },
       bPreview: null,
       downloading: false,
       // 出票中列表：[{filename, ticket_ids, count, amount, downloaded_at}]
@@ -446,6 +441,7 @@ createApp({
       pwdModalVisible: false,
       pwdOld: '', pwdNew: '', pwdConfirm: '',
       pwdError: '', pwdSuccess: '', pwdLoading: false,
+      pwdSuccessTimer: null,
     };
   },
   mounted() {
@@ -469,18 +465,20 @@ createApp({
           this.stats = data;
           if (data.mode_b_options && data.mode_b_options.length > 0) {
             this.bOptions = data.mode_b_options;
-            // 如果当前选的张数不在新选项里，重置为第一个
+            // 如果当前选择的张数不在新选项里，重置为第一个
             if (!this.bOptions.includes(this.bCount)) {
               this.bCount = this.bOptions[0];
             }
           }
         }
-      } catch(e) {}
+      } catch(e) {
+        this.bPendingBatches = [];
+      }
     },
     // Mode A methods
     async toggleModeA() {
       if (this.modeAActive) {
-        // 开始接单 - 添加body class防止误触
+        // 开始接单 - 添加 body class 防止误触
         document.body.classList.add('mode-a-active');
         await this.nextTicket();
       } else {
@@ -490,19 +488,18 @@ createApp({
       }
     },
     async nextTicket() {
-      // 如果在看历史票，"下一张"只是在本地数组前进，不调 API（不受冷却限制）
+      // 如果在看历史票，“下一张”只是在本地数组前进，不调 API（不受冷却限制）
       if (this.historyOffset > 0) {
         this.historyOffset -= 1;
         this.currentTicket = this.ticketHistory[this.historyOffset];
         this.startCountdown(this.currentTicket.deadline_time);
         return;
       }
-      // historyOffset=0，已在最新票，才真正从服务器获取下一张
-      // 检查冷却时间（7秒）
+      // historyOffset=0: request the next ticket from the server only when viewing the latest ticket
       const now = Date.now();
       if (now < this.nextCooldownUntil) {
         const remaining = Math.ceil((this.nextCooldownUntil - now) / 1000);
-        showToast(`请等待 ${remaining} 秒后再获取下一张`, 'warning');
+        showToast('请等待 ' + remaining + ' 秒后再获取下一张', 'warning');
         return;
       }
       this.loadingNext = true;
@@ -517,7 +514,9 @@ createApp({
           }),
         });
         const data = await res.json();
-        if (data.success) {
+        if (!res.ok) {
+          this.pwdError = data.error || '密码修改失败';
+        } else if (data.success) {
           console.log('Received ticket data:', data.ticket);
           this.modeAActive = true;
           this.ticketHistory.unshift(data.ticket);
@@ -525,13 +524,14 @@ createApp({
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
-          // 成功获取后启动7秒冷却
+          // 成功获取后启动 7 秒冷却
           this.startNextCooldown();
         } else {
           this.currentTicket = null;
-          if (!this.modeAActive) this.modeAActive = false;
-          showToast(data.error || '暂无票', 'warning');
+          showToast(data.error || '暂无可用票', 'warning');
         }
+      } catch (e) {
+        showToast('获取下一张失败，请稍后重试', 'danger');
       } finally {
         this.loadingNext = false;
       }
@@ -550,7 +550,7 @@ createApp({
         } else {
           this.nextCooldownSec = remaining;
         }
-      }, 200); // 200ms 刷新，确保倒计时精准
+      }, 200);
     },
     previousTicket() {
       // 在本地历史数组中后退，完全不调 API
@@ -568,24 +568,32 @@ createApp({
     },
     async doStop() {
       this.showStopConfirm = false;
-      // 移除防误触class
-      document.body.classList.remove('mode-a-active');
-      const res = await fetch('/api/mode-a/stop', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ device_id: deviceId }),
-      });
-      this.modeAActive = false;
-      this.currentTicket = null;
-      this.ticketHistory = [];
-      this.historyOffset = 0;
-      clearInterval(this.countdownTimer);
-      // 清理冷却定时器，重置冷却状态
-      clearInterval(this.cooldownTimer);
-      this.cooldownTimer = null;
-      this.nextCooldownUntil = 0;
-      this.nextCooldownSec = 0;
-      this.loadStats();
+      try {
+        const res = await fetch('/api/mode-a/stop', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ device_id: deviceId }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showToast(data.error || '停止接单失败', 'danger');
+          return;
+        }
+
+        document.body.classList.remove('mode-a-active');
+        this.modeAActive = false;
+        this.currentTicket = null;
+        this.historyOffset = 0;
+        clearInterval(this.countdownTimer);
+        clearInterval(this.cooldownTimer);
+        this.cooldownTimer = null;
+        this.nextCooldownUntil = 0;
+        this.nextCooldownSec = 0;
+        this.loadStats();
+        showToast(data.message || '已停止接单', 'success');
+      } catch (e) {
+        showToast('停止接单失败', 'danger');
+      }
     },
     startCountdown(deadlineStr) {
       clearInterval(this.countdownTimer);
@@ -625,28 +633,36 @@ createApp({
       try {
         const res = await fetch(`/api/mode-b/processing?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
-        if (data.success && data.batches.length > 0) {
-          // 只补充服务器上有但本地没有的批次（避免重复）
-          const localIds = new Set(this.bPendingBatches.flatMap(b => b.ticket_ids));
-          for (const batch of data.batches) {
-            if (!batch.ticket_ids.some(id => localIds.has(id))) {
-              this.bPendingBatches.push(batch);
-            }
-          }
+        if (data.success) {
+          this.bPendingBatches = data.batches || [];
         }
-      } catch(e) {}
+      } catch(e) {
+        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };
+      }
     },
     async loadPoolStatus() {
       try {
         const res = await fetch('/api/mode-b/pool-status');
         const data = await res.json();
         if (data.success) this.poolStatus = data;
-      } catch(e) {}
+      } catch(e) {
+        this.poolStatus = { total_pending: 0, by_type: [] };
+      }
     },
     async previewBatch() {
-      const res = await fetch(`/api/mode-b/preview?count=${this.bCount}`);
-      const data = await res.json();
-      this.bPreview = data;
+      try {
+        const res = await fetch(`/api/mode-b/preview?count=${this.bCount}`);
+        const data = await res.json();
+        if (data.success) {
+          this.bPreview = data;
+        } else {
+          this.bPreview = null;
+          showToast(data.error || '预览失败', 'danger');
+        }
+      } catch (e) {
+        this.bPreview = null;
+        showToast('预览失败，请稍后重试', 'danger');
+      }
     },
     async downloadBatch() {
       this.downloading = true;
@@ -664,22 +680,24 @@ createApp({
         });
         const data = await res.json();
         if (!data.success) {
-          showToast(data.error || '下载失败', 'danger'); return;
+          showToast(data.error || '下载失败', 'danger');
+          return;
         }
-        // 按彩种分组，每个文件单独下载
         if (!data.files || data.files.length === 0) {
-          showToast('无可用文件', 'warning'); return;
+          showToast('暂无可下载文件', 'warning');
+          return;
         }
         const downloadTime = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         for (const file of data.files) {
-          // 触发浏览器下载
           const blob = new Blob([file.content], { type: 'text/plain' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = url; a.download = file.filename;
-          document.body.appendChild(a); a.click(); a.remove();
+          a.href = url;
+          a.download = file.filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
           URL.revokeObjectURL(url);
-          // 加入出票中列表
           this.bPendingBatches.push({
             filename: file.filename,
             ticket_ids: file.ticket_ids,
@@ -688,48 +706,61 @@ createApp({
             downloaded_at: downloadTime,
           });
         }
-        showToast(`已下载 ${data.files.length} 个文件，共 ${data.actual_count} 张，请出票后点击"已完成"`, 'success');
+        if (data.adjustment_message) {
+          showToast(data.adjustment_message, 'info');
+        }
+        showToast('已下载 ' + data.files.length + ' 个文件，共 ' + data.actual_count + ' 张票', 'success');
         this.loadPoolStatus();
         this.bPreview = null;
+      } catch (e) {
+        showToast('下载失败，请稍后重试', 'danger');
       } finally {
         this.downloading = false;
       }
     },
     async confirmBatch(batch, index) {
-      const res = await fetch('/api/mode-b/confirm', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ ticket_ids: batch.ticket_ids }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        this.bPendingBatches.splice(index, 1);
-        this.loadStats();
-        showToast(`${batch.count} 张已完成`, 'success');
+      try {
+        const res = await fetch('/api/mode-b/confirm', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ ticket_ids: batch.ticket_ids }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.bPendingBatches.splice(index, 1);
+          this.loadStats();
+          this.loadPoolStatus();
+          showToast('已确认完成 ' + data.completed_count + ' 张票', 'success');
+        } else {
+          showToast(data.error || '确认失败', 'danger');
+        }
+      } catch (e) {
+        showToast('确认失败，请稍后重试', 'danger');
       }
     },
     async openWinning() {
       this.winningVisible = true;
       this.winningLoading = true;
-      // 重置筛选条件
       this.winningFilterDate = '';
       this.winningFilterType = '';
       try {
         const res = await fetch('/api/winning/my');
         const data = await res.json();
         if (data.success) {
-          this.winningGrouped = data.grouped || {};
-          this._winningAll = Object.values(data.grouped || {}).flat(); // 缓存全部
+          this._winningAll = Object.values(data.grouped || {}).flat();
           this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+          this.applyWinningGrouping();
         } else {
           this.winningGrouped = {};
           this._winningAll = [];
           this.winningFilterOptions = { dates: [], lottery_types: [] };
+          showToast(data.error || '加载中奖记录失败', 'danger');
         }
       } catch(e) {
         this.winningGrouped = {};
         this._winningAll = [];
         this.winningFilterOptions = { dates: [], lottery_types: [] };
+        showToast('加载中奖记录失败，请稍后重试', 'danger');
       } finally {
         this.winningLoading = false;
       }
@@ -740,14 +771,12 @@ createApp({
         const params = new URLSearchParams();
         if (this.winningFilterDate) params.append('date', this.winningFilterDate);
         if (this.winningFilterType) params.append('lottery_type', this.winningFilterType);
-
-        const res = await fetch(`/api/winning/my?${params.toString()}`);
+        const res = await fetch('/api/winning/my?' + params.toString());
         const data = await res.json();
         if (data.success) {
-          this.winningGrouped = data.grouped || {};
           this._winningAll = Object.values(data.grouped || {}).flat();
-          // 筛选后更新选项（只显示当前结果中的选项）
           this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+          this.applyWinningGrouping();
         } else {
           showToast(data.error || '筛选失败', 'danger');
         }
@@ -760,51 +789,61 @@ createApp({
     async resetWinningFilter() {
       this.winningFilterDate = '';
       this.winningFilterType = '';
-      await this.applyWinningFilter(); // 重新加载全部数据
+      await this.applyWinningFilter();
     },
     setWinningGroupBy(mode) {
       this.winningGroupBy = mode;
+      this.applyWinningGrouping();
+    },
+    applyWinningGrouping() {
       if (!this._winningAll) return;
-      if (mode === 'date') {
-        // 已经是按日期分组的原始数据，直接用
-        const res = {};
+      const grouped = {};
+      if (this.winningGroupBy === 'date') {
         this._winningAll.forEach(r => {
-          const d = r.completed_at ? r.completed_at.substring(0, 10) : 'unknown';
-          (res[d] = res[d] || []).push(r);
+          const key = r.business_date || 'unknown';
+          (grouped[key] = grouped[key] || []).push(r);
         });
-        this.winningGrouped = res;
       } else {
-        const res = {};
         this._winningAll.forEach(r => {
-          const t = r.lottery_type || '未知';
-          (res[t] = res[t] || []).push(r);
+          const key = r.lottery_type || '未知类型';
+          (grouped[key] = grouped[key] || []).push(r);
         });
-        this.winningGrouped = res;
       }
+      this.winningGrouped = grouped;
     },
     previewWinningImage(url) { this.winningPreviewUrl = url; },
     async exportDaily() {
-      const res = await fetch('/api/user/export-daily');
-      const ct = res.headers.get('content-type') || '';
-      if (ct.includes('spreadsheetml')) {
-        const pendingCount = parseInt(res.headers.get('X-Pending-Count') || '0');
-        const blob = await res.blob();
-        const cd = res.headers.get('content-disposition') || '';
-        const match = cd.match(/filename\*=UTF-8''(.+)/);
-        const filename = match ? decodeURIComponent(match[1]) : 'export.xlsx';
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename; a.click();
-        URL.revokeObjectURL(url);
-        if (pendingCount > 0) {
-          showToast(`另有 ${pendingCount} 张票尚未到截止时间，截止后可再次下载`, 'info');
+      try {
+        const res = await fetch('/api/user/export-daily');
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('spreadsheetml')) {
+          const pendingCount = parseInt(res.headers.get('X-Pending-Count') || '0');
+          const blob = await res.blob();
+          const cd = res.headers.get('content-disposition') || '';
+          const match = cd.match(/filename\*=UTF-8''(.+)/);
+          const filename = match ? decodeURIComponent(match[1]) : 'export.xlsx';
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+          if (pendingCount > 0) {
+            showToast('还有 ' + pendingCount + ' 张票未到截止时间，截止后即可导出', 'info');
+          }
+        } else {
+          const data = await res.json();
+          showToast(data.message || '暂无可导出记录', 'warning');
         }
-      } else {
-        const data = await res.json();
-        showToast(data.message || '暂无可下载记录', 'warning');
+      } catch (e) {
+        showToast('导出失败，请稍后重试', 'danger');
       }
     },
     openChangePassword() {
+      if (this.pwdSuccessTimer) {
+        clearTimeout(this.pwdSuccessTimer);
+        this.pwdSuccessTimer = null;
+      }
       this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
       this.pwdError = ''; this.pwdSuccess = '';
       this.pwdModalVisible = true;
@@ -812,13 +851,16 @@ createApp({
     async submitChangePassword() {
       this.pwdError = ''; this.pwdSuccess = '';
       if (!this.pwdOld || !this.pwdNew || !this.pwdConfirm) {
-        this.pwdError = '请填写所有字段'; return;
+        this.pwdError = '请填写完整';
+        return;
       }
       if (this.pwdNew.length < 6) {
-        this.pwdError = '新密码至少6位'; return;
+        this.pwdError = '新密码至少 6 位';
+        return;
       }
       if (this.pwdNew !== this.pwdConfirm) {
-        this.pwdError = '两次输入的新密码不一致'; return;
+        this.pwdError = '两次输入的新密码不一致';
+        return;
       }
       this.pwdLoading = true;
       try {
@@ -831,12 +873,16 @@ createApp({
         if (data.success) {
           this.pwdSuccess = data.message || '密码修改成功';
           this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
-          setTimeout(() => { this.pwdModalVisible = false; this.pwdSuccess = ''; }, 1500);
+          this.pwdSuccessTimer = setTimeout(() => {
+            this.pwdModalVisible = false;
+            this.pwdSuccess = '';
+            this.pwdSuccessTimer = null;
+          }, 1500);
         } else {
-          this.pwdError = data.error || '修改失败，请重试';
+          this.pwdError = data.error || '密码修改失败';
         }
       } catch(e) {
-        this.pwdError = '网络错误，请重试';
+        this.pwdError = '网络异常，请稍后重试';
       } finally {
         this.pwdLoading = false;
       }
@@ -844,20 +890,25 @@ createApp({
     async uploadWinningImage(event, record) {
       const file = event.target.files[0];
       if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        showToast('请上传图片文件', 'warning');
+        event.target.value = '';
+        return;
+      }
       this.uploadingWinningId = record.ticket_id;
       try {
         const fd = new FormData();
         fd.append('image', file);
-        const res = await fetch(`/api/winning/upload-image/${record.ticket_id}`, { method: 'POST', body: fd });
+        const res = await fetch('/api/winning/upload-image/' + record.ticket_id, { method: 'POST', body: fd });
         const data = await res.json();
-        if (data.success) {
-          record.winning_image_url = data.image_url;
+        if (res.ok && data.success) {
+          Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
           showToast('图片上传成功', 'success');
         } else {
           showToast(data.error || '上传失败', 'danger');
         }
       } catch(e) {
-        showToast('上传出错', 'danger');
+        showToast('上传失败', 'danger');
       } finally {
         this.uploadingWinningId = null;
         event.target.value = '';
@@ -866,6 +917,9 @@ createApp({
   },
   beforeUnmount() {
     clearInterval(this.countdownTimer);
+    if (this.pwdSuccessTimer) {
+      clearTimeout(this.pwdSuccessTimer);
+    }
   }
 }).mount('#client-dashboard');
 </script>
@@ -917,7 +971,7 @@ createApp({
 }
 .winning-img-actions { display: flex; align-items: center; gap: .25rem; }
 .btn-xs { padding: .15rem .4rem; font-size: .75rem; }
-/* A模式下一张冷却倒计时数字 */
+/* A模式下一张冷却计时数字 */
 .mode-a-cooldown-sec {
   font-size: 1.1rem;
   font-weight: 700;
@@ -929,3 +983,4 @@ createApp({
 }
 </style>
 {% endblock %}
+

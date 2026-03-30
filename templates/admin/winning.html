@@ -49,7 +49,7 @@
           <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
           <button class="btn btn-sm btn-outline-secondary" @click="filterUsername=''; filterDate=''; filterLotteryType=''; filterImage=''; filterChecked=''; page=1; loadWinning()">重置</button>
           <button class="btn btn-sm btn-outline-success" @click="exportWinning">
-            <i class="bi bi-download"></i> 导出CSV
+            <i class="bi bi-download"></i> 导出XLSX
           </button>
         </div>
       </div>
@@ -91,7 +91,7 @@
               <td>{{ r.detail_period }}</td>
               <td class="text-nowrap">
                 <div class="fw-bold text-success">
-                  <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税金 ¥{{ r.winning_tax }}）</span>
+                  <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税 ¥{{ r.winning_tax }}）</span>
                   <span v-else>¥{{ r.winning_amount }}</span>
                 </div>
               </td>
@@ -105,7 +105,7 @@
                 </label>
               </td>
               <td style="white-space:nowrap">
-                <span v-if="r.is_checked" class="badge bg-success" :title="'检查人: ' + (r.checked_by_username || '未知') + '\n检查时间: ' + (r.checked_at ? r.checked_at.substring(0,16) : '未知')">✓ 已检查</span>
+                <span v-if="r.is_checked" class="badge bg-success" :title="'检查人: ' + (r.checked_by_username || '未知') + '\n检查时间: ' + (r.checked_at ? r.checked_at.substring(0,16) : '未知')">已检查</span>
                 <button v-else-if="r.winning_image_url && r.winning_record_id" class="btn btn-xs btn-outline-warning" @click="markChecked(r)" :disabled="markingCheckedId === r.winning_record_id">
                   <span v-if="markingCheckedId === r.winning_record_id" class="spinner-border spinner-border-sm"></span>
                   <span v-else>标记已检查</span>
@@ -138,7 +138,7 @@
           <input type="file" class="form-control form-control-sm" accept=".txt" ref="resultFileInput" @change="onResultFileChange">
         </div>
         <div class="col-md-3">
-          <label class="form-label small mb-1">编号（如：26034）</label>
+          <label class="form-label small mb-1">编号（如 26034）</label>
           <input type="text" class="form-control form-control-sm" v-model="uploadPeriod" placeholder="输入编号">
         </div>
         <div class="col-md-2">
@@ -196,7 +196,7 @@
   <div v-if="detailVisible" class="modal-backdrop-custom" @click.self="detailVisible=false">
     <div class="modal-box">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6 class="mb-0"><i class="bi bi-file-text"></i> 结果详情 — 编号 {{ detailPeriod }}</h6>
+        <h6 class="mb-0"><i class="bi bi-file-text"></i> 结果详情 - 编号 {{ detailPeriod }}</h6>
         <button class="btn btn-sm btn-outline-secondary" @click="detailVisible=false">关闭</button>
       </div>
       <div v-if="detailLoading" class="text-center py-4">加载中...</div>
@@ -233,7 +233,7 @@
   <!-- 5. 图片预览弹窗 -->
   <div v-if="previewUrl" class="modal-backdrop-custom" @click.self="previewUrl=null">
     <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
-      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="previewUrl=null">✕ 关闭</button>
+      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="previewUrl=null">关闭</button>
       <img :src="previewUrl" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
     </div>
   </div>
@@ -263,7 +263,7 @@ createApp({
       records: [], loading: false, page: 1, totalPages: 1, total: 0,
       filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '', filterChecked: '',
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
-      summaryAmount: 0, summaryCount: 0,
+      summaryAmount: 0, summaryCount: 0, summaryTax: 0, summaryMissing: 0,
       markingCheckedId: null,
       // 上传赛果
       resultFile: null, uploadPeriod: '', uploading: false, uploadMsg: '', uploadSuccess: false,
@@ -288,10 +288,18 @@ createApp({
       try {
         const res = await fetch('/admin/api/winning/filter-options');
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载筛选项失败');
+        }
         this.usernameOptions = data.usernames || [];
         this.winningDateOptions = data.dates || [];
         this.lotteryTypeOptions = data.lottery_types || [];
-      } catch(e) {}
+      } catch(e) {
+        this.usernameOptions = [];
+        this.winningDateOptions = [];
+        this.lotteryTypeOptions = [];
+        showToast(e.message || '加载筛选项失败', 'danger');
+      }
     },
     async loadWinning() {
       this.loading = true;
@@ -304,11 +312,25 @@ createApp({
       try {
         const res = await fetch(`/admin/api/winning?${params}`);
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载中奖记录失败');
+        }
         this.records = data.records || [];
         this.total = data.total || 0;
         this.totalPages = data.pages || 1;
         this.summaryAmount = (data.summary && data.summary.amount) || 0;
         this.summaryCount = (data.summary && data.summary.count) || 0;
+        this.summaryTax = (data.summary && data.summary.tax) || 0;
+        this.summaryMissing = (data.summary && data.summary.missing) || 0;
+      } catch (e) {
+        this.records = [];
+        this.total = 0;
+        this.totalPages = 1;
+        this.summaryAmount = 0;
+        this.summaryCount = 0;
+        this.summaryTax = 0;
+        this.summaryMissing = 0;
+        showToast(e.message || '加载中奖记录失败', 'danger');
       } finally {
         this.loading = false;
       }
@@ -318,11 +340,11 @@ createApp({
         showToast('该记录没有对应的中签记录', 'danger');
         return;
       }
-      if (!confirm('确认标记该中签记录为已检查？标记后将无法更换图片。')) return;
+      if (!confirm('确认将这条中奖记录标记为已检查吗？')) return;
 
       this.markingCheckedId = record.winning_record_id;
       try {
-        const res = await fetch(`/winning/admin/mark-checked/${record.winning_record_id}`, {
+        const res = await fetch(`/api/winning/admin/mark-checked/${record.winning_record_id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -353,16 +375,18 @@ createApp({
         const data = await res.json();
         this.uploadSuccess = data.success;
         this.uploadMsg = data.success
-          ? `上传成功，解析 ${data.count} 条结果，中签计算已提交`
+          ? `上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列`
           : (data.error || '上传失败');
         if (data.success) {
           this.uploadPeriod = '';
           this.$refs.resultFileInput.value = '';
           this.resultFile = null;
-          setTimeout(() => { this.loadMatchResults(); this.loadWinning(); this.loadFilterOptions(); }, 2000);
+          await this.loadMatchResults();
+          await this.loadWinning();
+          await this.loadFilterOptions();
         }
       } catch(e) {
-        this.uploadSuccess = false; this.uploadMsg = '网络错误';
+        this.uploadSuccess = false; this.uploadMsg = '网络异常，请稍后重试';
       } finally {
         this.uploading = false;
       }
@@ -370,10 +394,19 @@ createApp({
     async loadMatchResults() {
       const params = new URLSearchParams();
       if (this.mrFilterDate) params.set('date', this.mrFilterDate);
-      const res = await fetch(`/admin/api/match-results?${params}`);
-      const data = await res.json();
-      this.matchResults = data.results || [];
-      this.mrDateOptions = data.dates || [];
+      try {
+        const res = await fetch(`/admin/api/match-results?${params}`);
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载赛果列表失败');
+        }
+        this.matchResults = data.results || [];
+        this.mrDateOptions = data.dates || [];
+      } catch (e) {
+        this.matchResults = [];
+        this.mrDateOptions = [];
+        showToast(e.message || '加载赛果列表失败', 'danger');
+      }
     },
     exportWinning() {
       const params = new URLSearchParams();
@@ -381,13 +414,20 @@ createApp({
       if (this.filterDate) params.set('date', this.filterDate);
       if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
       if (this.filterImage) params.set('image_filter', this.filterImage);
+      if (this.filterChecked) params.set('checked_status', this.filterChecked);
       window.location.href = `/admin/api/winning/export?${params}`;
     },
     async recalc(id) {
-      const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });
-      const data = await res.json();
-      showToast(data.success ? '重算任务已提交' : '提交失败', data.success ? 'success' : 'danger');
-      setTimeout(() => this.loadMatchResults(), 2000);
+      try {
+        const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.success ? '已提交重算' : (data.error || '提交失败'), data.success ? 'success' : 'danger');
+        if (data.success) {
+          await this.loadMatchResults();
+        }
+      } catch (e) {
+        showToast('提交失败', 'danger');
+      }
     },
     previewImage(url) {
       this.previewUrl = url;
@@ -396,7 +436,7 @@ createApp({
       const file = event.target.files[0];
       if (!file) return;
 
-      // 按钮已禁用 + 后端有验证，移除前端重复检查
+      // 按钮已禁用，后端也会再次校验
       this.uploadingImageId = record.ticket_id;
       try {
         const fd = new FormData();
@@ -426,6 +466,9 @@ createApp({
       try {
         const res = await fetch(`/admin/api/match-results/${r.id}/detail`);
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载赛果详情失败');
+        }
         // result_data: {"61": {"SPF": {result, sp}, ...}, ...}
         // 按场次号排序
         const sorted = {};
@@ -433,6 +476,9 @@ createApp({
           sorted[k] = data.result_data[k];
         });
         this.detailRows = sorted;
+      } catch (e) {
+        this.detailRows = {};
+        showToast(e.message || '加载赛果详情失败', 'danger');
       } finally {
         this.detailLoading = false;
       }
@@ -441,3 +487,4 @@ createApp({
 }).mount('#winning-app');
 </script>
 {% endblock %}
+

@@ -175,4 +175,6 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
 def confirm_batch(ticket_ids: List[int], user_id: int) -> dict:
     """确认收到，批量改为 completed"""
     count = complete_tickets_batch(ticket_ids, user_id)
+    if count == 0:
+        return {'success': False, 'error': '未找到可确认的票据，可能已完成或不属于当前用户', 'completed_count': 0}
     return {'success': True, 'completed_count': count}

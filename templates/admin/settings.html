@@ -1,12 +1,26 @@
 {% extends 'base.html' %}
 {% block title %}系统设置{% endblock %}
 {% block content %}
+{% raw %}
 <div id="settings-app" class="row justify-content-center">
   <div class="col-md-8">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-hdd-stack"></i> 数据库信息</div>
+      <div class="card-body py-2">
+        <div class="small text-muted">当前实际连接路径</div>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <span class="badge bg-dark text-uppercase">{{ databaseInfo.engine || '-' }}</span>
+          <span class="small text-muted">引擎</span>
+        </div>
+        <div class="font-monospace small text-break">{{ databaseInfo.path || '-' }}</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header"><i class="bi bi-gear"></i> 系统设置</div>
       <div class="card-body">
         <div v-if="saved" class="alert alert-success">设置已保存</div>
+        <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
         <h6 class="border-bottom pb-2 mb-3">功能开关</h6>
         <div class="row g-3 mb-4">
@@ -51,8 +65,8 @@
         <h6 class="border-bottom pb-2 mb-3">B模式批量选项（张数）</h6>
         <div class="mb-4">
           <input v-model="modeBOptionsStr" type="text" class="form-control"
-                 placeholder="例如: 50,100,200,300,400,500">
-          <div class="form-text">用逗号分隔多个数值</div>
+                 placeholder="例如：50,100,200,300,400,500">
+          <div class="form-text">用逗号分隔多个数字</div>
         </div>
 
         <h6 class="border-bottom pb-2 mb-3">公告</h6>
@@ -72,6 +86,7 @@
     </div>
   </div>
 </div>
+{% endraw %}
 {% endblock %}
 {% block scripts %}
 <script>
@@ -79,28 +94,53 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
-      s: {}, saving: false, saved: false,
+      s: {},
+      saving: false,
+      saved: false,
+      error: '',
       modeBOptionsStr: '',
+      databaseInfo: { engine: '', path: '' },
     };
   },
   async mounted() {
-    const res = await fetch('/admin/api/settings');
-    this.s = await res.json();
-    this.modeBOptionsStr = (this.s.mode_b_options || []).join(',');
+    try {
+      const res = await fetch('/admin/api/settings');
+      const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || '加载设置失败');
+      }
+      this.databaseInfo = data.database_info || { engine: '', path: '' };
+      delete data.database_info;
+      this.s = data;
+      this.modeBOptionsStr = (this.s.mode_b_options || []).join(',');
+    } catch (e) {
+      this.error = '加载设置失败';
+    }
   },
   methods: {
     async saveSettings() {
-      this.saving = true; this.saved = false;
+      this.saving = true;
+      this.saved = false;
+      this.error = '';
       try {
-        this.s.mode_b_options = this.modeBOptionsStr.split(',').map(v => parseInt(v.trim())).filter(v => !isNaN(v));
+        this.s.mode_b_options = this.modeBOptionsStr.split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v));
         const res = await fetch('/admin/api/settings', {
           method: 'PUT',
-          headers: {'Content-Type':'application/json'},
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.s),
         });
         const data = await res.json();
-        if (data.success) { this.saved = true; setTimeout(() => this.saved = false, 3000); }
-      } finally { this.saving = false; }
+        if (res.ok && data.success) {
+          this.saved = true;
+          setTimeout(() => this.saved = false, 3000);
+        } else {
+          this.error = data.error || '保存失败';
+        }
+      } catch (e) {
+        this.error = '保存失败';
+      } finally {
+        this.saving = false;
+      }
     },
   }
 }).mount('#settings-app');

@@ -131,6 +131,7 @@ def my_winning():
         business_date = str(get_business_date(t.completed_at)) if t.completed_at else 'unknown'
         grouped.setdefault(business_date, []).append({
             'ticket_id': t.id,
+            'business_date': business_date,
             'detail_period': t.detail_period,
             'lottery_type': t.lottery_type,
             'raw_content': t.raw_content or '',
@@ -193,12 +194,10 @@ def mark_checked(record_id):
 @login_required_json
 def upload_winning_image(ticket_id):
     """Upload a winning image and keep LotteryTicket / WinningRecord in sync."""
-    import io as _io
     import os
     import uuid
 
     from flask import current_app
-    from PIL import Image as _Image
 
     ticket = LotteryTicket.query.get_or_404(ticket_id)
     if ticket.assigned_user_id != current_user.id:
@@ -212,19 +211,13 @@ def upload_winning_image(ticket_id):
         return jsonify({'success': False, 'error': '请选择图片'}), 400
 
     file = request.files['image']
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
-    if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp'):
-        return jsonify({'success': False, 'error': '不支持的图片格式'}), 400
 
     try:
-        img = _Image.open(file.stream).convert('RGB')
-        if max(img.width, img.height) > 1200:
-            img.thumbnail((1200, 1200), _Image.LANCZOS)
-        buf = _io.BytesIO()
-        img.save(buf, format='JPEG', quality=80, optimize=True)
-        buf.seek(0)
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'图片处理失败: {e}'}), 400
+        from utils.image_upload import prepare_uploaded_image
+
+        image_stream, save_ext = prepare_uploaded_image(file)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
     from services.oss_service import _oss_configured, build_oss_key, get_public_url
 
@@ -232,9 +225,9 @@ def upload_winning_image(ticket_id):
     if _oss_configured():
         from services.oss_service import _get_bucket
 
-        image_oss_key = build_oss_key(ticket_id, 'jpg')
+        image_oss_key = build_oss_key(ticket_id, save_ext)
         try:
-            _get_bucket().put_object(image_oss_key, buf.read())
+            _get_bucket().put_object(image_oss_key, image_stream.read())
             image_url = get_public_url(image_oss_key)
         except Exception as e:
             return jsonify({'success': False, 'error': f'OSS上传失败: {e}'}), 500
@@ -242,9 +235,9 @@ def upload_winning_image(ticket_id):
         upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
         images_dir = os.path.join(upload_folder, 'images')
         os.makedirs(images_dir, exist_ok=True)
-        filename = f"winning_{ticket_id}_{uuid.uuid4().hex[:8]}.jpg"
+        filename = f"winning_{ticket_id}_{uuid.uuid4().hex[:8]}.{save_ext}"
         with open(os.path.join(images_dir, filename), 'wb') as f:
-            f.write(buf.read())
+            f.write(image_stream.read())
         image_url = f"/uploads/images/{filename}"
 
     if record:

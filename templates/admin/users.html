@@ -9,6 +9,9 @@
   </div>
 
   <div class="card">
+    <div v-if="loadError" class="alert alert-danger rounded-0 border-0 border-bottom mb-0 py-2">
+      {{ loadError }}
+    </div>
     <div class="card-body p-0">
       <table class="table table-hover mb-0">
         <thead class="table-dark">
@@ -19,6 +22,7 @@
         </thead>
         <tbody>
           <tr v-if="loading"><td colspan="10" class="text-center py-3">加载中...</td></tr>
+          <tr v-else-if="users.length === 0"><td colspan="10" class="text-center py-3 text-muted">暂无用户</td></tr>
           <tr v-for="u in users" :key="u.id">
             <td><strong>{{ u.username }}</strong></td>
             <td>
@@ -35,15 +39,15 @@
             <td>
               <input type="number" class="form-control form-control-sm" style="width:80px"
                      v-model.number="u.max_processing_b_mode" min="1" max="10000"
-                     placeholder="不限制"
+                     placeholder="不限"
                      @change="updateUser(u)"
                      :disabled="u.client_mode !== 'mode_b'"
-                     :title="u.client_mode === 'mode_b' ? 'B模式处理中票数上限' : '仅B模式可设置'">
+                     :title="u.client_mode === 'mode_b' ? 'B模式处理中票数上限' : '仅 B 模式可设置'">
             </td>
             <td>
               <input type="number" class="form-control form-control-sm" style="width:80px"
                      v-model.number="u.daily_ticket_limit" min="1" max="100000"
-                     placeholder="不限制"
+                     placeholder="不限"
                      @change="updateUser(u)"
                      title="每日可处理票数上限（A/B模式均生效）">
             </td>
@@ -52,7 +56,7 @@
                 <span v-if="u.blocked_lottery_types && u.blocked_lottery_types.length > 0"
                       class="badge bg-danger" style="cursor:pointer" @click="openBlockedTypesModal(u)"
                       :title="u.blocked_lottery_types.join(', ')">
-                  {{ u.blocked_lottery_types.length }}种
+                  {{ u.blocked_lottery_types.length }} 种
                 </span>
                 <span v-else class="text-muted small">无</span>
                 <button class="btn btn-xs btn-outline-secondary" @click="openBlockedTypesModal(u)" title="设置禁止彩种">
@@ -82,7 +86,6 @@
     </div>
   </div>
 
-  <!-- Create modal -->
   <div v-if="showCreate" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -112,12 +115,12 @@
             <input v-model.number="newUser.max_devices" type="number" class="form-control" min="1" max="10">
           </div>
           <div class="mb-3" v-if="newUser.client_mode === 'mode_b'">
-            <label class="form-label">B模式同时处理上限 <small class="text-muted">(可选，留空表示不限制)</small></label>
-            <input v-model.number="newUser.max_processing_b_mode" type="number" class="form-control" min="1" max="10000" placeholder="不限制">
+            <label class="form-label">B模式同时处理上限 <small class="text-muted">(可选，留空表示不限)</small></label>
+            <input v-model.number="newUser.max_processing_b_mode" type="number" class="form-control" min="1" max="10000" placeholder="不限">
           </div>
           <div class="mb-3">
-            <label class="form-label">每日处理上限 <small class="text-muted">(可选，留空表示不限制，A/B模式均生效)</small></label>
-            <input v-model.number="newUser.daily_ticket_limit" type="number" class="form-control" min="1" max="100000" placeholder="不限制">
+            <label class="form-label">每日处理上限 <small class="text-muted">(可选，留空表示不限，A/B模式均生效)</small></label>
+            <input v-model.number="newUser.daily_ticket_limit" type="number" class="form-control" min="1" max="100000" placeholder="不限">
           </div>
           <div class="mb-3">
             <label class="form-label">禁止彩种 <small class="text-muted">(勾选的彩种不会分配给该用户，可多选)</small></label>
@@ -137,7 +140,6 @@
     </div>
   </div>
 
-  <!-- Blocked Types Modal -->
   <div v-if="showBlockedTypes" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -170,50 +172,114 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
-      users: [], loading: true,
+      users: [],
+      loading: true,
+      loadError: '',
       showCreate: false,
       createError: '',
-      newUser: { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null, blocked_lottery_types: [] },
-      lotteryTypes: ['胜平负', '胜负', '比分', '上下盘', '总进球', '半全场'],
+      newUser: {
+        username: '',
+        password: '',
+        client_mode: 'mode_a',
+        max_devices: 1,
+        max_processing_b_mode: null,
+        daily_ticket_limit: null,
+        blocked_lottery_types: [],
+      },
+      lotteryTypes: [],
       showBlockedTypes: false,
       editingUser: null,
       editingBlockedTypes: [],
     };
   },
-  mounted() { this.loadUsers(); },
+  mounted() {
+    this.loadUsers();
+    this.loadLotteryTypes();
+  },
   methods: {
+    async loadLotteryTypes() {
+      try {
+        const res = await fetch('/admin/api/lottery-types');
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载彩种列表失败');
+        }
+        this.lotteryTypes = data.lottery_types || [];
+      } catch (e) {
+        this.lotteryTypes = [];
+        showToast(e.message || '加载彩种列表失败', 'danger');
+      }
+    },
     async loadUsers() {
       this.loading = true;
-      const res = await fetch('/admin/api/users');
-      const data = await res.json();
-      this.users = data.users;
-      this.loading = false;
+      this.loadError = '';
+      try {
+        const res = await fetch('/admin/api/users');
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载用户列表失败');
+        }
+        this.users = data.users || [];
+      } catch (e) {
+        this.users = [];
+        this.loadError = e.message || '加载用户列表失败';
+        showToast(this.loadError, 'danger');
+      } finally {
+        this.loading = false;
+      }
     },
     async updateUser(u) {
-      await fetch(`/admin/api/users/${u.id}`, {
+      const original = {
+        client_mode: u.client_mode,
+        max_devices: u.max_devices,
+        max_processing_b_mode: u.max_processing_b_mode,
+        daily_ticket_limit: u.daily_ticket_limit,
+        is_active: u.is_active,
+        can_receive: u.can_receive,
+      };
+      const res = await fetch(`/admin/api/users/${u.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(u),
       });
+      const data = await res.json();
+      if (!data.success) {
+        Object.assign(u, original);
+        showToast(data.error || '更新失败', 'danger');
+        await this.loadUsers();
+      }
     },
     async createUser() {
       this.createError = '';
       if (!this.newUser.username || !this.newUser.password) {
-        this.createError = '请填写用户名和密码'; return;
+        this.createError = '请输入用户名和密码';
+        return;
       }
-      const res = await fetch('/admin/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(this.newUser),
-      });
-      const data = await res.json();
-      if (data.success) {
-        this.showCreate = false;
-        this.newUser = { username: '', password: '', client_mode: 'mode_a', max_devices: 1, max_processing_b_mode: null, daily_ticket_limit: null, blocked_lottery_types: [] };
-        this.loadUsers();
-        showToast('用户创建成功', 'success');
-      } else {
-        this.createError = data.error;
+      try {
+        const res = await fetch('/admin/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.newUser),
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.showCreate = false;
+          this.newUser = {
+            username: '',
+            password: '',
+            client_mode: 'mode_a',
+            max_devices: 1,
+            max_processing_b_mode: null,
+            daily_ticket_limit: null,
+            blocked_lottery_types: [],
+          };
+          this.loadUsers();
+          showToast('用户创建成功', 'success');
+        } else {
+          this.createError = data.error;
+        }
+      } catch (e) {
+        this.createError = '网络异常，请稍后重试';
       }
     },
     openBlockedTypesModal(u) {
@@ -223,42 +289,66 @@ createApp({
     },
     async saveBlockedTypes() {
       if (!this.editingUser) return;
-      const res = await fetch(`/admin/api/users/${this.editingUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocked_lottery_types: this.editingBlockedTypes }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        this.editingUser.blocked_lottery_types = this.editingBlockedTypes;
-        this.showBlockedTypes = false;
-        showToast('禁止彩种已更新', 'success');
-      } else {
-        showToast(data.error || '更新失败', 'danger');
+      try {
+        const res = await fetch(`/admin/api/users/${this.editingUser.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blocked_lottery_types: this.editingBlockedTypes }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.editingUser.blocked_lottery_types = this.editingBlockedTypes;
+          this.showBlockedTypes = false;
+          showToast('禁止彩种已更新', 'success');
+        } else {
+          showToast(data.error || '更新失败', 'danger');
+        }
+      } catch (e) {
+        showToast('更新失败，请稍后重试', 'danger');
       }
     },
     async forceLogout(u) {
-      if (!confirm(`确认踢出 ${u.username}？`)) return;
-      const res = await fetch(`/admin/api/users/${u.id}/force-logout`, { method: 'POST' });
-      const data = await res.json();
-      showToast(data.success ? '已强制下线' : '操作失败', data.success ? 'success' : 'danger');
+      if (!confirm('确认踢出用户 ' + u.username + ' 吗？')) return;
+      try {
+        const res = await fetch(`/admin/api/users/${u.id}/force-logout`, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.success ? '已强制下线' : (data.error || '操作失败'), data.success ? 'success' : 'danger');
+      } catch (e) {
+        showToast('操作失败，请稍后重试', 'danger');
+      }
     },
     async resetPassword(u) {
-      const pwd = prompt(`请输入 ${u.username} 的新密码（至少6位）`);
-      if (!pwd || pwd.length < 6) { showToast('密码至少6位', 'warning'); return; }
-      const res = await fetch(`/admin/api/users/${u.id}`, {
-        method: 'PUT',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ password: pwd }),
-      });
-      const data = await res.json();
-      showToast(data.success ? '密码已修改' : '修改失败', data.success ? 'success' : 'danger');
+      const pwd = prompt('请输入 ' + u.username + ' 的新密码（至少 6 位）');
+      if (!pwd || pwd.length < 6) {
+        showToast('密码至少需要 6 位', 'warning');
+        return;
+      }
+      try {
+        const res = await fetch(`/admin/api/users/${u.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        const data = await res.json();
+        showToast(data.success ? '密码已更新' : (data.error || '更新失败'), data.success ? 'success' : 'danger');
+      } catch (e) {
+        showToast('更新失败，请稍后重试', 'danger');
+      }
     },
     async deleteUser(u) {
-      if (!confirm(`确认删除用户 ${u.username}？此操作不可撤销！`)) return;
-      const res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { this.loadUsers(); showToast('已删除', 'success'); }
+      if (!confirm('确认删除用户 ' + u.username + ' 吗？此操作不可恢复。')) return;
+      try {
+        const res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          this.loadUsers();
+          showToast('用户已删除', 'success');
+        } else {
+          showToast(data.error || '删除失败', 'danger');
+        }
+      } catch (e) {
+        showToast('删除失败，请稍后重试', 'danger');
+      }
     },
   }
 }).mount('#users-app');

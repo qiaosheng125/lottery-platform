@@ -48,7 +48,7 @@ def _database_display_info():
 @login_required
 @admin_required
 def dashboard():
-    return render_template('admin/dashboard.html', database_info=_database_display_info())
+    return render_template('admin/dashboard.html')
 
 
 @admin_bp.route('/api/dashboard-data')
@@ -525,6 +525,8 @@ def api_create_user():
 @admin_required
 def api_update_user(user_id):
     user = User.query.get_or_404(user_id)
+    if user.is_admin:
+        return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
     data = request.get_json()
 
     if 'client_mode' in data:
@@ -570,6 +572,8 @@ def api_update_user(user_id):
 @admin_required
 def api_delete_user(user_id):
     user = User.query.get_or_404(user_id)
+    if user.is_admin:
+        return jsonify({'success': False, 'error': '不允许在此接口删除管理员账号'}), 403
     db.session.delete(user)
     db.session.commit()
     return jsonify({'success': True})
@@ -579,6 +583,9 @@ def api_delete_user(user_id):
 @login_required
 @admin_required
 def api_force_logout(user_id):
+    user = User.query.get_or_404(user_id)
+    if user.is_admin:
+        return jsonify({'success': False, 'error': '不允许在此接口强制下线管理员账号'}), 403
     count = force_logout_user(user_id, '管理员强制下线')
     AuditLog.log('force_logout', user_id=current_user.id,
                  resource_type='user', resource_id=user_id)
@@ -693,6 +700,7 @@ def api_winning_list():
     summary_amount = sum(float(t.winning_amount or 0) for t in all_items)
     summary_gross  = sum(float(t.winning_gross  or 0) for t in all_items)
     summary_tax    = sum(float(t.winning_tax    or 0) for t in all_items)
+    summary_missing = sum(1 for t in all_items if not t.winning_image_url)
     total = len(all_items)
 
     # 分页切片
@@ -739,6 +747,7 @@ def api_winning_list():
             'gross':  round(summary_gross,  2),
             'tax':    round(summary_tax,    2),
             'count':  total,
+            'missing': summary_missing,
         },
     })
 
@@ -756,6 +765,7 @@ def api_winning_export():
     date_str     = request.args.get('date', '').strip()
     lottery_type = request.args.get('lottery_type', '').strip()
     image_filter = request.args.get('image_filter', '').strip()
+    checked_status = request.args.get('checked_status', '').strip()
 
     q = LotteryTicket.query.filter(LotteryTicket.is_winning == True)
     if username:
@@ -773,6 +783,24 @@ def api_winning_export():
         q = q.filter(
             (LotteryTicket.winning_image_url == None) |
             (LotteryTicket.winning_image_url == '')
+        )
+    if checked_status == 'checked':
+        q = q.filter(
+            db.exists().where(
+                db.and_(
+                    WinningRecord.ticket_id == LotteryTicket.id,
+                    WinningRecord.is_checked == True
+                )
+            )
+        )
+    elif checked_status == 'unchecked':
+        q = q.filter(
+            ~db.exists().where(
+                db.and_(
+                    WinningRecord.ticket_id == LotteryTicket.id,
+                    WinningRecord.is_checked == True
+                )
+            )
         )
     items = q.order_by(LotteryTicket.completed_at.desc()).all()
 
@@ -854,6 +882,10 @@ def admin_winning_record():
 def admin_winning_upload_image(ticket_id):
     """直接上传中奖图片，自动压缩后存储（本地或OSS）"""
     ticket = LotteryTicket.query.get_or_404(ticket_id)
+    record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+
+    if record and record.is_checked:
+        return jsonify({'success': False, 'error': '该中奖记录已被标记为已检查，无法更换图片'}), 403
 
     if 'image' not in request.files:
         return jsonify({'success': False, 'error': '请选择图片文件'}), 400
@@ -862,26 +894,12 @@ def admin_winning_upload_image(ticket_id):
     if not file.filename:
         return jsonify({'success': False, 'error': '文件名为空'}), 400
 
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
-    if ext not in ('jpg', 'jpeg', 'png', 'gif', 'webp'):
-        return jsonify({'success': False, 'error': '不支持的图片格式'}), 400
-
-    # 压缩图片：最长边不超过 1200px，JPEG 质量 80
-    import io as _io
-    from PIL import Image as _Image
     try:
-        img = _Image.open(file.stream)
-        img = img.convert('RGB')  # 统一转 RGB（兼容 PNG/WEBP 透明通道）
-        max_side = 1200
-        if max(img.width, img.height) > max_side:
-            img.thumbnail((max_side, max_side), _Image.LANCZOS)
-        buf = _io.BytesIO()
-        img.save(buf, format='JPEG', quality=80, optimize=True)
-        buf.seek(0)
-        compressed = buf
-        save_ext = 'jpg'
+        from utils.image_upload import prepare_uploaded_image
+
+        compressed, save_ext = prepare_uploaded_image(file)
     except Exception as e:
-        return jsonify({'success': False, 'error': f'图片处理失败: {e}'}), 400
+        return jsonify({'success': False, 'error': str(e)}), 400
 
     from services.oss_service import _oss_configured, build_oss_key, get_public_url
 
@@ -1032,7 +1050,9 @@ def settings_page():
 @admin_required
 def api_get_settings():
     settings = SystemSettings.get()
-    return jsonify(settings.to_dict())
+    payload = settings.to_dict()
+    payload['database_info'] = _database_display_info()
+    return jsonify(payload)
 
 
 @admin_bp.route('/api/settings', methods=['PUT'])

@@ -1,11 +1,11 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}登录 - 数据文件管理平台{% endblock %}
 {% block content %}
 <div class="row justify-content-center mt-5">
   <div class="col-md-4">
     <div class="card shadow">
       <div class="card-header text-center fw-bold fs-5">
-        🗂️ 数据文件管理平台
+        📁 数据文件管理平台
       </div>
       <div class="card-body p-4">
         {% raw %}
@@ -47,6 +47,7 @@ createApp({
   methods: {
     async doLogin() {
       this.loading = true; this.error = '';
+      const deviceId = typeof getOrCreateDeviceId === 'function' ? getOrCreateDeviceId() : '';
       try {
         const res = await fetch('/auth/login', {
           method: 'POST',
@@ -54,6 +55,7 @@ createApp({
           body: JSON.stringify({
             username: this.username,
             password: this.password,
+            device_id: deviceId || undefined,
           }),
         });
         const raw = await res.text();
@@ -70,7 +72,7 @@ createApp({
           this.error = data.error || '登录失败';
         }
       } catch(e) {
-        this.error = '网络错误，请重试';
+        this.error = '网络异常，请稍后重试';
       } finally {
         this.loading = false;
       }
@@ -79,3 +81,4 @@ createApp({
 }).mount('#login-app');
 </script>
 {% endblock %}
+

@@ -45,12 +45,15 @@
           <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
         </select>
         <button class="btn btn-sm btn-outline-success" @click="exportByDate">
-          <i class="bi bi-download"></i> 导出CSV
+          <i class="bi bi-download"></i> 导出XLSX
         </button>
         <button class="btn btn-sm btn-outline-secondary" @click="loadFiles">刷新</button>
       </div>
     </div>
     <div class="card-body p-0">
+      <div v-if="listError" class="alert alert-danger rounded-0 border-0 border-bottom mb-0 py-2">
+        {{ listError }}
+      </div>
       <div class="table-responsive">
         <table class="table table-sm table-hover mb-0">
           <thead class="table-dark">
@@ -145,21 +148,35 @@ createApp({
       filterDate: '', dateOptions: [],
       uploadQueue: [], uploading: false,
       detailTickets: [],
+      listError: '',
     };
   },
   mounted() { this.loadFiles(); },
   methods: {
     async loadFiles() {
       this.loading = true;
-      const params = new URLSearchParams({ page: this.page, per_page: 20 });
-      if (this.filterDate) params.set('date', this.filterDate);
-      const res = await fetch(`/admin/api/files?${params}`);
-      const data = await res.json();
-      this.files = data.files;
-      this.total = data.total;
-      this.totalPages = data.pages;
-      if (data.date_options) this.dateOptions = data.date_options;
-      this.loading = false;
+      this.listError = '';
+      try {
+        const params = new URLSearchParams({ page: this.page, per_page: 20 });
+        if (this.filterDate) params.set('date', this.filterDate);
+        const res = await fetch(`/admin/api/files?${params}`);
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载文件列表失败');
+        }
+        this.files = data.files || [];
+        this.total = data.total || 0;
+        this.totalPages = data.pages || 1;
+        if (data.date_options) this.dateOptions = data.date_options;
+      } catch (e) {
+        this.files = [];
+        this.total = 0;
+        this.totalPages = 1;
+        this.listError = e.message || '加载文件列表失败';
+        showToast(this.listError, 'danger');
+      } finally {
+        this.loading = false;
+      }
     },
     statusLabel(s) {
       return { active: '活跃', revoked: '已撤回', expired: '已过期', exhausted: '已出完' }[s] || s;
@@ -230,16 +247,34 @@ createApp({
     },
     async revokeFile(id, name) {
       if (!confirm(`确认撤回文件"${name}"？`)) return;
-      const res = await fetch(`/admin/api/files/${id}/revoke`, { method: 'POST' });
-      const data = await res.json();
-      showToast(data.message || (data.success ? '撤回成功' : '撤回失败'), data.success ? 'success' : 'danger');
-      if (data.success) this.loadFiles();
+      try {
+        const res = await fetch(`/admin/api/files/${id}/revoke`, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || (data.success ? '撤回成功' : '撤回失败'), data.success ? 'success' : 'danger');
+        if (data.success) this.loadFiles();
+      } catch (e) {
+        showToast('撤回失败，请稍后重试', 'danger');
+      }
     },
     async viewDetail(fileId) {
-      const res = await fetch(`/admin/api/files/${fileId}/detail?per_page=100`);
-      const data = await res.json();
-      this.detailTickets = data.tickets;
-      new bootstrap.Modal(document.getElementById('detailModal')).show();
+      try {
+        const detailTickets = [];
+        let page = 1;
+        let totalPages = 1;
+
+        do {
+          const res = await fetch(`/admin/api/files/${fileId}/detail?page=${page}&per_page=100`);
+          const data = await res.json();
+          detailTickets.push(...(data.tickets || []));
+          totalPages = data.pages || 1;
+          page += 1;
+        } while (page <= totalPages);
+
+        this.detailTickets = detailTickets;
+        new bootstrap.Modal(document.getElementById('detailModal')).show();
+      } catch (e) {
+        showToast('加载详情失败，请稍后重试', 'danger');
+      }
     },
   }
 }).mount('#upload-app');

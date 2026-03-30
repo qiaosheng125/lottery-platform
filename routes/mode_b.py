@@ -14,6 +14,16 @@ from utils.decorators import can_receive_required, login_required_json
 mode_b_bp = Blueprint('mode_b', __name__)
 
 
+def _parse_batch_count(value, default: int = 100):
+    try:
+        count = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return None
+    if count < 1:
+        return None
+    return count
+
+
 @mode_b_bp.route('/pool-status')
 @login_required
 @login_required_json
@@ -34,7 +44,9 @@ def pool_status():
 @login_required
 @login_required_json
 def preview():
-    count = int(request.args.get('count', 100))
+    count = _parse_batch_count(request.args.get('count', 100))
+    if count is None:
+        return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
     result = preview_batch(count)
     return jsonify({'success': True, **result})
 
@@ -45,7 +57,9 @@ def preview():
 @can_receive_required
 def download():
     data = request.get_json()
-    count = int(data.get('count', 100))
+    count = _parse_batch_count(data.get('count', 100) if data else 100)
+    if count is None:
+        return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
     device_id = data.get('device_id') or 'Web'
     device_name = data.get('device_name') or '网页浏览器'
 
