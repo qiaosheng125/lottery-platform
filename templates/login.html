@@ -56,7 +56,14 @@ createApp({
             password: this.password,
           }),
         });
-        const data = await res.json();
+        const raw = await res.text();
+        let data = null;
+        try {
+          data = JSON.parse(raw);
+        } catch (parseError) {
+          this.error = `登录失败（HTTP ${res.status}）`;
+          return;
+        }
         if (data.success) {
           window.location.href = data.redirect;
         } else {

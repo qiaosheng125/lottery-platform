@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "NanoClaw REPL"
+  short_description: "Operate and extend NanoClaw v2, ECC's zero-dependency session-aware REPL built on claude -p."
+  brand_color: "#6366F1"
+  default_prompt: "Use NanoClaw REPL: Operate and extend NanoClaw v2, ECC's zero-dependency session-aware REPL built on claude -p."
+policy:
+  allow_implicit_invocation: true

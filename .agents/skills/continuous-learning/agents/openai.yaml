@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Continuous Learning Skill"
+  short_description: "Automatically extract reusable patterns from Claude Code sessions and save them as learned skills for future use."
+  brand_color: "#6366F1"
+  default_prompt: "Use Continuous Learning Skill: Automatically extract reusable patterns from Claude Code sessions and save them as learned skills for future use."
+policy:
+  allow_implicit_invocation: true

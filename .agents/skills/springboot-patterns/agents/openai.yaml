@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Spring Boot Development Patterns"
+  short_description: "Spring Boot architecture patterns, REST API design, layered services, data access, caching, async processing, and logging. Use for Java Spring Boot backend work."
+  brand_color: "#6366F1"
+  default_prompt: "Use Spring Boot Development Patterns: Spring Boot architecture patterns, REST API design, layered services, data access, caching, async processing, and logging. Use for Java Spring Boot backend work."
+policy:
+  allow_implicit_invocation: true

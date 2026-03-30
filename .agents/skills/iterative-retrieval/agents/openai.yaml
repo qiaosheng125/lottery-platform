@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Iterative Retrieval Pattern"
+  short_description: "Pattern for progressively refining context retrieval to solve the subagent context problem"
+  brand_color: "#6366F1"
+  default_prompt: "Use Iterative Retrieval Pattern: Pattern for progressively refining context retrieval to solve the subagent context problem"
+policy:
+  allow_implicit_invocation: true

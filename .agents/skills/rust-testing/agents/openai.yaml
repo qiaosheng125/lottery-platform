@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Rust Testing Patterns"
+  short_description: "Rust testing patterns including unit tests, integration tests, async testing, property-based testing, mocking, and coverage. Follows TDD methodology."
+  brand_color: "#6366F1"
+  default_prompt: "Use Rust Testing Patterns: Rust testing patterns including unit tests, integration tests, async testing, property-based testing, mocking, and coverage. Follows TDD methodology."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Production Scheduling"
+  short_description: ">"
+  brand_color: "#6366F1"
+  default_prompt: "Use Production Scheduling: >"
+policy:
+  allow_implicit_invocation: true

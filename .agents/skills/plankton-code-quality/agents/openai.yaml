@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Plankton Code Quality Skill"
+  short_description: "\"Write-time code quality enforcement using Plankton — auto-formatting, linting, and Claude-powered fixes on every file edit via hooks.\""
+  brand_color: "#6366F1"
+  default_prompt: "Use Plankton Code Quality Skill: \"Write-time code quality enforcement using Plankton — auto-formatting, linting, and Claude-powered fixes on every file edit via hooks.\""
+policy:
+  allow_implicit_invocation: true

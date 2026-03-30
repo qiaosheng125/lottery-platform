@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Deployment Patterns"
+  short_description: "Deployment workflows, CI/CD pipeline patterns, Docker containerization, health checks, rollback strategies, and production readiness checklists for web applications."
+  brand_color: "#6366F1"
+  default_prompt: "Use Deployment Patterns: Deployment workflows, CI/CD pipeline patterns, Docker containerization, health checks, rollback strategies, and production readiness checklists for web applications."
+policy:
+  allow_implicit_invocation: true

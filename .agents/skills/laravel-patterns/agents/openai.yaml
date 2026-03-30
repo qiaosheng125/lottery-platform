@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Laravel Development Patterns"
+  short_description: "Laravel architecture patterns, routing/controllers, Eloquent ORM, service layers, queues, events, caching, and API resources for production apps."
+  brand_color: "#6366F1"
+  default_prompt: "Use Laravel Development Patterns: Laravel architecture patterns, routing/controllers, Eloquent ORM, service layers, queues, events, caching, and API resources for production apps."
+policy:
+  allow_implicit_invocation: true

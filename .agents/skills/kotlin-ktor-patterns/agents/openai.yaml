@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Ktor Server Patterns"
+  short_description: "Ktor server patterns including routing DSL, plugins, authentication, Koin DI, kotlinx.serialization, WebSockets, and testApplication testing."
+  brand_color: "#6366F1"
+  default_prompt: "Use Ktor Server Patterns: Ktor server patterns including routing DSL, plugins, authentication, Koin DI, kotlinx.serialization, WebSockets, and testApplication testing."
+policy:
+  allow_implicit_invocation: true

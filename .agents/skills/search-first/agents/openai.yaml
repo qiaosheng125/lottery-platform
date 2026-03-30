@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "/search-first — Research Before You Code"
+  short_description: "Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. Invokes the researcher agent."
+  brand_color: "#6366F1"
+  default_prompt: "Use /search-first — Research Before You Code: Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. Invokes the researcher agent."
+policy:
+  allow_implicit_invocation: true

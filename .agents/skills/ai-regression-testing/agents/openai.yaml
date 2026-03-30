@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "AI Regression Testing"
+  short_description: "Regression testing strategies for AI-assisted development. Sandbox-mode API testing without database dependencies, automated bug-check workflows, and patterns to catch AI blind spots where the same model writes and reviews code."
+  brand_color: "#6366F1"
+  default_prompt: "Use AI Regression Testing: Regression testing strategies for AI-assisted development. Sandbox-mode API testing without database dependencies, automated bug-check workflows, and patterns to catch AI blind spots where the same model writes and reviews code."
+policy:
+  allow_implicit_invocation: true

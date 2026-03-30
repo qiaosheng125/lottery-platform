@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Kotlin Testing Patterns"
+  short_description: "Kotlin testing patterns with Kotest, MockK, coroutine testing, property-based testing, and Kover coverage. Follows TDD methodology with idiomatic Kotlin practices."
+  brand_color: "#6366F1"
+  default_prompt: "Use Kotlin Testing Patterns: Kotlin testing patterns with Kotest, MockK, coroutine testing, property-based testing, and Kover coverage. Follows TDD methodology with idiomatic Kotlin practices."
+policy:
+  allow_implicit_invocation: true

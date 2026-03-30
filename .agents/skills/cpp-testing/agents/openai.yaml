@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "C++ Testing (Agent Skill)"
+  short_description: "Use only when writing/updating/fixing C++ tests, configuring GoogleTest/CTest, diagnosing failing or flaky tests, or adding coverage/sanitizers."
+  brand_color: "#6366F1"
+  default_prompt: "Use C++ Testing (Agent Skill): Use only when writing/updating/fixing C++ tests, configuring GoogleTest/CTest, diagnosing failing or flaky tests, or adding coverage/sanitizers."
+policy:
+  allow_implicit_invocation: true

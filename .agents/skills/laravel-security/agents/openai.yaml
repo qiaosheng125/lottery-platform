@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Laravel Security Best Practices"
+  short_description: "Laravel security best practices for authn/authz, validation, CSRF, mass assignment, file uploads, secrets, rate limiting, and secure deployment."
+  brand_color: "#6366F1"
+  default_prompt: "Use Laravel Security Best Practices: Laravel security best practices for authn/authz, validation, CSRF, mass assignment, file uploads, secrets, rate limiting, and secure deployment."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Content-Hash File Cache Pattern"
+  short_description: "Cache expensive file processing results using SHA-256 content hashes — path-independent, auto-invalidating, with service layer separation."
+  brand_color: "#6366F1"
+  default_prompt: "Use Content-Hash File Cache Pattern: Cache expensive file processing results using SHA-256 content hashes — path-independent, auto-invalidating, with service layer separation."
+policy:
+  allow_implicit_invocation: true

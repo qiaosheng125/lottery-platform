@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "AI-First Engineering"
+  short_description: "Engineering operating model for teams where AI agents generate a large share of implementation output."
+  brand_color: "#6366F1"
+  default_prompt: "Use AI-First Engineering: Engineering operating model for teams where AI agents generate a large share of implementation output."
+policy:
+  allow_implicit_invocation: true

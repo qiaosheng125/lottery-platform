@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Django Verification Loop"
+  short_description: "\"Verification loop for Django projects: migrations, linting, tests with coverage, security scans, and deployment readiness checks before release or PR.\""
+  brand_color: "#6366F1"
+  default_prompt: "Use Django Verification Loop: \"Verification loop for Django projects: migrations, linting, tests with coverage, security scans, and deployment readiness checks before release or PR.\""
+policy:
+  allow_implicit_invocation: true

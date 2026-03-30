@@ -1,10 +1,68 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask
+from sqlalchemy import inspect
+from sqlalchemy.exc import OperationalError
 from config import config
+from config import _engine_options
 from extensions import db, login_manager, bcrypt, socketio, migrate, init_redis
+
+
+def apply_runtime_database_config(app):
+    db_uri = os.environ.get('DATABASE_URL')
+    if not db_uri:
+        return
+
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = _engine_options(db_uri)
+
+
+def normalize_sqlite_db_uri(app):
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:///') or db_uri.startswith('sqlite:////'):
+        return
+
+    relative_path = db_uri[len('sqlite:///'):]
+    resolved_path = Path(app.instance_path) / relative_path
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{resolved_path.as_posix()}"
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True}
+    app.logger.warning('Using SQLite database at %s', resolved_path)
+
+
+def ensure_sqlite_bootstrap(app):
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite'):
+        return
+
+    from models import User, SystemSettings
+
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    required_tables = {'users', 'system_settings'}
+
+    if required_tables.issubset(existing_tables):
+        return
+
+    app.logger.warning('SQLite database missing core tables; bootstrapping schema automatically')
+    try:
+        db.create_all()
+    except OperationalError as exc:
+        db.session.rollback()
+        if 'already exists' not in str(exc).lower():
+            raise
+    SystemSettings.get()
+
+    admin = User.query.filter_by(is_admin=True).first()
+    if not admin:
+        admin = User(username='zucaixu', is_admin=True)
+        admin.set_password('zhongdajiang888')
+        db.session.add(admin)
+        db.session.commit()
+        app.logger.warning('Bootstrapped default admin account: zucaixu')
 
 
 def create_app(config_name=None):
@@ -13,6 +71,8 @@ def create_app(config_name=None):
 
     app = Flask(__name__)
     app.config.from_object(config[config_name])
+    apply_runtime_database_config(app)
+    normalize_sqlite_db_uri(app)
 
     # Ensure upload folder exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -38,6 +98,9 @@ def create_app(config_name=None):
         engineio_logger=False,
     )
     init_redis(app)
+
+    with app.app_context():
+        ensure_sqlite_bootstrap(app)
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message = '请先登录'
@@ -65,25 +128,43 @@ def create_app(config_name=None):
     # Register SocketIO event handlers
     from sockets import pool_events, admin_events  # noqa: F401
 
-    # Update last_seen on every authenticated request
+    # Validate the DB-backed session on every authenticated request and refresh last_seen.
     @app.before_request
     def update_last_seen():
-        from flask import session as flask_session, request as req
+        from flask import jsonify, redirect, request as req, session as flask_session, url_for
+        from flask_login import logout_user
         from flask_login import current_user as cu
+        from utils.time_utils import beijing_now
+
+        def invalidate_current_session():
+            flask_session.pop('session_token', None)
+            logout_user()
+            if req.path.startswith('/api') or req.path == '/auth/heartbeat':
+                return jsonify({'success': False, 'error': '会话已失效，请重新登录'}), 401
+            return redirect(url_for('auth.login'))
+
         # Skip static files
         if req.path.startswith('/static'):
             return
         if cu.is_authenticated:
             token = flask_session.get('session_token')
-            if token:
-                from models.user import UserSession
-                sess = UserSession.query.filter_by(session_token=token).first()
-                if sess:
-                    sess.touch()
-                    try:
-                        db.session.commit()
-                    except Exception:
-                        db.session.rollback()
+            if not token:
+                return invalidate_current_session()
+
+            from models.user import UserSession
+            sess = UserSession.query.filter_by(session_token=token).first()
+            if not sess:
+                return invalidate_current_session()
+            if sess.is_expired():
+                db.session.delete(sess)
+                db.session.commit()
+                return invalidate_current_session()
+
+            sess.last_seen = beijing_now()
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
     # Register main index route
     from flask import redirect, url_for

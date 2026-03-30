@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Go Development Patterns"
+  short_description: "Idiomatic Go patterns, best practices, and conventions for building robust, efficient, and maintainable Go applications."
+  brand_color: "#6366F1"
+  default_prompt: "Use Go Development Patterns: Idiomatic Go patterns, best practices, and conventions for building robust, efficient, and maintainable Go applications."
+policy:
+  allow_implicit_invocation: true

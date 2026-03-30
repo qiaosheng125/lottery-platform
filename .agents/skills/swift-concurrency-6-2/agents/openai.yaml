@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Swift 6.2 Approachable Concurrency"
+  short_description: "Swift 6.2 Approachable Concurrency — single-threaded by default, @concurrent for explicit background offloading, isolated conformances for main actor types."
+  brand_color: "#6366F1"
+  default_prompt: "Use Swift 6.2 Approachable Concurrency: Swift 6.2 Approachable Concurrency — single-threaded by default, @concurrent for explicit background offloading, isolated conformances for main actor types."
+policy:
+  allow_implicit_invocation: true

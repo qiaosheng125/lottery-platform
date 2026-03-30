@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Agentic Engineering"
+  short_description: "Operate as an agentic engineer using eval-first execution, decomposition, and cost-aware model routing."
+  brand_color: "#6366F1"
+  default_prompt: "Use Agentic Engineering: Operate as an agentic engineer using eval-first execution, decomposition, and cost-aware model routing."
+policy:
+  allow_implicit_invocation: true

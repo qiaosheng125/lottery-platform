@@ -510,7 +510,11 @@ createApp({
         const res = await fetch('/api/mode-a/next', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ device_id: deviceId, device_name: getDeviceName() }),
+          body: JSON.stringify({
+            device_id: deviceId,
+            device_name: getDeviceName(),
+            complete_current_ticket_id: this.currentTicket ? this.currentTicket.id : null,
+          }),
         });
         const data = await res.json();
         if (data.success) {
@@ -818,7 +822,7 @@ createApp({
       }
       this.pwdLoading = true;
       try {
-        const res = await fetch('/user/change-password', {
+        const res = await fetch('/api/user/change-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ old_password: this.pwdOld, new_password: this.pwdNew }),

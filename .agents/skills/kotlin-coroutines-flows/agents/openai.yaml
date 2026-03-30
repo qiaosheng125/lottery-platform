@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Kotlin Coroutines & Flows"
+  short_description: "Kotlin Coroutines and Flow patterns for Android and KMP — structured concurrency, Flow operators, StateFlow, error handling, and testing."
+  brand_color: "#6366F1"
+  default_prompt: "Use Kotlin Coroutines & Flows: Kotlin Coroutines and Flow patterns for Android and KMP — structured concurrency, Flow operators, StateFlow, error handling, and testing."
+policy:
+  allow_implicit_invocation: true

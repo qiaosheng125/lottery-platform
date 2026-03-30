@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Python Testing Patterns"
+  short_description: "Python testing strategies using pytest, TDD methodology, fixtures, mocking, parametrization, and coverage requirements."
+  brand_color: "#6366F1"
+  default_prompt: "Use Python Testing Patterns: Python testing strategies using pytest, TDD methodology, fixtures, mocking, parametrization, and coverage requirements."
+policy:
+  allow_implicit_invocation: true

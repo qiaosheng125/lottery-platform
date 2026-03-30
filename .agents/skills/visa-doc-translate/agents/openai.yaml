@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Visa Doc Translate"
+  short_description: "Translate visa application documents (images) to English and create a bilingual PDF with original and translation"
+  brand_color: "#6366F1"
+  default_prompt: "Use Visa Doc Translate: Translate visa application documents (images) to English and create a bilingual PDF with original and translation"
+policy:
+  allow_implicit_invocation: true

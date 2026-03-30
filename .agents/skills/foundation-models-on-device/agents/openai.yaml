@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "FoundationModels: On-Device LLM (iOS 26)"
+  short_description: "Apple FoundationModels framework for on-device LLM — text generation, guided generation with @Generable, tool calling, and snapshot streaming in iOS 26+."
+  brand_color: "#6366F1"
+  default_prompt: "Use FoundationModels: On-Device LLM (iOS 26): Apple FoundationModels framework for on-device LLM — text generation, guided generation with @Generable, tool calling, and snapshot streaming in iOS 26+."
+policy:
+  allow_implicit_invocation: true

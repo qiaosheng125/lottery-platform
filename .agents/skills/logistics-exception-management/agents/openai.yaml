@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Logistics Exception Management"
+  short_description: ">"
+  brand_color: "#6366F1"
+  default_prompt: "Use Logistics Exception Management: >"
+policy:
+  allow_implicit_invocation: true

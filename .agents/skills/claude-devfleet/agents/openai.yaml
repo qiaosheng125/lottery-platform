@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Claude DevFleet Multi-Agent Orchestration"
+  short_description: "Orchestrate multi-agent coding tasks via Claude DevFleet — plan projects, dispatch parallel agents in isolated worktrees, monitor progress, and read structured reports."
+  brand_color: "#6366F1"
+  default_prompt: "Use Claude DevFleet Multi-Agent Orchestration: Orchestrate multi-agent coding tasks via Claude DevFleet — plan projects, dispatch parallel agents in isolated worktrees, monitor progress, and read structured reports."
+policy:
+  allow_implicit_invocation: true

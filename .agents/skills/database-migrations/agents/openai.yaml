@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Database Migration Patterns"
+  short_description: "Database migration best practices for schema changes, data migrations, rollbacks, and zero-downtime deployments across PostgreSQL, MySQL, and common ORMs (Prisma, Drizzle, Django, TypeORM, golang-migrate)."
+  brand_color: "#6366F1"
+  default_prompt: "Use Database Migration Patterns: Database migration best practices for schema changes, data migrations, rollbacks, and zero-downtime deployments across PostgreSQL, MySQL, and common ORMs (Prisma, Drizzle, Django, TypeORM, golang-migrate)."
+policy:
+  allow_implicit_invocation: true

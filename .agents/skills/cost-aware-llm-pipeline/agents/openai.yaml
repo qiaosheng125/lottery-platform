@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Cost-Aware LLM Pipeline"
+  short_description: "Cost optimization patterns for LLM API usage — model routing by task complexity, budget tracking, retry logic, and prompt caching."
+  brand_color: "#6366F1"
+  default_prompt: "Use Cost-Aware LLM Pipeline: Cost optimization patterns for LLM API usage — model routing by task complexity, budget tracking, retry logic, and prompt caching."
+policy:
+  allow_implicit_invocation: true

@@ -138,6 +138,31 @@ FLASK_ENV=production
    - 设备速度统计按用户名排序，同一用户的设备显示在相邻行
    - 所有数据实时更新（每5秒刷新）
 
+## 本次会话完成的功能（2026-03-30）
+
+### 核心 Bug 修复（12个）
+
+1. **会话验证增强** — `app.py` 在 `before_request` 钩子中强制校验 `session_token`，缺失/过期/不存在的会话立即失效并返回 401，修复会话过期、强制下线、每日重置后仍可继续访问的问题
+2. **停池状态统一** — `routes/pool.py` 和 `routes/mode_b.py` 停池时统一返回空池状态（`total_pending=0`），修复停池后仍显示待处理票数的问题
+3. **A模式显式确认机制** — `services/mode_a_service.py` 和 `routes/mode_a.py` 实现显式票ID确认，只有客户端传入正确的 `complete_current_ticket_id` 才完成当前票，防止重复请求/网络重试误完成票
+4. **B模式批次查询修复** — `routes/mode_b.py` `/processing` 接口未传 `device_id` 时返回当前用户所有设备的处理中批次，修复页面刷新后非 Web 设备批次"消失"的问题
+5. **中奖记录同步写入** — `routes/winning.py` 用户上传中奖图片时同步更新 `LotteryTicket.winning_image_url` 和 `WinningRecord`，修复前台"已上传"但后台查不到记录的问题
+6. **文件计数同步** — `tasks/expire_tickets.py` 过期任务执行时同步更新 `UploadedFile` 的 `pending_count/assigned_count/completed_count`，修复管理端文件列表显示失真的问题
+7. **pytest 配置优化** — 新增 `pytest.ini` 限制测试收集范围为 `tests/test_*.py`，修复 `test_progress.txt` 被误当测试文件导致收集阶段中断的问题
+8. **修改密码路径修复** — `templates/client/dashboard.html` 修改密码请求路径从 `/user/change-password` 改为 `/api/user/change-password`，修复用户修改密码遇到 404 的问题
+9. **关闭公开注册** — `routes/auth.py` 统一关闭公开注册入口，JSON 请求返回 403，页面访问重定向到登录页，删除 `templates/register.html`
+10. **SQLite 自举逻辑** — `app.py` 启动时检测核心表缺失则自动执行 `db.create_all()`，补齐 `SystemSettings` 默认记录和默认管理员账号，修复空库登录报"网络错误"的问题
+11. **数据库路径规范化** — `app.py` 对相对 SQLite 路径统一规范到 `instance/` 目录，启动时日志记录实际使用路径，修复多份数据库文件混乱的问题
+12. **数据库信息可视化** — `routes/admin.py` 和 `templates/admin/dashboard.html` 后台首页新增"数据库信息"卡片，显示当前引擎类型和实际连接路径
+
+### 测试增强
+
+- **活体并发压测重写** — `tests/test_concurrent_20devices.py` 重写为完整的活体并发压测（40设备：4账号×10设备，A/B模式混合），验证核心分票流程无重复、无遗漏、无卡顿
+
+### 文档完善
+
+- **Bug 修复日志** — `docs/bug-fix-log-2026-03-30.md` 详细记录12个 bug 的问题、影响、修复方式、关键代码和测试方法
+
 ## 上次会话完成的功能（2026-03-20）
 
 1. **并发安全优化** — `services/ticket_pool.py` 将 `threading.Lock` 改为 `gevent.lock.BoundedSemaphore(1)`，持锁期间其他协程可继续响应无关请求，互斥性不变

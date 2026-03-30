@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Python Development Patterns"
+  short_description: "Pythonic idioms, PEP 8 standards, type hints, and best practices for building robust, efficient, and maintainable Python applications."
+  brand_color: "#6366F1"
+  default_prompt: "Use Python Development Patterns: Pythonic idioms, PEP 8 standards, type hints, and best practices for building robust, efficient, and maintainable Python applications."
+policy:
+  allow_implicit_invocation: true

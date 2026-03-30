@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "ClickHouse Analytics Patterns"
+  short_description: "ClickHouse database patterns, query optimization, analytics, and data engineering best practices for high-performance analytical workloads."
+  brand_color: "#6366F1"
+  default_prompt: "Use ClickHouse Analytics Patterns: ClickHouse database patterns, query optimization, analytics, and data engineering best practices for high-performance analytical workloads."
+policy:
+  allow_implicit_invocation: true

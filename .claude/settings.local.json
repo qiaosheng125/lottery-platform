@@ -16,7 +16,8 @@
       "Read(//mnt/c/Users/xuyifei/Desktop/file-hub/templates/**)",
       "Bash(dir \"C:\\\\Users\\\\徐逸飞\\\\Desktop\\\\file-hub\\\\templates\\\\client\")",
       "Bash(sqlite3:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(grep -E \"\\\\.\\(html|jinja2\\)$\")"
     ]
   }
 }

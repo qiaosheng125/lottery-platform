@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Agent Harness Construction"
+  short_description: "Design and optimize AI agent action spaces, tool definitions, and observation formatting for higher completion rates."
+  brand_color: "#6366F1"
+  default_prompt: "Use Agent Harness Construction: Design and optimize AI agent action spaces, tool definitions, and observation formatting for higher completion rates."
+policy:
+  allow_implicit_invocation: true

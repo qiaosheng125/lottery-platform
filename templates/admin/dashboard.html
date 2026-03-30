@@ -2,6 +2,17 @@
 {% block title %}管理后台{% endblock %}
 {% block content %}
 <div id="admin-dashboard">
+  <div class="card border-dark mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-hdd-stack"></i> 数据库信息</span>
+      <span class="badge bg-dark text-uppercase">{{ database_info.engine }}</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="small text-muted">当前实际连接路径</div>
+      <div class="font-monospace small text-break">{{ database_info.path }}</div>
+    </div>
+  </div>
+
   <div class="row g-3 mb-3">
     <!-- Pool stats -->
     <div class="col-md-2">

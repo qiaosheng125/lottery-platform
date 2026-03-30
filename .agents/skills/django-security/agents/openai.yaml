@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Django Security Best Practices"
+  short_description: "Django security best practices, authentication, authorization, CSRF protection, SQL injection prevention, XSS prevention, and secure deployment configurations."
+  brand_color: "#6366F1"
+  default_prompt: "Use Django Security Best Practices: Django security best practices, authentication, authorization, CSRF protection, SQL injection prevention, XSS prevention, and secure deployment configurations."
+policy:
+  allow_implicit_invocation: true

@@ -5,6 +5,7 @@
 import os
 import uuid
 from datetime import datetime
+from urllib.parse import unquote
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, send_file, current_app
 from flask_login import login_required, current_user
@@ -27,12 +28,27 @@ from utils.time_utils import beijing_now, get_business_date
 admin_bp = Blueprint('admin', __name__)
 
 
+def _database_display_info():
+    db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if db_uri.startswith('sqlite:///'):
+        raw_path = db_uri[len('sqlite:///'):]
+        return {
+            'engine': 'sqlite',
+            'path': raw_path.replace('/', os.sep),
+        }
+
+    return {
+        'engine': db_uri.split(':', 1)[0] if db_uri else 'unknown',
+        'path': unquote(db_uri),
+    }
+
+
 @admin_bp.route('/')
 @admin_bp.route('/dashboard')
 @login_required
 @admin_required
 def dashboard():
-    return render_template('admin/dashboard.html')
+    return render_template('admin/dashboard.html', database_info=_database_display_info())
 
 
 @admin_bp.route('/api/dashboard-data')

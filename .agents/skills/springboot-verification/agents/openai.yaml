@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Spring Boot Verification Loop"
+  short_description: "\"Verification loop for Spring Boot projects: build, static analysis, tests with coverage, security scans, and diff review before release or PR.\""
+  brand_color: "#6366F1"
+  default_prompt: "Use Spring Boot Verification Loop: \"Verification loop for Spring Boot projects: build, static analysis, tests with coverage, security scans, and diff review before release or PR.\""
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Security Scan Skill"
+  short_description: "Scan your Claude Code configuration (.claude/ directory) for security vulnerabilities, misconfigurations, and injection risks using AgentShield. Checks CLAUDE.md, settings.json, MCP servers, hooks, and agent definitions."
+  brand_color: "#6366F1"
+  default_prompt: "Use Security Scan Skill: Scan your Claude Code configuration (.claude/ directory) for security vulnerabilities, misconfigurations, and injection risks using AgentShield. Checks CLAUDE.md, settings.json, MCP servers, hooks, and agent definitions."
+policy:
+  allow_implicit_invocation: true

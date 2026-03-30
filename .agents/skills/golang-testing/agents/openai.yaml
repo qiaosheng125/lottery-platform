@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Go Testing Patterns"
+  short_description: "Go testing patterns including table-driven tests, subtests, benchmarks, fuzzing, and test coverage. Follows TDD methodology with idiomatic Go practices."
+  brand_color: "#6366F1"
+  default_prompt: "Use Go Testing Patterns: Go testing patterns including table-driven tests, subtests, benchmarks, fuzzing, and test coverage. Follows TDD methodology with idiomatic Go practices."
+policy:
+  allow_implicit_invocation: true

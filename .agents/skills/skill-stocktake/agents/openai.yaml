@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "skill-stocktake"
+  short_description: "\"Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation.\""
+  brand_color: "#6366F1"
+  default_prompt: "Use skill-stocktake: \"Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation.\""
+policy:
+  allow_implicit_invocation: true

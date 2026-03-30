@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Project Guidelines Skill (Example)"
+  short_description: "\"Example project-specific skill template based on a real production application.\""
+  brand_color: "#6366F1"
+  default_prompt: "Use Project Guidelines Skill (Example): \"Example project-specific skill template based on a real production application.\""
+policy:
+  allow_implicit_invocation: true

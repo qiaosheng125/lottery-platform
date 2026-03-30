@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Laravel TDD Workflow"
+  short_description: "Test-driven development for Laravel with PHPUnit and Pest, factories, database testing, fakes, and coverage targets."
+  brand_color: "#6366F1"
+  default_prompt: "Use Laravel TDD Workflow: Test-driven development for Laravel with PHPUnit and Pest, factories, database testing, fakes, and coverage targets."
+policy:
+  allow_implicit_invocation: true

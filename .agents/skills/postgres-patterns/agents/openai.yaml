@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "PostgreSQL Patterns"
+  short_description: "PostgreSQL database patterns for query optimization, schema design, indexing, and security. Based on Supabase best practices."
+  brand_color: "#6366F1"
+  default_prompt: "Use PostgreSQL Patterns: PostgreSQL database patterns for query optimization, schema design, indexing, and security. Based on Supabase best practices."
+policy:
+  allow_implicit_invocation: true

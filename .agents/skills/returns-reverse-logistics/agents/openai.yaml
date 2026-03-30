@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Returns & Reverse Logistics"
+  short_description: ">"
+  brand_color: "#6366F1"
+  default_prompt: "Use Returns & Reverse Logistics: >"
+policy:
+  allow_implicit_invocation: true

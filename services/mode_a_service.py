@@ -1,21 +1,12 @@
-"""
-A模式接单服务
-
-包含接单、历史记录（Redis）、完成、停止逻辑。
-Redis history key: history:{user_id}:{device_id}  → List，最近3张（LPUSH + LTRIM），TTL 3小时
-"""
-
-from typing import Optional, List
+from typing import List, Optional
 
 from flask import current_app
 
-from extensions import db
-from models.ticket import LotteryTicket
 from models.settings import SystemSettings
+from models.ticket import LotteryTicket
 from services.ticket_pool import assign_ticket_atomic, complete_ticket
-from utils.time_utils import beijing_now
 
-HISTORY_TTL = 3 * 3600  # 3 hours in seconds
+HISTORY_TTL = 3 * 3600
 MAX_HISTORY = 3
 
 
@@ -24,10 +15,12 @@ def _history_key(user_id: int, device_id: str) -> str:
 
 
 def _push_history(user_id: int, device_id: str, ticket_id: int):
-    """将 ticket_id 推入用户历史记录（最多保留 MAX_HISTORY 条）"""
+    """Push the completed ticket into the short device history."""
     from extensions import redis_client as rc
+
     if not rc:
         return
+
     key = _history_key(user_id, device_id)
     try:
         pipe = rc.pipeline()
@@ -40,8 +33,9 @@ def _push_history(user_id: int, device_id: str, ticket_id: int):
 
 
 def _get_history(user_id: int, device_id: str) -> List[int]:
-    """从 Redis 获取历史 ticket IDs（最近 MAX_HISTORY 条），无 Redis 时从数据库查询"""
+    """Fetch recent ticket IDs from Redis, or fall back to the database."""
     from extensions import redis_client as rc
+
     if rc:
         key = _history_key(user_id, device_id)
         try:
@@ -50,7 +44,6 @@ def _get_history(user_id: int, device_id: str) -> List[int]:
         except Exception:
             pass
 
-    # DB fallback: query recently completed tickets for this device
     try:
         tickets = LotteryTicket.query.filter_by(
             assigned_user_id=user_id,
@@ -62,22 +55,39 @@ def _get_history(user_id: int, device_id: str) -> List[int]:
         return []
 
 
-def get_next_ticket(user_id: int, device_id: str, username: str, device_name: str = None) -> dict:
+def _parse_requested_ticket_id(complete_current_ticket_id) -> Optional[int]:
+    if complete_current_ticket_id in (None, ''):
+        return None
+    try:
+        return int(complete_current_ticket_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_next_ticket(
+    user_id: int,
+    device_id: str,
+    username: str,
+    device_name: str = None,
+    complete_current_ticket_id: int = None,
+) -> dict:
     """
-    A模式：获取下一张票。
-    若当前有 assigned 票（来自当前设备），先完成再取下一张。
+    Get the next ticket for mode A.
+
+    The currently assigned ticket is only completed when the client explicitly
+    confirms the exact current ticket ID. This avoids duplicate/retried requests
+    from accidentally completing a newer ticket.
     """
     settings = SystemSettings.get()
     if not settings.mode_a_enabled:
         return {'success': False, 'error': '模式A已被关闭'}
 
-    # 获取用户每日上限和禁止彩种
     from models.user import User
+
     user = User.query.get(user_id)
     daily_limit = user.daily_ticket_limit if user else None
     blocked_lottery_types = user.get_blocked_lottery_types() if user else []
 
-    # Check if user already has an assigned ticket from this device
     current_ticket = LotteryTicket.query.filter_by(
         assigned_user_id=user_id,
         assigned_device_id=device_id,
@@ -85,24 +95,39 @@ def get_next_ticket(user_id: int, device_id: str, username: str, device_name: st
     ).first()
 
     if current_ticket:
-        # Complete the current ticket before assigning next
-        complete_ticket(current_ticket.id, user_id)
+        requested_ticket_id = _parse_requested_ticket_id(complete_current_ticket_id)
+        if requested_ticket_id != current_ticket.id:
+            return {
+                'success': True,
+                'ticket': current_ticket.to_dict(),
+                'completed_current': False,
+            }
+
+        completed = complete_ticket(current_ticket.id, user_id)
+        if not completed:
+            return {'success': False, 'error': '当前票状态已变化，请刷新后重试'}
         _push_history(user_id, device_id, current_ticket.id)
 
-    # Assign next ticket
-    ticket = assign_ticket_atomic(user_id, device_id, username, device_name, daily_limit=daily_limit, blocked_lottery_types=blocked_lottery_types)
+    ticket = assign_ticket_atomic(
+        user_id,
+        device_id,
+        username,
+        device_name,
+        daily_limit=daily_limit,
+        blocked_lottery_types=blocked_lottery_types,
+    )
     if not ticket:
         return {'success': False, 'error': '暂无可用票'}
 
-    # Refresh history (new ticket not yet in history, but previous completed one is)
     return {
         'success': True,
         'ticket': ticket.to_dict(),
+        'completed_current': current_ticket is not None,
     }
 
 
 def stop_receiving(user_id: int, device_id: str) -> dict:
-    """A模式：停止接单（完成当前票）"""
+    """Stop mode A and complete the current assigned ticket for this device."""
     current_ticket = LotteryTicket.query.filter_by(
         assigned_user_id=user_id,
         assigned_device_id=device_id,
@@ -118,10 +143,7 @@ def stop_receiving(user_id: int, device_id: str) -> dict:
 
 
 def get_previous_ticket(user_id: int, device_id: str, offset: int = 0) -> dict:
-    """
-    A模式：查看历史票（不改变状态）。
-    offset=0 → 上一张（最近一张完成的），offset=1 → 上上一张，最多2
-    """
+    """Return a recent completed ticket without mutating state."""
     history_ids = _get_history(user_id, device_id)
     if not history_ids or offset >= len(history_ids):
         return {'success': False, 'error': '无历史记录'}
@@ -135,7 +157,7 @@ def get_previous_ticket(user_id: int, device_id: str, offset: int = 0) -> dict:
 
 
 def get_current_ticket(user_id: int, device_id: str) -> Optional[LotteryTicket]:
-    """返回当前分配给该设备的 assigned 票"""
+    """Return the currently assigned ticket for the given device."""
     return LotteryTicket.query.filter_by(
         assigned_user_id=user_id,
         assigned_device_id=device_id,
