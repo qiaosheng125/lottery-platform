@@ -110,7 +110,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     parsed_meta = parse_filename(filename, upload_dt)
     if not parsed_meta:
         os.remove(file_path)
-        return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None}
+        return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
 
     # Create UploadedFile record
     uploaded_file = UploadedFile(
@@ -169,7 +169,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not tickets:
         db.session.rollback()
         os.remove(file_path)
-        return {'success': False, 'message': '文件内容为空', 'file_id': None}
+        return {'success': False, 'message': '文件内容为空', 'file_id': None, 'filename': filename}
 
     db.session.bulk_save_objects(tickets, return_defaults=True)
 
@@ -219,6 +219,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     return {
         'success': True,
         'file_id': uploaded_file.id,
+        'filename': filename,
         'message': f'成功上传 {len(tickets)} 条数据',
         'ticket_count': len(tickets),
     }

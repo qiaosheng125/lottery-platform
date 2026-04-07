@@ -379,6 +379,27 @@ def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
     assert "pool_enabled 必须是布尔值" in data["error"]
 
 
+def test_process_uploaded_file_returns_filename_on_success_and_failure(app):
+    from io import BytesIO
+    from services.file_parser import process_uploaded_file
+
+    with app.app_context():
+        user = create_user("upload_filename_user", "secret123", client_mode="mode_b")
+        good_result = process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        assert good_result["success"] is True
+        assert good_result["filename"] == "芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt"
+
+        bad_result = process_uploaded_file(
+            FileStorage(stream=BytesIO(b"content\n"), filename="bad-name.txt"),
+            uploader_id=user.id,
+        )
+        assert bad_result["success"] is False
+        assert bad_result["filename"] == "bad-name.txt"
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)
