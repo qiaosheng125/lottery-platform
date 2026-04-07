@@ -561,6 +561,38 @@ def test_mode_b_processing_with_device_id_filters_batches(app, client):
     assert data["batches"][0]["count"] == 1
 
 
+def test_mode_a_routes_reject_invalid_device_id_and_name(app, client):
+    with app.app_context():
+        create_user("mode_a_device_guard_user", "secret123", client_mode="mode_a")
+
+    resp = login(client, "mode_a_device_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    invalid_id_resp = client.post("/api/mode-a/next", json={"device_id": "bad id", "device_name": "Device A"})
+    assert invalid_id_resp.status_code == 400
+    assert "无效的设备ID" in invalid_id_resp.get_json()["error"]
+
+    long_name_resp = client.post("/api/mode-a/next", json={"device_id": "device-a", "device_name": "x" * 129})
+    assert long_name_resp.status_code == 400
+    assert "设备名称过长" in long_name_resp.get_json()["error"]
+
+
+def test_mode_b_download_rejects_invalid_device_info(app, client):
+    with app.app_context():
+        create_user("mode_b_device_guard_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_device_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    invalid_id_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "bad id", "device_name": "设备1"})
+    assert invalid_id_resp.status_code == 400
+    assert "无效的设备ID" in invalid_id_resp.get_json()["error"]
+
+    long_name_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "dev-1", "device_name": "x" * 129})
+    assert long_name_resp.status_code == 400
+    assert "设备名称过长" in long_name_resp.get_json()["error"]
+
+
 def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     with app.app_context():
         create_user("modeb_confirm_guard_user", "secret123", client_mode="mode_b")
@@ -954,6 +986,67 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
 
     assert result is not None
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
+
+
+def test_mode_a_postgres_assignment_falls_back_when_redis_returns_stale_id(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_ticket_atomic
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeRedis:
+        def __init__(self):
+            self.calls = 0
+
+        def lpop(self, key):
+            self.calls += 1
+            return "999" if self.calls == 1 else None
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    class FakeTicketRow:
+        def __init__(self):
+            self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
+            self.lottery_type = "胜平负"
+            self.source_file_id = 1
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=(321,))
+        if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            if params["id"] == 999:
+                return FakeResult(fetchone_data=None)
+            assert params["id"] == 321
+            return FakeResult(fetchone_data=FakeTicketRow())
+        if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
+            assert params["id"] == 321
+            return FakeResult(rowcount=1)
+        if "UPDATE uploaded_files" in sql:
+            assert params["id"] == 321
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    fake_redis = FakeRedis()
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: fake_redis)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.LotteryTicket", SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id, assigned_at=fixed_now))))
+
+    with app.app_context():
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+
+    assert result is not None
+    assert result.id == 321
 
 
 def test_mode_a_sqlite_assignment_retries_after_guarded_update_miss(app, monkeypatch):
@@ -2016,6 +2109,69 @@ def test_expire_overdue_tickets_updates_file_counters(app):
         assert statuses == {"expired"}
         assert refreshed.pending_count == 0
         assert refreshed.assigned_count == 0
+
+
+def test_expire_overdue_tickets_removes_pending_ids_from_redis(app, monkeypatch):
+    from tasks.expire_tickets import expire_overdue_tickets
+
+    removed = []
+
+    class FakePipe:
+        def lrem(self, key, count, value):
+            removed.append((key, count, value))
+            return self
+
+        def execute(self):
+            return True
+
+    class FakeRedis:
+        def pipeline(self):
+            return FakePipe()
+
+    monkeypatch.setattr("extensions.redis_client", FakeRedis())
+
+    with app.app_context():
+        user = create_user("expire_redis_user", "secret123", client_mode="mode_a")
+        uploaded_file = UploadedFile(
+            display_id="2026/03/30-02",
+            original_filename="expired-redis.txt",
+            stored_filename="expired-redis.txt",
+            uploaded_by=user.id,
+            total_tickets=2,
+            pending_count=1,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.commit()
+
+        pending_ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="PENDING-REDIS-EXPIRED",
+            status="pending",
+            deadline_time=beijing_now() - timedelta(minutes=1),
+        )
+        assigned_ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=2,
+            raw_content="ASSIGNED-REDIS-EXPIRED",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            assigned_device_name="device-a",
+            deadline_time=beijing_now() - timedelta(minutes=1),
+        )
+        db.session.add_all([pending_ticket, assigned_ticket])
+        db.session.commit()
+        pending_ticket_id = pending_ticket.id
+        assigned_ticket_id = assigned_ticket.id
+
+        expire_overdue_tickets()
+
+    assert ("pool:pending", 0, str(pending_ticket_id)) in removed
+    assert ("pool:pending", 0, str(assigned_ticket_id)) not in removed
 
 
 def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
@@ -4060,6 +4216,50 @@ def test_mode_b_confirm_can_complete_prefix_and_expire_rest(app):
     assert result["completed_count"] == 2
     assert result["expired_count"] == 1
     assert [ticket.status for ticket in refreshed] == ["completed", "completed", "expired"]
+
+
+def test_mode_b_finalize_ignores_duplicate_ticket_ids(app):
+    from services.ticket_pool import finalize_tickets_batch
+
+    with app.app_context():
+        user = create_user("modeb_duplicate_finalize_user", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            display_id="2026/04/07-99",
+            original_filename="duplicate-finalize.txt",
+            stored_filename="txt/2026-04-07/duplicate-finalize.txt",
+            uploaded_by=user.id,
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="DUP-FINALIZE-001",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-b",
+            assigned_device_name="device-b",
+            assigned_at=beijing_now(),
+            deadline_time=beijing_now() - timedelta(minutes=1),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+        result = finalize_tickets_batch([ticket.id, ticket.id], user.id, completed_count=2)
+        db.session.expire_all()
+        refreshed_ticket = LotteryTicket.query.get(ticket.id)
+        refreshed_file = UploadedFile.query.get(uploaded.id)
+
+    assert result == {"completed_count": 1, "expired_count": 0}
+    assert refreshed_ticket.status == "completed"
+    assert refreshed_file.assigned_count == 0
+    assert refreshed_file.completed_count == 1
 
 
 def test_mode_b_preview_rejects_invalid_count(app, client):

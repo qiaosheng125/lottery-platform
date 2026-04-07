@@ -14,6 +14,18 @@ from utils.decorators import can_receive_required, login_required_json, mode_b_r
 mode_b_bp = Blueprint('mode_b', __name__)
 
 
+def _validate_device_info(device_id: str, device_name: str = ''):
+    device_id = (device_id or '').strip()
+    device_name = (device_name or '').strip()
+    if not device_id:
+        return '缺少设备ID'
+    if len(device_id) > 64 or not all(c.isalnum() or c in '-_' for c in device_id):
+        return '无效的设备ID'
+    if len(device_name) > 128:
+        return '设备名称过长'
+    return None
+
+
 def _parse_batch_count(value, default: int = 100):
     try:
         count = int(value if value is not None else default)
@@ -65,6 +77,9 @@ def download():
         return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
     device_id = data.get('device_id') or 'Web'
     device_name = data.get('device_name') or '网页浏览器'
+    error = _validate_device_info(device_id, device_name)
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
 
     result = download_batch(
         user_id=current_user.id,
@@ -87,8 +102,10 @@ def download():
 def processing():
     """Return assigned batches for the current user."""
     device_id = (request.args.get('device_id') or '').strip()
-    if device_id and (len(device_id) > 50 or not all(c.isalnum() or c in '-_' for c in device_id)):
-        return jsonify({'success': False, 'error': '无效的设备ID'}), 400
+    if device_id:
+        error = _validate_device_info(device_id)
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
 
     batches = get_processing_batches(current_user.id, device_id or None)
     return jsonify({'success': True, 'batches': batches})

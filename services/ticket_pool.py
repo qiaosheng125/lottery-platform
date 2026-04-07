@@ -181,117 +181,127 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
     blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
 
     MAX_ATTEMPTS = 10
+
+    def _fetch_pending_ticket_id_from_db():
+        result = db.session.execute(
+            text(f"""
+                SELECT id FROM lottery_tickets
+                WHERE status = 'pending'
+                  AND deadline_time > :now
+                  {blocked_condition}
+                ORDER BY id
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            """),
+            {'now': now, **blocked_params}
+        ).fetchone()
+        return result[0] if result else None
+
     for _ in range(MAX_ATTEMPTS):
-        ticket_id = None
+        redis_ticket_id = None
         if rc:
             try:
-                ticket_id = rc.lpop('pool:pending')
+                popped_id = rc.lpop('pool:pending')
+                if popped_id:
+                    redis_ticket_id = int(popped_id)
             except Exception as e:
                 current_app.logger.warning(f"Redis LPOP error: {e}")
 
-        if ticket_id:
-            ticket_id = int(ticket_id)
-        else:
-            result = db.session.execute(
-                text(f"""
-                    SELECT id FROM lottery_tickets
-                    WHERE status = 'pending'
-                      AND deadline_time > :now
-                      {blocked_condition}
-                    ORDER BY id
-                    FOR UPDATE SKIP LOCKED
-                    LIMIT 1
-                """),
-                {'now': now, **blocked_params}
-            ).fetchone()
-            if not result:
-                return None
-            ticket_id = result[0]
+        candidate_ids = []
+        if redis_ticket_id is not None:
+            candidate_ids.append(redis_ticket_id)
 
-        try:
-            ticket = db.session.execute(
-                text("""
-                    SELECT * FROM lottery_tickets
-                    WHERE id = :id AND status = 'pending'
-                    FOR UPDATE SKIP LOCKED
-                """),
-                {'id': ticket_id}
-            ).fetchone()
+        fallback_ticket_id = _fetch_pending_ticket_id_from_db()
+        if fallback_ticket_id is not None and fallback_ticket_id not in candidate_ids:
+            candidate_ids.append(fallback_ticket_id)
+        if not candidate_ids:
+            return None
 
-            if not ticket:
-                continue
+        for ticket_id in candidate_ids:
+            try:
+                ticket = db.session.execute(
+                    text("""
+                        SELECT * FROM lottery_tickets
+                        WHERE id = :id AND status = 'pending'
+                        FOR UPDATE SKIP LOCKED
+                    """),
+                    {'id': ticket_id}
+                ).fetchone()
 
-            if ticket.deadline_time and ticket.deadline_time < now:
+                if not ticket:
+                    continue
+
+                if ticket.deadline_time and ticket.deadline_time < now:
+                    db.session.execute(
+                        text("UPDATE lottery_tickets SET status='expired' WHERE id=:id"),
+                        {'id': ticket_id}
+                    )
+                    if ticket.source_file_id:
+                        db.session.execute(
+                            text("""
+                                UPDATE uploaded_files
+                                SET pending_count = CASE
+                                    WHEN pending_count > 0 THEN pending_count - 1
+                                    ELSE 0
+                                END
+                                WHERE id = :file_id
+                            """),
+                            {'file_id': ticket.source_file_id}
+                        )
+                    db.session.commit()
+                    continue
+
+                if ticket.lottery_type and ticket.lottery_type in blocked_types:
+                    # 该票属于禁止彩种，放回 Redis 队列供其他用户使用
+                    if rc:
+                        try:
+                            rc.rpush('pool:pending', ticket_id)
+                        except Exception:
+                            pass
+                    continue
+
+                updated = db.session.execute(
+                    text("""
+                        UPDATE lottery_tickets
+                        SET status = 'assigned',
+                            assigned_user_id = :user_id,
+                            assigned_username = :username,
+                            assigned_device_id = :device_id,
+                            assigned_device_name = :device_name,
+                            assigned_at = :now,
+                            locked_until = :lock_until,
+                            version = version + 1
+                        WHERE id = :id AND status = 'pending' AND deadline_time > :now
+                    """),
+                    {
+                        'user_id': user_id, 'username': username,
+                        'device_id': device_id, 'device_name': device_name,
+                        'now': now, 'lock_until': lock_until, 'id': ticket_id,
+                    }
+                ).rowcount
+
+                if not updated:
+                    db.session.rollback()
+                    continue
+
                 db.session.execute(
-                    text("UPDATE lottery_tickets SET status='expired' WHERE id=:id"),
+                    text("""
+                        UPDATE uploaded_files
+                        SET pending_count = pending_count - 1,
+                            assigned_count = assigned_count + 1
+                        WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
+                          AND pending_count > 0
+                    """),
                     {'id': ticket_id}
                 )
-                if ticket.source_file_id:
-                    db.session.execute(
-                        text("""
-                            UPDATE uploaded_files
-                            SET pending_count = CASE
-                                WHEN pending_count > 0 THEN pending_count - 1
-                                ELSE 0
-                            END
-                            WHERE id = :file_id
-                        """),
-                        {'file_id': ticket.source_file_id}
-                    )
+
                 db.session.commit()
-                continue
+                return LotteryTicket.query.get(ticket_id)
 
-            if ticket.lottery_type and ticket.lottery_type in blocked_types:
-                # 该票属于禁止彩种，放回 Redis 队列供其他用户使用
-                if rc:
-                    try:
-                        rc.rpush('pool:pending', ticket_id)
-                    except Exception:
-                        pass
-                continue
-
-            updated = db.session.execute(
-                text("""
-                    UPDATE lottery_tickets
-                    SET status = 'assigned',
-                        assigned_user_id = :user_id,
-                        assigned_username = :username,
-                        assigned_device_id = :device_id,
-                        assigned_device_name = :device_name,
-                        assigned_at = :now,
-                        locked_until = :lock_until,
-                        version = version + 1
-                    WHERE id = :id AND status = 'pending' AND deadline_time > :now
-                """),
-                {
-                    'user_id': user_id, 'username': username,
-                    'device_id': device_id, 'device_name': device_name,
-                    'now': now, 'lock_until': lock_until, 'id': ticket_id,
-                }
-            ).rowcount
-
-            if not updated:
+            except Exception as e:
                 db.session.rollback()
-                continue
-
-            db.session.execute(
-                text("""
-                    UPDATE uploaded_files
-                    SET pending_count = pending_count - 1,
-                        assigned_count = assigned_count + 1
-                    WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
-                      AND pending_count > 0
-                """),
-                {'id': ticket_id}
-            )
-
-            db.session.commit()
-            return LotteryTicket.query.get(ticket_id)
-
-        except Exception as e:
-            db.session.rollback()
-            current_app.logger.error(f"assign_ticket_atomic error for id {ticket_id}: {e}")
-            return None
+                current_app.logger.error(f"assign_ticket_atomic error for id {ticket_id}: {e}")
+                return None
 
     return None
 
@@ -755,6 +765,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
     if not ticket_ids:
         return {'completed_count': 0, 'expired_count': 0}
 
+    ticket_ids = list(dict.fromkeys(ticket_ids))
     total = len(ticket_ids)
     if completed_count is None:
         completed_count = total

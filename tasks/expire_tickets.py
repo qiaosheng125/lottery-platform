@@ -54,9 +54,11 @@ def expire_overdue_tickets():
     """Mark overdue pending/assigned tickets as expired and sync file counters."""
     try:
         from services.notify_service import notify_admins
+        from extensions import redis_client
 
         now = beijing_now()
         affected_file_ids = []
+        expired_pending_ticket_ids = []
 
         if _is_postgres():
             affected_file_ids = [
@@ -68,6 +70,18 @@ def expire_overdue_tickets():
                         WHERE status IN ('pending', 'assigned')
                           AND deadline_time < :now
                           AND source_file_id IS NOT NULL
+                    """),
+                    {'now': now},
+                ).fetchall()
+            ]
+            expired_pending_ticket_ids = [
+                row[0]
+                for row in db.session.execute(
+                    text("""
+                        SELECT id
+                        FROM lottery_tickets
+                        WHERE status = 'pending'
+                          AND deadline_time < :now
                     """),
                     {'now': now},
                 ).fetchall()
@@ -92,10 +106,21 @@ def expire_overdue_tickets():
             for ticket in tickets:
                 if ticket.source_file_id is not None:
                     affected_file_ids.append(ticket.source_file_id)
+                if ticket.status == 'pending':
+                    expired_pending_ticket_ids.append(ticket.id)
                 ticket.status = 'expired'
 
         _sync_uploaded_file_counters(sorted(set(affected_file_ids)))
         db.session.commit()
+
+        if expired_pending_ticket_ids and redis_client:
+            try:
+                pipe = redis_client.pipeline()
+                for ticket_id in expired_pending_ticket_ids:
+                    pipe.lrem('pool:pending', 0, str(ticket_id))
+                pipe.execute()
+            except Exception as redis_error:
+                logger.warning("expire_overdue_tickets Redis cleanup error: %s", redis_error)
 
         if rows:
             try:
