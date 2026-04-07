@@ -216,6 +216,15 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
                 'file_id': None,
                 'filename': filename,
             }
+        if parsed_ticket['final_multiplier'] != parsed_meta['multiplier']:
+            db.session.rollback()
+            os.remove(file_path)
+            return {
+                'success': False,
+                'message': f'第 {line_no} 行倍数与文件名倍数不一致',
+                'file_id': None,
+                'filename': filename,
+            }
         amount = calculate_ticket_amount(line)
         total_amount += amount
 
