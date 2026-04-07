@@ -54,6 +54,8 @@ def expire_overdue_tickets():
     """Mark overdue pending/assigned tickets as expired and sync file counters."""
     try:
         from services.notify_service import notify_admins
+        from services.notify_service import notify_pool_update
+        from services.ticket_pool import get_pool_status
         from extensions import redis_client
 
         now = beijing_now()
@@ -125,6 +127,10 @@ def expire_overdue_tickets():
         if rows:
             try:
                 notify_admins('tickets_expired', {'count': rows})
+            except Exception:
+                pass
+            try:
+                notify_pool_update(get_pool_status())
             except Exception:
                 pass
             logger.info("Expired %s overdue tickets", rows)

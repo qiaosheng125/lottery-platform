@@ -2829,6 +2829,42 @@ def test_expire_overdue_tickets_removes_pending_ids_from_redis(app, monkeypatch)
     assert ("pool:pending", 0, str(assigned_ticket_id)) not in removed
 
 
+def test_expire_overdue_tickets_pushes_pool_update(app, monkeypatch):
+    from tasks.expire_tickets import expire_overdue_tickets
+
+    pushed = []
+
+    monkeypatch.setattr("services.notify_service.notify_pool_update", lambda payload: pushed.append(payload))
+    monkeypatch.setattr("services.ticket_pool.get_pool_status", lambda: {"total_pending": 0, "by_type": [], "assigned": 0, "completed_today": 0})
+
+    with app.app_context():
+        user = create_user("expire_notify_user", "secret123", client_mode="mode_a")
+        uploaded_file = UploadedFile(
+            display_id="2026/03/30-03",
+            original_filename="expired-notify.txt",
+            stored_filename="expired-notify.txt",
+            uploaded_by=user.id,
+            total_tickets=1,
+            pending_count=1,
+            assigned_count=0,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+        db.session.add(LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="PENDING-NOTIFY-EXPIRED",
+            status="pending",
+            deadline_time=beijing_now() - timedelta(minutes=1),
+        ))
+        db.session.commit()
+
+        expire_overdue_tickets()
+
+    assert pushed == [{"total_pending": 0, "by_type": [], "assigned": 0, "completed_today": 0}]
+
+
 def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
     from tasks.archive import archive_old_tickets
 
