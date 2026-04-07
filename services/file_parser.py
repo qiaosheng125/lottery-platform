@@ -155,8 +155,18 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
     except UnicodeDecodeError:
-        with open(file_path, 'r', encoding='gbk') as f:
-            lines = f.readlines()
+        try:
+            with open(file_path, 'r', encoding='gbk') as f:
+                lines = f.readlines()
+        except UnicodeDecodeError:
+            db.session.rollback()
+            os.remove(file_path)
+            return {
+                'success': False,
+                'message': '文件编码无法识别，请使用 UTF-8 或 GBK',
+                'file_id': None,
+                'filename': filename,
+            }
 
     ticket_ids = []
     initial_ticket_status = 'expired' if parsed_meta['deadline_time'] and parsed_meta['deadline_time'] <= upload_dt else 'pending'

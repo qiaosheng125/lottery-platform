@@ -453,6 +453,50 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
         assert {ticket.status for ticket in tickets} == {"expired"}
 
 
+def test_process_uploaded_file_rejects_unknown_text_encoding_cleanly(app, monkeypatch):
+    from io import BytesIO
+    from werkzeug.datastructures import FileStorage
+    from services import file_parser
+
+    with app.app_context():
+        user = create_user("upload_bad_encoding_user", "secret123", client_mode="mode_b")
+        before_count = UploadedFile.query.count()
+        monkeypatch.setattr(
+            file_parser,
+            "build_uploaded_txt_relative_path",
+            lambda filename, upload_dt=None: "txt/2026-04-07/mock-bad-encoding.txt",
+        )
+        monkeypatch.setattr(
+            file_parser,
+            "parse_filename",
+            lambda filename, upload_dt=None: {
+                "identifier": "AA",
+                "internal_code": "P7",
+                "lottery_type": "TEST",
+                "multiplier": 3,
+                "declared_amount": 600.0,
+                "declared_count": 47,
+                "deadline_hhmm": "23.55",
+                "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+                "detail_period": "26034",
+            },
+        )
+        result = file_parser.process_uploaded_file(
+            FileStorage(
+                stream=BytesIO(b"\x80\x80\x80"),
+                filename="AA_P7TEST_600_47_00.55_26034.txt",
+            ),
+            uploader_id=user.id,
+        )
+
+        assert result["success"] is False
+        assert result["file_id"] is None
+        assert result["filename"] == "AA_P7TEST_600_47_00.55_26034.txt"
+        assert "UTF-8" in result["message"]
+        assert "GBK" in result["message"]
+        assert UploadedFile.query.count() == before_count
+
+
 def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app, monkeypatch):
     from services import file_parser
     first_now = datetime(2026, 4, 7, 13, 0, 0)
