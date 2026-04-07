@@ -125,6 +125,13 @@ def get_next_ticket(
         if _normalize_ticket_action(complete_current_ticket_action) != 'expired':
             _push_history(user_id, device_id, current_ticket.id)
 
+    if not settings.pool_enabled:
+        return {
+            'success': False,
+            'error': '票池已关闭',
+            'completed_current': current_ticket is not None,
+        }
+
     ticket = assign_ticket_atomic(
         user_id,
         device_id,

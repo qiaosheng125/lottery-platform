@@ -19,6 +19,13 @@ from utils.time_utils import beijing_now
 
 def preview_batch(requested_count: int) -> dict:
     """预查询当前票池总可用票数"""
+    settings = SystemSettings.get()
+    if not settings.pool_enabled:
+        return {
+            'available': 0,
+            'requested': requested_count,
+            'sufficient': False,
+        }
     available = get_pool_total_pending()
     return {
         'available': available,
@@ -40,6 +47,8 @@ def download_batch(
     settings = SystemSettings.get()
     if not settings.mode_b_enabled:
         return {'success': False, 'error': '模式B已被关闭'}
+    if not settings.pool_enabled:
+        return {'success': False, 'error': '票池已关闭'}
 
     # 获取用户的B模式处理中票数上限、每日上限和禁止彩种
     from models.user import User

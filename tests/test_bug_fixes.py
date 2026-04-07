@@ -820,6 +820,40 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
     assert result["error"] == "当前票池无可用票"
 
 
+def test_mode_b_download_rejects_when_pool_disabled(app):
+    from services.mode_b_service import download_batch
+
+    with app.app_context():
+        user = create_user("mode_b_pool_disabled_user", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.pool_enabled = False
+        db.session.commit()
+
+        result = download_batch(
+            user_id=user.id,
+            device_id="device-b",
+            username=user.username,
+            count=2,
+            device_name="设备B",
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "票池已关闭"
+
+
+def test_mode_b_preview_returns_zero_when_pool_disabled(app):
+    from services.mode_b_service import preview_batch
+
+    with app.app_context():
+        settings = SystemSettings.get()
+        settings.pool_enabled = False
+        db.session.commit()
+
+        result = preview_batch(5)
+
+    assert result == {"available": 0, "requested": 5, "sufficient": False}
+
+
 def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(app):
     from services.mode_b_service import download_batch
 
@@ -1718,6 +1752,35 @@ def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
         assigned_next = LotteryTicket.query.get(next_ticket_id)
         assert expired_ticket.status == "expired"
         assert assigned_next.status == "assigned"
+
+
+def test_mode_a_next_stops_after_completing_current_when_pool_disabled(app):
+    from services.mode_a_service import get_next_ticket
+
+    with app.app_context():
+        user = create_user("modea_pool_disabled_user", "secret123", client_mode="mode_a")
+        settings = SystemSettings.get()
+        settings.pool_enabled = False
+        db.session.commit()
+
+        current_ticket = create_assigned_ticket(user, "device-a", "MODEA-POOL-DISABLED", 1)
+        current_ticket_id = current_ticket.id
+
+        result = get_next_ticket(
+            user_id=user.id,
+            device_id="device-a",
+            username=user.username,
+            device_name="设备A",
+            complete_current_ticket_id=current_ticket_id,
+            complete_current_ticket_action="completed",
+        )
+
+        refreshed = LotteryTicket.query.get(current_ticket_id)
+        assert refreshed.status == "completed"
+        assert result["success"] is False
+        assert result["error"] == "票池已关闭"
+        assert result["completed_current"] is True
+
 
 def test_mode_a_current_prefers_latest_assigned_ticket_for_device(app, client):
     with app.app_context():
