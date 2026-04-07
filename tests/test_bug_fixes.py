@@ -5069,6 +5069,16 @@ def test_admin_upload_template_uses_xlsx_export_label():
     assert "导出CSV" not in content
 
 
+def test_admin_upload_template_uses_server_derived_file_status():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "if (f.status === 'exhausted') return 'bg-success';" in content
+    assert "if (f.status === 'expired') return 'bg-secondary';" in content
+    assert "if (f.status === 'exhausted') return '已完成';" in content
+    assert "if (f.status === 'expired') return '已过期';" in content
+    assert "new Date(f.deadline_time) < new Date()" not in content
+
+
 def test_admin_upload_template_loads_all_detail_pages():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
