@@ -282,7 +282,16 @@ def upload_files():
     for f in files:
         if not f.filename:
             continue
-        result = process_uploaded_file(f, current_user.id)
+        try:
+            result = process_uploaded_file(f, current_user.id)
+        except Exception as exc:
+            current_app.logger.exception("Admin upload failed for file %s", getattr(f, 'filename', ''))
+            result = {
+                'success': False,
+                'filename': getattr(f, 'filename', '') or '',
+                'file_id': None,
+                'message': f'上传处理失败: {exc}',
+            }
         results.append(result)
 
     any_success = any(result.get('success') for result in results)

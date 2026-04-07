@@ -639,6 +639,58 @@ def test_admin_file_upload_returns_http_400_when_all_files_fail(app, client, mon
     assert "同名文件" in data["results"][0]["message"]
     assert notified["count"] == 0
 
+
+def test_admin_file_upload_keeps_batch_running_when_one_file_raises(app, client, monkeypatch):
+    import routes.admin as admin_routes
+    from services import notify_service
+
+    notified = {"count": 0}
+
+    def fake_process_uploaded_file(file, uploader_id):
+        if file.filename == "boom.txt":
+            raise RuntimeError("解析异常")
+        return {
+            "success": True,
+            "filename": file.filename,
+            "file_id": 123,
+            "message": "ok",
+        }
+
+    def fake_notify_pool_update(_payload):
+        notified["count"] += 1
+
+    monkeypatch.setattr(admin_routes, "process_uploaded_file", fake_process_uploaded_file)
+    monkeypatch.setattr(notify_service, "notify_pool_update", fake_notify_pool_update)
+
+    with app.app_context():
+        admin = User(username="admin_upload_partial_exception", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_partial_exception", "password": "secret123"})
+    assert resp.status_code == 200
+
+    upload = client.post(
+        "/admin/files/upload",
+        data={
+            "files": [
+                (make_upload_file("boom.txt", "1\n"), "boom.txt"),
+                (make_upload_file("ok.txt", "2\n"), "ok.txt"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 200
+    data = upload.get_json()
+    assert data["success"] is True
+    assert [item["filename"] for item in data["results"]] == ["boom.txt", "ok.txt"]
+    assert data["results"][0]["success"] is False
+    assert "上传处理失败" in data["results"][0]["message"]
+    assert data["results"][1]["success"] is True
+    assert notified["count"] == 1
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)
