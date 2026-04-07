@@ -68,6 +68,17 @@ def _normalize_ticket_action(action: Optional[str]) -> str:
     return 'expired' if action == 'expired' else 'completed'
 
 
+def _get_latest_assigned_ticket(user_id: int, device_id: str) -> Optional[LotteryTicket]:
+    return LotteryTicket.query.filter_by(
+        assigned_user_id=user_id,
+        assigned_device_id=device_id,
+        status='assigned',
+    ).order_by(
+        LotteryTicket.assigned_at.desc(),
+        LotteryTicket.id.desc(),
+    ).first()
+
+
 def get_next_ticket(
     user_id: int,
     device_id: str,
@@ -93,11 +104,7 @@ def get_next_ticket(
     daily_limit = user.daily_ticket_limit if user else None
     blocked_lottery_types = user.get_blocked_lottery_types() if user else []
 
-    current_ticket = LotteryTicket.query.filter_by(
-        assigned_user_id=user_id,
-        assigned_device_id=device_id,
-        status='assigned',
-    ).first()
+    current_ticket = _get_latest_assigned_ticket(user_id, device_id)
 
     if current_ticket:
         requested_ticket_id = _parse_requested_ticket_id(complete_current_ticket_id)
@@ -138,11 +145,7 @@ def get_next_ticket(
 
 def stop_receiving(user_id: int, device_id: str, current_ticket_action: str = 'completed') -> dict:
     """Stop mode A and complete the current assigned ticket for this device."""
-    current_ticket = LotteryTicket.query.filter_by(
-        assigned_user_id=user_id,
-        assigned_device_id=device_id,
-        status='assigned',
-    ).first()
+    current_ticket = _get_latest_assigned_ticket(user_id, device_id)
 
     if current_ticket:
         final_status = _normalize_ticket_action(current_ticket_action)
@@ -174,8 +177,4 @@ def get_previous_ticket(user_id: int, device_id: str, offset: int = 0) -> dict:
 
 def get_current_ticket(user_id: int, device_id: str) -> Optional[LotteryTicket]:
     """Return the currently assigned ticket for the given device."""
-    return LotteryTicket.query.filter_by(
-        assigned_user_id=user_id,
-        assigned_device_id=device_id,
-        status='assigned',
-    ).first()
+    return _get_latest_assigned_ticket(user_id, device_id)

@@ -223,6 +223,18 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     text("UPDATE lottery_tickets SET status='expired' WHERE id=:id"),
                     {'id': ticket_id}
                 )
+                if ticket.source_file_id:
+                    db.session.execute(
+                        text("""
+                            UPDATE uploaded_files
+                            SET pending_count = CASE
+                                WHEN pending_count > 0 THEN pending_count - 1
+                                ELSE 0
+                            END
+                            WHERE id = :file_id
+                        """),
+                        {'file_id': ticket.source_file_id}
+                    )
                 db.session.commit()
                 continue
 

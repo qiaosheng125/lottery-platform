@@ -144,6 +144,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             lines = f.readlines()
 
     ticket_ids = []
+    initial_ticket_status = 'expired' if parsed_meta['deadline_time'] and parsed_meta['deadline_time'] <= upload_dt else 'pending'
     for line_no, line in enumerate(lines, start=1):
         line = line.strip()
         if not line:
@@ -161,7 +162,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             deadline_time=parsed_meta['deadline_time'],
             detail_period=parsed_meta['detail_period'],
             ticket_amount=amount,
-            status='pending',
+            status=initial_ticket_status,
             admin_upload_time=upload_dt,
         )
         tickets.append(ticket)
@@ -175,7 +176,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
 
     # Update file counters
     uploaded_file.total_tickets = len(tickets)
-    uploaded_file.pending_count = len(tickets)
+    uploaded_file.pending_count = len(tickets) if initial_ticket_status == 'pending' else 0
     uploaded_file.actual_total_amount = total_amount
 
     db.session.flush()

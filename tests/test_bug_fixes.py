@@ -400,6 +400,29 @@ def test_process_uploaded_file_returns_filename_on_success_and_failure(app):
         assert bad_result["filename"] == "bad-name.txt"
 
 
+def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monkeypatch):
+    from services import file_parser
+
+    fixed_now = datetime(2026, 4, 7, 1, 0, 0)
+    monkeypatch.setattr(file_parser, "beijing_now", lambda: fixed_now)
+
+    with app.app_context():
+        user = create_user("upload_overdue_user", "secret123", client_mode="mode_b")
+        result = file_parser.process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        assert result["success"] is True
+
+        uploaded = UploadedFile.query.get(result["file_id"])
+        tickets = LotteryTicket.query.filter_by(source_file_id=uploaded.id).all()
+
+        assert uploaded.pending_count == 0
+        assert uploaded.assigned_count == 0
+        assert uploaded.completed_count == 0
+        assert {ticket.status for ticket in tickets} == {"expired"}
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)
@@ -757,6 +780,25 @@ def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
         assert expired_ticket.status == "expired"
         assert assigned_next.status == "assigned"
 
+def test_mode_a_current_prefers_latest_assigned_ticket_for_device(app, client):
+    with app.app_context():
+        user = create_user("modea_latest_current_user", "secret123", client_mode="mode_a")
+        older = create_assigned_ticket(user, "device-a", "CUR-OLDER", 1)
+        newer = create_assigned_ticket(user, "device-a", "CUR-NEWER", 2)
+        older.assigned_at = datetime(2026, 4, 7, 10, 0, 0)
+        newer.assigned_at = datetime(2026, 4, 7, 10, 5, 0)
+        db.session.commit()
+        newer_id = newer.id
+
+    resp = login(client, "modea_latest_current_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-a/current?device_id=device-a")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["id"] == newer_id
+
 
 def test_mode_a_previous_rejects_invalid_offset(app, client):
     with app.app_context():
@@ -956,6 +998,21 @@ def test_device_update_name_rejects_too_long_name(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "长度不能超过 20" in data["error"]
+
+
+def test_device_update_name_returns_json_for_missing_device(app, client):
+    with app.app_context():
+        create_user("device_missing_name_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "device_missing_name_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.put("/api/device/missing-device/name", json={"name": "新设备名"})
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "设备不存在" in data["error"]
 
 
 def test_change_password_handles_empty_json_body(app, client):

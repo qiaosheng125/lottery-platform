@@ -74,7 +74,9 @@ def update_device_name(device_id):
 
     device = DeviceRegistry.query.filter_by(
         device_id=device_id, user_id=current_user.id
-    ).first_or_404()
+    ).first()
+    if not device:
+        return jsonify({'success': False, 'error': '设备不存在'}), 404
 
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
