@@ -32,8 +32,8 @@ def _parse_non_negative_int(value):
 
 
 @mode_a_bp.route('/next', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 @mode_a_required
 @can_receive_required
 def next_ticket():
@@ -53,8 +53,8 @@ def next_ticket():
 
 
 @mode_a_bp.route('/current', methods=['GET'])
-@login_required
 @login_required_json
+@login_required
 @mode_a_required
 def current_ticket():
     """Return the currently assigned ticket without mutating status."""
@@ -69,8 +69,8 @@ def current_ticket():
 
 
 @mode_a_bp.route('/stop', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 @mode_a_required
 def stop():
     device_id, _, _, complete_current_ticket_action = _get_device_info()
@@ -82,8 +82,8 @@ def stop():
 
 
 @mode_a_bp.route('/previous', methods=['GET'])
-@login_required
 @login_required_json
+@login_required
 @mode_a_required
 def previous_ticket():
     device_id = request.args.get('device_id', '')

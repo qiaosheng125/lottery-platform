@@ -3,11 +3,13 @@ from flask_login import current_user, login_required
 
 from models.settings import SystemSettings
 from services.ticket_pool import get_pool_status
+from utils.decorators import login_required_json
 
 pool_bp = Blueprint('pool', __name__)
 
 
 @pool_bp.route('/status')
+@login_required_json
 @login_required
 def pool_status():
     settings = SystemSettings.get()

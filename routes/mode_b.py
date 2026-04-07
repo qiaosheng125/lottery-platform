@@ -25,8 +25,8 @@ def _parse_batch_count(value, default: int = 100):
 
 
 @mode_b_bp.route('/pool-status')
-@login_required
 @login_required_json
+@login_required
 @mode_b_required
 def pool_status():
     """Return grouped pool status for mode B users."""
@@ -42,8 +42,8 @@ def pool_status():
 
 
 @mode_b_bp.route('/preview')
-@login_required
 @login_required_json
+@login_required
 @mode_b_required
 def preview():
     count = _parse_batch_count(request.args.get('count', 100))
@@ -54,8 +54,8 @@ def preview():
 
 
 @mode_b_bp.route('/download', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 @mode_b_required
 @can_receive_required
 def download():
@@ -81,8 +81,8 @@ def download():
 
 
 @mode_b_bp.route('/processing')
-@login_required
 @login_required_json
+@login_required
 @mode_b_required
 def processing():
     """Return assigned batches for the current user."""
@@ -95,8 +95,8 @@ def processing():
 
 
 @mode_b_bp.route('/confirm', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 @mode_b_required
 def confirm():
     data = request.get_json(silent=True) or {}

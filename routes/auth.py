@@ -12,7 +12,7 @@ from models.audit import AuditLog
 from models.settings import SystemSettings
 from models.user import User, UserSession
 from services.session_service import create_session, delete_session
-from utils.decorators import get_client_ip
+from utils.decorators import get_client_ip, login_required_json
 from utils.time_utils import beijing_now
 
 auth_bp = Blueprint('auth', __name__)
@@ -107,6 +107,7 @@ def logout():
 
 
 @auth_bp.route('/heartbeat', methods=['POST'])
+@login_required_json
 @login_required
 def heartbeat():
     """心跳接口：刷新会话活跃时间。"""

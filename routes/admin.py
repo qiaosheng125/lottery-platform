@@ -579,6 +579,8 @@ def api_create_user():
 
     if not username or not password:
         return jsonify({'success': False, 'error': '用户名和密码不能为空'}), 400
+    if len(password) < 6:
+        return jsonify({'success': False, 'error': '密码至少需要 6 位'}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({'success': False, 'error': '用户名已存在'}), 409
 
@@ -638,6 +640,8 @@ def api_update_user(user_id):
             return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
         user.can_receive = parsed_can_receive
     if 'password' in data and data['password']:
+        if len(data['password']) < 6:
+            return jsonify({'success': False, 'error': '密码至少需要 6 位'}), 400
         user.set_password(data['password'])
     if 'blocked_lottery_types' in data:
         blocked_types = data['blocked_lottery_types']

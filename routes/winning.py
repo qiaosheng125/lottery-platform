@@ -25,8 +25,8 @@ def _get_winning_ticket_or_error(ticket_id_value):
 
 
 @winning_bp.route('/presign')
-@login_required
 @login_required_json
+@login_required
 def presign():
     ticket_id = request.args.get('ticket_id')
     if not ticket_id:
@@ -55,8 +55,8 @@ def presign():
 
 
 @winning_bp.route('/upload-local', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 def upload_local():
     import os
 
@@ -113,8 +113,8 @@ def upload_local():
 
 
 @winning_bp.route('/record', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 def record_winning():
     data = request.get_json(silent=True) or {}
     ticket_id = data.get('ticket_id')
@@ -168,8 +168,8 @@ def record_winning():
 
 
 @winning_bp.route('/my')
-@login_required
 @login_required_json
+@login_required
 def my_winning():
     """Return the current user's winning tickets from the last 4 business days."""
     from datetime import datetime, timedelta
@@ -241,8 +241,8 @@ def my_winning():
 
 
 @winning_bp.route('/admin/mark-checked/<int:record_id>', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 def mark_checked(record_id):
     if not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
@@ -269,8 +269,8 @@ def mark_checked(record_id):
 
 
 @winning_bp.route('/upload-image/<int:ticket_id>', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 def upload_winning_image(ticket_id):
     """Upload a winning image and keep LotteryTicket / WinningRecord in sync."""
     import os

@@ -189,6 +189,26 @@ def test_admin_create_user_rejects_invalid_client_mode(app, client):
     assert "mode_a 或 mode_b" in data["error"]
 
 
+def test_admin_create_user_rejects_short_password(app, client):
+    with app.app_context():
+        admin = User(username="admin_short_create_pwd", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_short_create_pwd", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/users",
+        json={"username": "short_pwd_user", "password": "12345", "client_mode": "mode_a"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "至少需要 6 位" in data["error"]
+
+
 def test_admin_update_user_rejects_invalid_client_mode(app, client):
     with app.app_context():
         admin = User(username="admin_invalid_update_mode", is_admin=True)
@@ -210,6 +230,25 @@ def test_admin_update_user_rejects_invalid_client_mode(app, client):
     with app.app_context():
         refreshed_user = User.query.get(user_id)
         assert refreshed_user.client_mode == "mode_a"
+
+
+def test_admin_update_user_rejects_short_password(app, client):
+    with app.app_context():
+        admin = User(username="admin_short_update_pwd", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("short_update_pwd_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_short_update_pwd", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}", json={"password": "12345"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "至少需要 6 位" in data["error"]
 
 
 def test_admin_update_user_parses_string_boolean_flags(app, client):
@@ -662,6 +701,24 @@ def test_pool_status_returns_empty_when_pool_disabled(app, client):
     assert data["pool_enabled"] is False
     assert data["total_pending"] == 0
     assert data["by_type"] == []
+
+
+def test_pool_status_requires_login_json_response(app, client):
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请先登录" in data["error"]
+
+
+def test_heartbeat_requires_login_json_response(app, client):
+    resp = client.post("/auth/heartbeat")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请先登录" in data["error"]
 
 
 def test_mode_b_pool_status_returns_empty_when_pool_disabled(app, client):

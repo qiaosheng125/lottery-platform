@@ -24,8 +24,8 @@ def dashboard():
 
 
 @user_bp.route('/daily-stats')
-@login_required
 @login_required_json
+@login_required
 def daily_stats():
     today = get_business_date()
     today_start = get_today_noon()
@@ -149,8 +149,8 @@ def export_daily():
 
 
 @user_bp.route('/change-password', methods=['POST'])
-@login_required
 @login_required_json
+@login_required
 def change_password():
     data = request.get_json(silent=True) or {}
     old_password = data.get('old_password', '')
