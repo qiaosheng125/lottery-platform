@@ -285,12 +285,17 @@ def upload_files():
         result = process_uploaded_file(f, current_user.id)
         results.append(result)
 
-    # Push pool update
-    try:
-        from services.notify_service import notify_pool_update
-        notify_pool_update(get_pool_status())
-    except Exception:
-        pass
+    any_success = any(result.get('success') for result in results)
+
+    if any_success:
+        try:
+            from services.notify_service import notify_pool_update
+            notify_pool_update(get_pool_status())
+        except Exception:
+            pass
+
+    if not any_success:
+        return jsonify({'success': False, 'results': results, 'error': '本次上传全部失败'}), 400
 
     return jsonify({'success': True, 'results': results})
 

@@ -455,7 +455,6 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
 
 def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app, monkeypatch):
     from services import file_parser
-
     first_now = datetime(2026, 4, 7, 13, 0, 0)
     second_now = datetime(2026, 4, 7, 13, 5, 0)
     calls = {"count": 0}
@@ -465,28 +464,47 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
         return first_now if calls["count"] == 1 else second_now
 
     monkeypatch.setattr(file_parser, "beijing_now", fake_now)
+    monkeypatch.setattr(
+        file_parser,
+        "build_uploaded_txt_relative_path",
+        lambda filename, upload_dt=None: "txt/2026-04-07/mock-duplicate.txt",
+    )
+    monkeypatch.setattr(
+        file_parser,
+        "parse_filename",
+        lambda filename, upload_dt=None: {
+            "identifier": "AA",
+            "internal_code": "P7",
+            "lottery_type": "TEST",
+            "multiplier": 3,
+            "declared_amount": 600.0,
+            "declared_count": 47,
+            "deadline_hhmm": "23.55",
+            "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+            "detail_period": "26034",
+        },
+    )
 
     with app.app_context():
         user = create_user("upload_duplicate_name_user", "secret123", client_mode="mode_b")
         first_result = file_parser.process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "3\n1\n"),
             uploader_id=user.id,
         )
         assert first_result["success"] is True
 
         second_result = file_parser.process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "9\n8\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "9\n8\n"),
             uploader_id=user.id,
         )
         assert second_result["success"] is False
-        assert "同名文件" in second_result["message"]
+        assert second_result["message"].startswith("当前业务日内已上传同名文件")
 
         assert UploadedFile.query.count() == 1
 
 
 def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_business_day(app, monkeypatch):
     from services import file_parser
-
     first_now = datetime(2026, 4, 7, 13, 0, 0)
     second_now = datetime(2026, 4, 7, 13, 5, 0)
     calls = {"count": 0}
@@ -496,24 +514,86 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
         return first_now if calls["count"] == 1 else second_now
 
     monkeypatch.setattr(file_parser, "beijing_now", fake_now)
+    monkeypatch.setattr(
+        file_parser,
+        "build_uploaded_txt_relative_path",
+        lambda filename, upload_dt=None: "txt/2026-04-07/mock-duplicate-case.txt",
+    )
+    monkeypatch.setattr(
+        file_parser,
+        "parse_filename",
+        lambda filename, upload_dt=None: {
+            "identifier": "AA",
+            "internal_code": "P7",
+            "lottery_type": "TEST",
+            "multiplier": 3,
+            "declared_amount": 600.0,
+            "declared_count": 47,
+            "deadline_hhmm": "23.55",
+            "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+            "detail_period": "26034",
+        },
+    )
 
     with app.app_context():
         user = create_user("upload_duplicate_case_user", "secret123", client_mode="mode_b")
         first_result = file_parser.process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.TXT", "3\n1\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.TXT", "3\n1\n"),
             uploader_id=user.id,
         )
         assert first_result["success"] is True
 
         second_result = file_parser.process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "9\n8\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "9\n8\n"),
             uploader_id=user.id,
         )
         assert second_result["success"] is False
-        assert "同名文件" in second_result["message"]
+        assert second_result["message"].startswith("当前业务日内已上传同名文件")
 
         assert UploadedFile.query.count() == 1
 
+
+def test_admin_file_upload_returns_http_400_when_all_files_fail(app, client, monkeypatch):
+    import routes.admin as admin_routes
+    from services import notify_service
+
+    notified = {"count": 0}
+
+    def fake_process_uploaded_file(file, uploader_id):
+        return {
+            "success": False,
+            "filename": file.filename,
+            "message": "当前业务日内已上传同名文件",
+        }
+
+    def fake_notify_pool_update(_payload):
+        notified["count"] += 1
+
+    monkeypatch.setattr(admin_routes, "process_uploaded_file", fake_process_uploaded_file)
+    monkeypatch.setattr(notify_service, "notify_pool_update", fake_notify_pool_update)
+
+    with app.app_context():
+        admin = User(username="admin_upload_all_fail", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_all_fail", "password": "secret123"})
+    assert resp.status_code == 200
+
+    upload = client.post(
+        "/admin/files/upload",
+        data={"files": (make_upload_file("mock-upload.txt", "3\n1\n"), "mock-upload.txt")},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 400
+    data = upload.get_json()
+    assert data["success"] is False
+    assert data["error"] == "本次上传全部失败"
+    assert data["results"][0]["success"] is False
+    assert data["results"][0]["filename"] == "mock-upload.txt"
+    assert "同名文件" in data["results"][0]["message"]
+    assert notified["count"] == 0
 
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
