@@ -373,6 +373,57 @@ def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     assert "整数" in data["error"]
 
 
+def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
+    with app.app_context():
+        user = create_user("modeb_processing_separate_user", "secret123", client_mode="mode_b")
+        first_time = datetime(2026, 4, 7, 10, 30, 0, 111111)
+        second_time = datetime(2026, 4, 7, 10, 30, 0, 222222)
+        deadline = datetime(2026, 4, 7, 18, 0, 0)
+
+        tickets = [
+            LotteryTicket(
+                source_file_id=1,
+                line_number=1,
+                raw_content="BATCH-SAME-MIN-001",
+                lottery_type="胜平负",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="device-b",
+                assigned_device_name="device-b",
+                assigned_at=first_time,
+                deadline_time=deadline,
+                ticket_amount=2,
+            ),
+            LotteryTicket(
+                source_file_id=1,
+                line_number=2,
+                raw_content="BATCH-SAME-MIN-002",
+                lottery_type="胜平负",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="device-b",
+                assigned_device_name="device-b",
+                assigned_at=second_time,
+                deadline_time=deadline,
+                ticket_amount=2,
+            ),
+        ]
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "modeb_processing_separate_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/processing?device_id=device-b")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert len(data["batches"]) == 2
+    assert all(batch["count"] == 1 for batch in data["batches"])
+
+
 def test_mode_b_endpoints_reject_mode_a_user(app, client):
     with app.app_context():
         create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")

@@ -133,15 +133,16 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
     if not tickets:
         return []
 
-    # 按 (lottery_type, deadline_time, assigned_at精确到分钟) 分组，还原每次下载批次
+    # 按 (device_id, lottery_type, deadline_time, assigned_at精确时间) 分组，还原每次下载批次
     from collections import defaultdict
     groups = defaultdict(list)
     for t in tickets:
-        # 用分钟精度作为批次key，同一次download_batch的票assigned_at完全相同
-        minute_key = t.assigned_at.strftime('%Y%m%d%H%M') if t.assigned_at else '000000000000'
+        # 同一次 download_batch 的票 assigned_at 完全相同；不同批次即使同分钟也不能合并。
+        assigned_key = t.assigned_at.isoformat() if t.assigned_at else '0000-00-00T00:00:00'
         lottery_key = t.lottery_type or '未知'
         deadline_key = t.deadline_time.strftime('%H%M') if t.deadline_time else '0000'
-        key = f"{lottery_key}_{deadline_key}_{minute_key}"
+        device_key = t.assigned_device_id or ''
+        key = f"{device_key}_{lottery_key}_{deadline_key}_{assigned_key}"
         groups[key].append(t)
 
     batches = []
