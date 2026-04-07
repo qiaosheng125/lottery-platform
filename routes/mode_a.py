@@ -17,7 +17,8 @@ def _get_device_info():
     device_id = data.get('device_id') or request.args.get('device_id', '')
     device_name = data.get('device_name') or request.args.get('device_name', '')
     complete_current_ticket_id = data.get('complete_current_ticket_id')
-    return device_id, device_name, complete_current_ticket_id
+    complete_current_ticket_action = data.get('complete_current_ticket_action') or 'completed'
+    return device_id, device_name, complete_current_ticket_id, complete_current_ticket_action
 
 
 @mode_a_bp.route('/next', methods=['POST'])
@@ -25,7 +26,7 @@ def _get_device_info():
 @login_required_json
 @can_receive_required
 def next_ticket():
-    device_id, device_name, complete_current_ticket_id = _get_device_info()
+    device_id, device_name, complete_current_ticket_id, complete_current_ticket_action = _get_device_info()
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
 
@@ -35,6 +36,7 @@ def next_ticket():
         username=current_user.username,
         device_name=device_name,
         complete_current_ticket_id=complete_current_ticket_id,
+        complete_current_ticket_action=complete_current_ticket_action,
     )
     return jsonify(result)
 
@@ -58,11 +60,11 @@ def current_ticket():
 @login_required
 @login_required_json
 def stop():
-    device_id, _, _ = _get_device_info()
+    device_id, _, _, complete_current_ticket_action = _get_device_info()
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
 
-    result = stop_receiving(current_user.id, device_id)
+    result = stop_receiving(current_user.id, device_id, current_ticket_action=complete_current_ticket_action)
     return jsonify(result)
 
 

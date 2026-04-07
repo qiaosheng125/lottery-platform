@@ -1,10 +1,17 @@
-from flask import Blueprint, jsonify, request, Response
-from flask_login import login_required, current_user
+from datetime import timedelta
+from urllib.parse import quote
+import io as _io
+
+from flask import Blueprint, Response, jsonify, request
+from flask_login import current_user, login_required
+from openpyxl import Workbook
 
 from extensions import db
+from models.settings import SystemSettings
 from models.ticket import LotteryTicket
+from services.ticket_pool import get_pool_status
 from utils.decorators import login_required_json
-from utils.time_utils import beijing_now, get_business_date
+from utils.time_utils import beijing_now, get_business_date, get_today_noon
 
 user_bp = Blueprint('user', __name__)
 
@@ -20,31 +27,20 @@ def dashboard():
 @login_required
 @login_required_json
 def daily_stats():
-    from datetime import datetime, timedelta
     today = get_business_date()
-    now = beijing_now()
+    today_start = get_today_noon()
+    today_end = today_start + timedelta(days=1)
 
-    # 计算今日业务时间范围（12点分割线）
-    today_start = datetime.combine(today, datetime.min.time())
-    if now.hour < 12:
-        today_start = today_start - timedelta(days=1) + timedelta(hours=12)
-        today_end = today_start + timedelta(days=1)
-    else:
-        today_start = today_start + timedelta(hours=12)
-        today_end = today_start + timedelta(days=1)
-
-    # 用数据库过滤，不要 .all()
     today_tickets = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
         LotteryTicket.status == 'completed',
         LotteryTicket.completed_at >= today_start,
-        LotteryTicket.completed_at < today_end
+        LotteryTicket.completed_at < today_end,
     ).all()
 
     ticket_count = len(today_tickets)
     total_amount = sum(float(t.ticket_amount or 0) for t in today_tickets)
 
-    # 按设备分组统计
     device_stats = {}
     for t in today_tickets:
         key = t.assigned_device_id or 'unknown'
@@ -59,18 +55,13 @@ def daily_stats():
         device_stats[key]['amount'] += float(t.ticket_amount or 0)
     device_stats_list = sorted(device_stats.values(), key=lambda x: x['count'], reverse=True)
 
-    # Active count
     active = LotteryTicket.query.filter_by(
-        assigned_user_id=current_user.id, status='assigned'
+        assigned_user_id=current_user.id,
+        status='assigned',
     ).count()
 
-    # Pool status
-    from services.ticket_pool import get_pool_status
-    from models.settings import SystemSettings
     pool = get_pool_status()
     settings = SystemSettings.get()
-
-    # 被禁止接单的用户看到的待处理数量为0
     pool_total_pending = pool['total_pending'] if current_user.can_receive else 0
 
     return jsonify({
@@ -89,20 +80,8 @@ def daily_stats():
 @login_required
 def export_daily():
     """下载当日出票清单 XLSX（仅含已过截止时间的票）"""
-    import io as _io
-    from openpyxl import Workbook
-    from datetime import datetime, timedelta
-    from urllib.parse import quote
-
-    today = get_business_date()
     now = beijing_now()
-
-    # 今日业务时间范围（12点分割线）
-    today_start = datetime.combine(today, datetime.min.time())
-    if now.hour < 12:
-        today_start = today_start - timedelta(days=1) + timedelta(hours=12)
-    else:
-        today_start = today_start + timedelta(hours=12)
+    today_start = get_today_noon()
     today_end = today_start + timedelta(days=1)
 
     all_rows = LotteryTicket.query.filter(
@@ -128,8 +107,13 @@ def export_daily():
     wb = Workbook()
     ws = wb.active
     ws.append(['票ID', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间'])
-    status_map = {'pending': '待出票', 'assigned': '出票中', 'completed': '已完成',
-                  'revoked': '已撤回', 'expired': '已过期'}
+    status_map = {
+        'pending': '待出票',
+        'assigned': '出票中',
+        'completed': '已完成',
+        'revoked': '已撤回',
+        'expired': '已过期',
+    }
     for t in rows:
         ws.append([
             t.id,

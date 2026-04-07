@@ -2,7 +2,7 @@ import os
 import sys
 import builtins
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
 import io
 
 import pytest
@@ -245,6 +245,41 @@ def test_mode_a_next_ignores_stale_completion_ticket_id(app, client):
         assert current.status == "assigned"
 
 
+def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
+    with app.app_context():
+        user = create_user("modea_expire_user", "secret123", client_mode="mode_a")
+        current_ticket = create_assigned_ticket(user, "device-a", "CUR-EXPIRE", 1)
+        current_ticket.deadline_time = beijing_now() - timedelta(minutes=1)
+        next_ticket = create_pending_ticket("NEXT-AFTER-EXPIRE", 2)
+        current_ticket_id = current_ticket.id
+        next_ticket_id = next_ticket.id
+        db.session.commit()
+
+    resp = login(client, "modea_expire_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-a/next",
+        json={
+            "device_id": "device-a",
+            "device_name": "Device A",
+            "complete_current_ticket_id": current_ticket_id,
+            "complete_current_ticket_action": "expired",
+        },
+    )
+    assert resp.status_code == 200
+
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["id"] == next_ticket_id
+
+    with app.app_context():
+        expired_ticket = LotteryTicket.query.get(current_ticket_id)
+        assigned_next = LotteryTicket.query.get(next_ticket_id)
+        assert expired_ticket.status == "expired"
+        assert assigned_next.status == "assigned"
+
+
 def test_pool_status_returns_empty_when_pool_disabled(app, client):
     with app.app_context():
         user = create_user("pool_user", "secret123", client_mode="mode_b")
@@ -320,6 +355,89 @@ def test_expired_user_session_invalidates_api_access(app, client):
     assert resp.status_code == 401
     data = resp.get_json()
     assert data["success"] is False
+
+
+def test_heartbeat_can_backfill_session_device_id(app, client):
+    with app.app_context():
+        user = create_user("heartbeat_device_user", "secret123", client_mode="mode_b")
+        user_id = user.id
+
+    resp = login(client, "heartbeat_device_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/auth/heartbeat", json={"device_id": "device-01"})
+    assert resp.status_code == 200
+    assert resp.get_json()["success"] is True
+
+    with app.app_context():
+        from models.user import UserSession
+
+        session = UserSession.query.filter_by(user_id=user_id).first()
+        assert session is not None
+        assert session.device_id == "device-01"
+
+
+def test_user_daily_stats_uses_current_business_window_before_noon(app, client, monkeypatch):
+    business_start = datetime(2026, 4, 6, 12, 0, 0)
+    business_end = datetime(2026, 4, 7, 12, 0, 0)
+
+    with app.app_context():
+        user = create_user("daily_stats_user", "secret123", client_mode="mode_b")
+
+        in_window = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="IN-WINDOW",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            assigned_device_name="设备A",
+            ticket_amount=2,
+            completed_at=business_start + timedelta(hours=1),
+        )
+        out_of_window = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="OUT-OF-WINDOW",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            assigned_device_name="设备A",
+            ticket_amount=3,
+            completed_at=business_start - timedelta(hours=1),
+        )
+        db.session.add_all([in_window, out_of_window])
+        db.session.commit()
+
+    monkeypatch.setattr("routes.user.get_today_noon", lambda: business_start)
+    monkeypatch.setattr("routes.user.get_business_date", lambda dt=None: business_start.date())
+
+    resp = login(client, "daily_stats_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket_count"] == 1
+    assert data["total_amount"] == 2.0
+    assert data["today"] == "2026-04-06"
+    assert data["device_stats"][0]["count"] == 1
+    assert data["device_stats"][0]["amount"] == 2.0
+
+
+def test_file_display_id_uses_business_date_before_noon(app, monkeypatch):
+    fixed_now = datetime(2026, 4, 7, 11, 0, 0)
+
+    with app.app_context():
+        monkeypatch.setattr("services.file_parser.beijing_now", lambda: fixed_now)
+
+        from services.file_parser import _generate_display_id
+
+        display_id = _generate_display_id()
+        assert display_id == "2026/04/06-01"
 
 
 def test_upload_winning_image_creates_winning_record(app, client):
@@ -748,6 +866,28 @@ def test_mode_b_confirm_returns_error_when_nothing_completed(app):
     assert "票据" in result["error"]
 
 
+def test_mode_b_confirm_can_complete_prefix_and_expire_rest(app):
+    from services.mode_b_service import confirm_batch
+
+    with app.app_context():
+        user = create_user("modeb_partial_user", "secret123", client_mode="mode_b")
+        first = create_assigned_ticket(user, "device-b", "BATCH-001", 1)
+        second = create_assigned_ticket(user, "device-b", "BATCH-002", 2)
+        third = create_assigned_ticket(user, "device-b", "BATCH-003", 3)
+        for ticket in (first, second, third):
+            ticket.deadline_time = beijing_now() - timedelta(minutes=1)
+        db.session.commit()
+
+        result = confirm_batch([first.id, second.id, third.id], user_id=user.id, completed_count=2)
+        db.session.expire_all()
+        refreshed = [LotteryTicket.query.get(ticket_id) for ticket_id in (first.id, second.id, third.id)]
+
+    assert result["success"] is True
+    assert result["completed_count"] == 2
+    assert result["expired_count"] == 1
+    assert [ticket.status for ticket in refreshed] == ["completed", "completed", "expired"]
+
+
 def test_mode_b_preview_rejects_invalid_count(app, client):
     with app.app_context():
         user = create_user("mode_b_preview_invalid", "secret123", client_mode="mode_b")
@@ -780,7 +920,8 @@ def test_client_dashboard_handles_mode_b_confirm_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "showToast(data.error || '确认失败', 'danger');" in content
-    assert "showToast('已确认完成 ' + data.completed_count + ' 张票', 'success');" in content
+    assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount })," in content
+    assert "showToast(message, 'success');" in content
 
 
 def test_client_dashboard_replaces_processing_batches_from_server():

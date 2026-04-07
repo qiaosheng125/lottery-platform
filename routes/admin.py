@@ -23,7 +23,7 @@ from services.session_service import force_logout_user
 from services.ticket_pool import get_pool_status
 from services.notify_service import notify_admins, notify_all
 from utils.decorators import admin_required, get_client_ip
-from utils.time_utils import beijing_now, get_business_date
+from utils.time_utils import beijing_now, get_today_noon
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -73,15 +73,8 @@ def dashboard_data():
     ).all() if user_ids else []
 
     # 计算今日业务时间范围
-    today = get_business_date()
-    now = beijing_now()
-    today_start = datetime.combine(today, datetime.min.time())
-    if now.hour < 12:
-        today_start = today_start - timedelta(days=1) + timedelta(hours=12)
-        today_end = today_start + timedelta(days=1)
-    else:
-        today_start = today_start + timedelta(hours=12)
-        today_end = today_start + timedelta(days=1)
+    today_start = get_today_noon()
+    today_end = today_start + timedelta(days=1)
 
     # 在线用户统计
     user_stats = []
@@ -330,15 +323,12 @@ def export_tickets():
     import csv
     import io
 
-    today = get_business_date()
-
     from sqlalchemy import text
     # Use ORM for cross-db compatibility
     from models.ticket import LotteryTicket
     from models.file import UploadedFile as UF
-    from datetime import timedelta
-    cutoff_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=12)  # today noon
-    cutoff_end = cutoff_start + timedelta(days=1)  # tomorrow noon
+    cutoff_start = get_today_noon()
+    cutoff_end = cutoff_start + timedelta(days=1)
 
     tickets_q = LotteryTicket.query.filter(
         LotteryTicket.completed_at >= cutoff_start,

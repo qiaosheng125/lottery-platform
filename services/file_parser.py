@@ -18,18 +18,15 @@ from models.ticket import LotteryTicket
 from models.audit import AuditLog
 from utils.filename_parser import parse_filename
 from utils.amount_parser import calculate_ticket_amount
-from utils.time_utils import beijing_now
+from utils.time_utils import beijing_now, get_business_date, get_today_noon
 
 
 def _generate_display_id() -> str:
     """生成文件展示ID，格式: YYYY/MM/DD-NN"""
     now = beijing_now()
-    date_str = now.strftime('%Y/%m/%d')
-    # 找今日12点之后的文件数量
-    if now.hour < 12:
-        cutoff = now.replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    else:
-        cutoff = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    date_str = get_business_date(now).strftime('%Y/%m/%d')
+    # 找当前业务日 12:00 起的文件数量
+    cutoff = get_today_noon()
     count = UploadedFile.query.filter(UploadedFile.uploaded_at >= cutoff).count()
     return f"{date_str}-{count + 1:02d}"
 

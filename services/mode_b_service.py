@@ -13,7 +13,7 @@ from flask import current_app
 from extensions import db
 from models.ticket import LotteryTicket
 from models.settings import SystemSettings
-from services.ticket_pool import assign_tickets_batch, complete_tickets_batch, get_pool_total_pending
+from services.ticket_pool import assign_tickets_batch, finalize_tickets_batch, get_pool_total_pending
 from utils.time_utils import beijing_now
 
 
@@ -99,6 +99,7 @@ def download_batch(
             'ticket_ids': ticket_ids,
             'count': len(tickets),
             'amount': total_amount,
+            'deadline_time': min(deadlines).isoformat() if deadlines else None,
         }],
         'ticket_ids': ticket_ids,
         'actual_count': len(tickets),
@@ -167,14 +168,23 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
             'count': len(group_tickets),
             'amount': total_amount,
             'downloaded_at': downloaded_at,
+            'deadline_time': min(deadlines).isoformat() if deadlines else None,
         })
 
     return batches
 
 
-def confirm_batch(ticket_ids: List[int], user_id: int) -> dict:
+def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = None) -> dict:
     """确认收到，批量改为 completed"""
-    count = complete_tickets_batch(ticket_ids, user_id)
-    if count == 0:
+    if completed_count is not None:
+        try:
+            completed_count = int(completed_count)
+        except (TypeError, ValueError):
+            return {'success': False, 'error': '已完成张数必须是整数', 'completed_count': 0, 'expired_count': 0}
+        if completed_count < 0 or completed_count > len(ticket_ids):
+            return {'success': False, 'error': '已完成张数超出当前批次范围', 'completed_count': 0, 'expired_count': 0}
+
+    result = finalize_tickets_batch(ticket_ids, user_id, completed_count=completed_count)
+    if result['completed_count'] == 0 and result['expired_count'] == 0:
         return {'success': False, 'error': '未找到可确认的票据，可能已完成或不属于当前用户', 'completed_count': 0}
-    return {'success': True, 'completed_count': count}
+    return {'success': True, **result}

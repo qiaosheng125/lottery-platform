@@ -110,6 +110,10 @@ def heartbeat():
     if token:
         session_record = UserSession.query.filter_by(session_token=token).first()
         if session_record:
+            data = request.get_json(silent=True) or {}
+            device_id = (data.get('device_id') or '').strip()
+            if device_id:
+                session_record.device_id = device_id
             session_record.last_seen = beijing_now()
             db.session.commit()
     return jsonify({'success': True})

@@ -4,7 +4,7 @@ from flask import current_app
 
 from models.settings import SystemSettings
 from models.ticket import LotteryTicket
-from services.ticket_pool import assign_ticket_atomic, complete_ticket
+from services.ticket_pool import assign_ticket_atomic, finalize_ticket
 
 HISTORY_TTL = 3 * 3600
 MAX_HISTORY = 3
@@ -64,12 +64,17 @@ def _parse_requested_ticket_id(complete_current_ticket_id) -> Optional[int]:
         return None
 
 
+def _normalize_ticket_action(action: Optional[str]) -> str:
+    return 'expired' if action == 'expired' else 'completed'
+
+
 def get_next_ticket(
     user_id: int,
     device_id: str,
     username: str,
     device_name: str = None,
     complete_current_ticket_id: int = None,
+    complete_current_ticket_action: str = 'completed',
 ) -> dict:
     """
     Get the next ticket for mode A.
@@ -103,10 +108,15 @@ def get_next_ticket(
                 'completed_current': False,
             }
 
-        completed = complete_ticket(current_ticket.id, user_id)
+        completed = finalize_ticket(
+            current_ticket.id,
+            user_id,
+            final_status=_normalize_ticket_action(complete_current_ticket_action),
+        )
         if not completed:
             return {'success': False, 'error': '当前票状态已变化，请刷新后重试'}
-        _push_history(user_id, device_id, current_ticket.id)
+        if _normalize_ticket_action(complete_current_ticket_action) != 'expired':
+            _push_history(user_id, device_id, current_ticket.id)
 
     ticket = assign_ticket_atomic(
         user_id,
@@ -126,7 +136,7 @@ def get_next_ticket(
     }
 
 
-def stop_receiving(user_id: int, device_id: str) -> dict:
+def stop_receiving(user_id: int, device_id: str, current_ticket_action: str = 'completed') -> dict:
     """Stop mode A and complete the current assigned ticket for this device."""
     current_ticket = LotteryTicket.query.filter_by(
         assigned_user_id=user_id,
@@ -135,8 +145,12 @@ def stop_receiving(user_id: int, device_id: str) -> dict:
     ).first()
 
     if current_ticket:
-        complete_ticket(current_ticket.id, user_id)
-        _push_history(user_id, device_id, current_ticket.id)
+        final_status = _normalize_ticket_action(current_ticket_action)
+        finalize_ticket(current_ticket.id, user_id, final_status=final_status)
+        if final_status != 'expired':
+            _push_history(user_id, device_id, current_ticket.id)
+        if final_status == 'expired':
+            return {'success': True, 'message': '已停止接单，当前票已标记为已过期'}
         return {'success': True, 'message': '已停止接单，当前票已完成'}
 
     return {'success': True, 'message': '当前无进行中的票'}

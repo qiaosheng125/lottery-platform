@@ -670,6 +670,146 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
     return rows
 
 
+def finalize_ticket(ticket_id: int, user_id: int, final_status: str = 'completed') -> bool:
+    """Finalize a single assigned ticket as completed or expired."""
+    completed_count = 1 if final_status != 'expired' else 0
+    result = finalize_tickets_batch([ticket_id], user_id, completed_count=completed_count)
+    return (result['completed_count'] + result['expired_count']) > 0
+
+
+def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count: int = None) -> dict:
+    """Finalize an assigned batch, completing the first N tickets and expiring the rest."""
+    if not ticket_ids:
+        return {'completed_count': 0, 'expired_count': 0}
+
+    total = len(ticket_ids)
+    if completed_count is None:
+        completed_count = total
+    completed_count = max(0, min(int(completed_count), total))
+
+    completed_ids = list(ticket_ids[:completed_count])
+    expired_ids = list(ticket_ids[completed_count:])
+    now = beijing_now()
+
+    if not _is_postgres():
+        tickets = LotteryTicket.query.filter(
+            LotteryTicket.id.in_(ticket_ids),
+            LotteryTicket.assigned_user_id == user_id,
+            LotteryTicket.status == 'assigned',
+        ).all()
+        ticket_map = {ticket.id: ticket for ticket in tickets}
+
+        completed_total = 0
+        expired_total = 0
+
+        for current_id in completed_ids:
+            ticket = ticket_map.get(current_id)
+            if not ticket:
+                continue
+            ticket.status = 'completed'
+            ticket.completed_at = now
+            ticket.version += 1
+            file = UploadedFile.query.get(ticket.source_file_id)
+            if file and file.assigned_count > 0:
+                file.assigned_count -= 1
+                file.completed_count += 1
+            completed_total += 1
+
+        for current_id in expired_ids:
+            ticket = ticket_map.get(current_id)
+            if not ticket:
+                continue
+            ticket.status = 'expired'
+            ticket.version += 1
+            file = UploadedFile.query.get(ticket.source_file_id)
+            if file and file.assigned_count > 0:
+                file.assigned_count -= 1
+            expired_total += 1
+
+        db.session.commit()
+        return {'completed_count': completed_total, 'expired_count': expired_total}
+
+    existing_ids = {
+        row.id
+        for row in db.session.execute(
+            text("""
+                SELECT id
+                FROM lottery_tickets
+                WHERE id = ANY(:ids)
+                  AND assigned_user_id = :user_id
+                  AND status = 'assigned'
+            """),
+            {'ids': ticket_ids, 'user_id': user_id}
+        ).fetchall()
+    }
+    valid_completed_ids = [current_id for current_id in completed_ids if current_id in existing_ids]
+    valid_expired_ids = [current_id for current_id in expired_ids if current_id in existing_ids]
+
+    if valid_completed_ids:
+        db.session.execute(
+            text("""
+                UPDATE lottery_tickets
+                SET status = 'completed',
+                    completed_at = :now,
+                    version = version + 1
+                WHERE id = ANY(:ids)
+                  AND assigned_user_id = :user_id
+                  AND status = 'assigned'
+            """),
+            {'ids': valid_completed_ids, 'user_id': user_id, 'now': now}
+        )
+        db.session.execute(
+            text("""
+                UPDATE uploaded_files f
+                SET assigned_count = assigned_count - sub.cnt,
+                    completed_count = completed_count + sub.cnt
+                FROM (
+                    SELECT source_file_id, COUNT(*) as cnt
+                    FROM lottery_tickets
+                    WHERE id = ANY(:ids)
+                    GROUP BY source_file_id
+                ) sub
+                WHERE f.id = sub.source_file_id
+            """),
+            {'ids': valid_completed_ids}
+        )
+
+    if valid_expired_ids:
+        db.session.execute(
+            text("""
+                UPDATE lottery_tickets
+                SET status = 'expired',
+                    version = version + 1
+                WHERE id = ANY(:ids)
+                  AND assigned_user_id = :user_id
+                  AND status = 'assigned'
+            """),
+            {'ids': valid_expired_ids, 'user_id': user_id}
+        )
+        db.session.execute(
+            text("""
+                UPDATE uploaded_files f
+                SET assigned_count = assigned_count - sub.cnt
+                FROM (
+                    SELECT source_file_id, COUNT(*) as cnt
+                    FROM lottery_tickets
+                    WHERE id = ANY(:ids)
+                    GROUP BY source_file_id
+                ) sub
+                WHERE f.id = sub.source_file_id
+            """),
+            {'ids': valid_expired_ids}
+        )
+
+    if valid_completed_ids or valid_expired_ids:
+        db.session.commit()
+
+    return {
+        'completed_count': len(valid_completed_ids),
+        'expired_count': len(valid_expired_ids),
+    }
+
+
 def get_pool_status() -> dict:
     """获取当前票池状态（用于实时展示）"""
     now = beijing_now()
@@ -677,7 +817,7 @@ def get_pool_status() -> dict:
     if not _is_postgres():
         from sqlalchemy import func
         from models.ticket import LotteryTicket as T
-        from utils.time_utils import get_business_date
+        from utils.time_utils import get_today_noon
         rows = db.session.query(
             T.lottery_type, T.deadline_time, func.count(T.id).label('count')
         ).filter(
@@ -696,17 +836,9 @@ def get_pool_status() -> dict:
         ]
         assigned = T.query.filter_by(status='assigned').count()
 
-        # 今日完成数：用数据库过滤，不要 .all()
-        today = get_business_date()
-        today_start = datetime.combine(today, datetime.min.time())
-        if datetime.now().hour < 12:
-            # 当前时间 < 12点，业务日期是昨天，所以今日范围是昨天12点到今天12点
-            today_start = today_start - timedelta(days=1) + timedelta(hours=12)
-            today_end = today_start + timedelta(days=1)
-        else:
-            # 当前时间 >= 12点，业务日期是今天，范围是今天12点到明天12点
-            today_start = today_start + timedelta(hours=12)
-            today_end = today_start + timedelta(days=1)
+        # 今日完成数：按业务日 12:00-次日 12:00 统计
+        today_start = get_today_noon()
+        today_end = today_start + timedelta(days=1)
 
         completed_today = T.query.filter(
             T.status == 'completed',
@@ -742,11 +874,17 @@ def get_pool_status() -> dict:
     assigned = db.session.execute(
         text("SELECT COUNT(*) FROM lottery_tickets WHERE status='assigned'")
     ).scalar()
+    from utils.time_utils import get_today_noon
+    today_start = get_today_noon()
+    today_end = today_start + timedelta(days=1)
     completed_today = db.session.execute(
-        text("""SELECT COUNT(*) FROM lottery_tickets
-                WHERE status='completed'
-                AND completed_at >= CURRENT_DATE + INTERVAL '12 hours'
-                AND completed_at < CURRENT_DATE + INTERVAL '36 hours'""")
+        text("""
+            SELECT COUNT(*) FROM lottery_tickets
+            WHERE status = 'completed'
+              AND completed_at >= :today_start
+              AND completed_at < :today_end
+        """),
+        {'today_start': today_start, 'today_end': today_end}
     ).scalar()
     return {'total_pending': total, 'by_type': by_type, 'assigned': assigned or 0, 'completed_today': completed_today or 0}
 

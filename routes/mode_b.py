@@ -96,8 +96,11 @@ def processing():
 def confirm():
     data = request.get_json()
     ticket_ids = data.get('ticket_ids', [])
+    completed_count = data.get('completed_count')
     if not ticket_ids:
         return jsonify({'success': False, 'error': '缺少票ID列表'}), 400
 
-    result = confirm_batch([int(i) for i in ticket_ids], current_user.id)
+    result = confirm_batch([int(i) for i in ticket_ids], current_user.id, completed_count=completed_count)
+    if not result.get('success') and (('整数' in (result.get('error') or '')) or ('范围' in (result.get('error') or ''))):
+        return jsonify(result), 400
     return jsonify(result)

@@ -453,7 +453,11 @@ createApp({
 
     // 心跳：每30秒更新会话活跃时间
     setInterval(() => {
-      fetch('/auth/heartbeat', { method: 'POST' }).catch(() => {});
+      fetch('/auth/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: getOrCreateDeviceId() || undefined }),
+      }).catch(() => {});
     }, 30000);
   },
   methods: {
@@ -504,6 +508,9 @@ createApp({
       }
       this.loadingNext = true;
       try {
+        const completeCurrentTicketAction = (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time))
+          ? this.resolveModeAOverdueAction()
+          : 'completed';
         const res = await fetch('/api/mode-a/next', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
@@ -511,6 +518,7 @@ createApp({
             device_id: deviceId,
             device_name: getDeviceName(),
             complete_current_ticket_id: this.currentTicket ? this.currentTicket.id : null,
+            complete_current_ticket_action: completeCurrentTicketAction,
           }),
         });
         const data = await res.json();
@@ -566,13 +574,39 @@ createApp({
         this.modeAActive = false;
       }
     },
+    isDeadlinePassed(deadlineStr) {
+      return !!deadlineStr && new Date(deadlineStr).getTime() <= Date.now();
+    },
+    resolveModeAOverdueAction() {
+      const completed = window.confirm('当前已过截止时间，请确认是否完成？\n点击“确定”标记为已完成，点击“取消”标记为已过期。');
+      return completed ? 'completed' : 'expired';
+    },
+    resolveModeBCompletedCount(batch) {
+      const allCompleted = window.confirm('当前已过截止时间，请确认是否全部完成？\n点击“确定”标记整批已完成；点击“取消”可输入已完成张数，其余将标记为已过期。');
+      if (allCompleted) {
+        return batch.count;
+      }
+      const input = window.prompt('请输入已完成的张数（例如输入 10，则前 10 张完成，其余标记为已过期；如果一张都没完成请输入 0）', '0');
+      if (input === null) {
+        return null;
+      }
+      const value = Number(input);
+      if (!Number.isInteger(value) || value < 0 || value > batch.count) {
+        showToast('请输入 0 到 ' + batch.count + ' 之间的整数', 'warning');
+        return false;
+      }
+      return value;
+    },
     async doStop() {
       this.showStopConfirm = false;
       try {
+        const completeCurrentTicketAction = (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time))
+          ? this.resolveModeAOverdueAction()
+          : 'completed';
         const res = await fetch('/api/mode-a/stop', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ device_id: deviceId }),
+          body: JSON.stringify({ device_id: deviceId, complete_current_ticket_action: completeCurrentTicketAction }),
         });
         const data = await res.json();
         if (!data.success) {
@@ -704,6 +738,7 @@ createApp({
             count: file.count,
             amount: file.amount,
             downloaded_at: downloadTime,
+            deadline_time: file.deadline_time,
           });
         }
         if (data.adjustment_message) {
@@ -720,17 +755,28 @@ createApp({
     },
     async confirmBatch(batch, index) {
       try {
+        let completedCount = null;
+        if (this.isDeadlinePassed(batch.deadline_time)) {
+          completedCount = this.resolveModeBCompletedCount(batch);
+          if (completedCount === null || completedCount === false) {
+            return;
+          }
+        }
         const res = await fetch('/api/mode-b/confirm', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ ticket_ids: batch.ticket_ids }),
+          body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount }),
         });
         const data = await res.json();
         if (data.success) {
           this.bPendingBatches.splice(index, 1);
           this.loadStats();
           this.loadPoolStatus();
-          showToast('已确认完成 ' + data.completed_count + ' 张票', 'success');
+          const expiredCount = data.expired_count || 0;
+          const message = expiredCount > 0
+            ? ('已确认完成 ' + data.completed_count + ' 张，标记过期 ' + expiredCount + ' 张')
+            : ('已确认完成 ' + data.completed_count + ' 张票');
+          showToast(message, 'success');
         } else {
           showToast(data.error || '确认失败', 'danger');
         }
