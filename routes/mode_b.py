@@ -67,7 +67,7 @@ def pool_status():
     if not settings.pool_enabled:
         return jsonify({'success': True, 'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0})
 
-    status = _trim_status_for_mode_b(get_pool_status())
+    status = _trim_status_for_mode_b(get_pool_status(current_user.get_blocked_lottery_types()))
     if not current_user.can_receive:
         status['total_pending'] = 0
         status['by_type'] = []
@@ -82,7 +82,7 @@ def preview():
     count = _parse_batch_count(request.args.get('count', 100))
     if count is None:
         return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
-    result = preview_batch(count)
+    result = preview_batch(count, user_id=current_user.id)
     if not current_user.can_receive:
         result = {
             'available': 0,

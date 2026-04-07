@@ -17,7 +17,7 @@ from services.ticket_pool import assign_tickets_batch, finalize_tickets_batch, g
 from utils.time_utils import beijing_now
 
 
-def preview_batch(requested_count: int) -> dict:
+def preview_batch(requested_count: int, user_id: int = None) -> dict:
     """预查询当前票池总可用票数"""
     settings = SystemSettings.get()
     if not settings.pool_enabled:
@@ -26,7 +26,12 @@ def preview_batch(requested_count: int) -> dict:
             'requested': requested_count,
             'sufficient': False,
         }
-    available = get_pool_total_pending()
+    blocked_lottery_types = []
+    if user_id is not None:
+        from models.user import User
+        user = User.query.get(user_id)
+        blocked_lottery_types = user.get_blocked_lottery_types() if user else []
+    available = get_pool_total_pending(blocked_lottery_types=blocked_lottery_types)
     return {
         'available': available,
         'requested': requested_count,

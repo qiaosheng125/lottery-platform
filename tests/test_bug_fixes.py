@@ -636,6 +636,51 @@ def test_mode_b_pool_status_reflects_reserve_adjusted_available_counts(app, clie
     assert data["by_type"][0]["count"] == 5
 
 
+def test_mode_b_pool_status_hides_blocked_lottery_types(app, client):
+    with app.app_context():
+        user = create_user("modeb_pool_blocked_user", "secret123", client_mode="mode_b")
+        user.set_blocked_lottery_types(["胜平负"])
+        first_deadline = beijing_now() + timedelta(hours=1)
+        second_deadline = beijing_now() + timedelta(hours=2)
+        tickets = []
+        for idx in range(25):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=idx + 1,
+                    raw_content=f"BLOCKED-{idx}",
+                    status="pending",
+                    lottery_type="胜平负",
+                    deadline_time=first_deadline,
+                )
+            )
+        for idx in range(25):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=100 + idx,
+                    raw_content=f"ALLOWED-{idx}",
+                    status="pending",
+                    lottery_type="让球胜平负",
+                    deadline_time=second_deadline,
+                )
+            )
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "modeb_pool_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/pool-status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["total_pending"] == 5
+    assert len(data["by_type"]) == 1
+    assert data["by_type"][0]["lottery_type"] == "让球胜平负"
+    assert data["by_type"][0]["count"] == 5
+
+
 def test_mode_a_routes_reject_invalid_device_id_and_name(app, client):
     with app.app_context():
         create_user("mode_a_device_guard_user", "secret123", client_mode="mode_a")
@@ -870,6 +915,50 @@ def test_mode_b_preview_returns_zero_when_user_cannot_receive(app, client):
     assert data["success"] is True
     assert data["available"] == 0
     assert data["requested"] == 1
+    assert data["sufficient"] is False
+
+
+def test_mode_b_preview_excludes_blocked_lottery_types(app, client):
+    with app.app_context():
+        user = create_user("mode_b_preview_blocked_user", "secret123", client_mode="mode_b")
+        user.set_blocked_lottery_types(["胜平负"])
+        blocked_deadline = beijing_now() + timedelta(hours=1)
+        allowed_deadline = beijing_now() + timedelta(hours=2)
+        tickets = []
+        for idx in range(30):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=idx + 1,
+                    raw_content=f"PREVIEW-BLOCKED-{idx}",
+                    status="pending",
+                    lottery_type="胜平负",
+                    deadline_time=blocked_deadline,
+                )
+            )
+        for idx in range(25):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=100 + idx,
+                    raw_content=f"PREVIEW-ALLOWED-{idx}",
+                    status="pending",
+                    lottery_type="让球胜平负",
+                    deadline_time=allowed_deadline,
+                )
+            )
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "mode_b_preview_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=6")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["available"] == 5
+    assert data["requested"] == 6
     assert data["sufficient"] is False
 
 

@@ -889,20 +889,24 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
     }
 
 
-def get_pool_status() -> dict:
+def get_pool_status(blocked_lottery_types: List[str] = None) -> dict:
     """获取当前票池状态（用于实时展示）"""
     now = beijing_now()
+    blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
         from sqlalchemy import func
         from models.ticket import LotteryTicket as T
         from utils.time_utils import get_today_noon
-        rows = db.session.query(
+        query = db.session.query(
             T.lottery_type, T.deadline_time, func.count(T.id).label('count')
         ).filter(
             T.status == 'pending',
             T.deadline_time > now,
-        ).group_by(T.lottery_type, T.deadline_time).order_by(T.deadline_time, T.lottery_type).all()
+        )
+        if blocked_types:
+            query = query.filter((T.lottery_type == None) | (~T.lottery_type.in_(blocked_types)))
+        rows = query.group_by(T.lottery_type, T.deadline_time).order_by(T.deadline_time, T.lottery_type).all()
 
         total = sum(r.count for r in rows)
         by_type = [
@@ -927,8 +931,10 @@ def get_pool_status() -> dict:
 
         return {'total_pending': total, 'by_type': by_type, 'assigned': assigned, 'completed_today': completed_today}
 
+    blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+
     result = db.session.execute(
-        text("""
+        text(f"""
             SELECT
                 lottery_type,
                 deadline_time,
@@ -936,10 +942,11 @@ def get_pool_status() -> dict:
             FROM lottery_tickets
             WHERE status = 'pending'
               AND deadline_time > :now
+              {blocked_condition}
             GROUP BY lottery_type, deadline_time
             ORDER BY deadline_time, lottery_type
         """),
-        {'now': now}
+        {'now': now, **blocked_params}
     ).fetchall()
 
     total = sum(r.count for r in result)
@@ -969,24 +976,30 @@ def get_pool_status() -> dict:
     return {'total_pending': total, 'by_type': by_type, 'assigned': assigned or 0, 'completed_today': completed_today or 0}
 
 
-def get_pool_total_pending() -> int:
+def get_pool_total_pending(blocked_lottery_types: List[str] = None) -> int:
     """B模式预查询：当前票池可供B模式使用的票数（总pending减去保留给A模式的20张）"""
     now = beijing_now()
     RESERVE = 20  # 至少保留给A模式/管理员上传缓冲
+    blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
-        total = LotteryTicket.query.filter(
+        query = LotteryTicket.query.filter(
             LotteryTicket.status == 'pending',
             LotteryTicket.deadline_time > now,
-        ).count()
+        )
+        if blocked_types:
+            query = query.filter((LotteryTicket.lottery_type == None) | (~LotteryTicket.lottery_type.in_(blocked_types)))
+        total = query.count()
         return max(0, total - RESERVE)
 
+    blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
     result = db.session.execute(
-        text("""
+        text(f"""
             SELECT COUNT(*) FROM lottery_tickets
             WHERE status = 'pending'
               AND deadline_time > :now
+              {blocked_condition}
         """),
-        {'now': now}
+        {'now': now, **blocked_params}
     ).scalar()
     return max(0, (result or 0) - RESERVE)
