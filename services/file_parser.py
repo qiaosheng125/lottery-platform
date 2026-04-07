@@ -181,7 +181,17 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         '上下单双': 'SXP',
         '胜负': 'SF',
     }
-    expected_bet_code = lottery_code_map.get((parsed_meta.get('lottery_type') or '').strip())
+    lottery_type = (parsed_meta.get('lottery_type') or '').strip()
+    expected_bet_code = lottery_code_map.get(lottery_type)
+    if not expected_bet_code:
+        db.session.rollback()
+        os.remove(file_path)
+        return {
+            'success': False,
+            'message': f'文件名彩种不支持: {lottery_type}',
+            'file_id': None,
+            'filename': filename,
+        }
     for line_no, line in enumerate(lines, start=1):
         line = line.strip()
         if not line:
