@@ -424,6 +424,59 @@ def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
     assert all(batch["count"] == 1 for batch in data["batches"])
 
 
+def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypatch):
+    from services.mode_b_service import download_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0, 123456)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+
+    with app.app_context():
+        user = create_user("modeb_unique_assigned_at_user", "secret123", client_mode="mode_b")
+
+        existing_assigned = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="EXISTING-BATCH-001",
+            lottery_type="胜平负",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-b",
+            assigned_device_name="device-b",
+            assigned_at=fixed_now,
+            deadline_time=datetime(2026, 4, 7, 18, 0, 0),
+            ticket_amount=2,
+        )
+        db.session.add(existing_assigned)
+
+        for line_number in range(2, 23):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=line_number,
+                raw_content=f"PENDING-BATCH-{line_number:03d}",
+                lottery_type="胜平负",
+                status="pending",
+                deadline_time=datetime(2026, 4, 7, 18, 0, 0),
+                ticket_amount=2,
+            ))
+
+        db.session.commit()
+
+        result = download_batch(
+            user_id=user.id,
+            device_id="device-b",
+            username=user.username,
+            count=1,
+            device_name="device-b",
+        )
+
+        assert result["success"] is True
+        assigned_ticket_id = result["ticket_ids"][0]
+        assigned_ticket = LotteryTicket.query.get(assigned_ticket_id)
+        assert assigned_ticket.assigned_at > fixed_now
+        assert assigned_ticket.assigned_at == fixed_now + timedelta(microseconds=1)
+
+
 def test_mode_b_endpoints_reject_mode_a_user(app, client):
     with app.app_context():
         create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")
@@ -3152,6 +3205,8 @@ def test_client_dashboard_handles_mode_b_confirm_failure():
     assert "showToast(data.error || '确认失败', 'danger');" in content
     assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount })," in content
     assert "showToast(message, 'success');" in content
+    assert "showToast('请等待 1 秒后再下载', 'warning');" in content
+    assert "bDownloadCooldownUntil > Date.now()" in content
 
 
 def test_client_dashboard_replaces_processing_batches_from_server():

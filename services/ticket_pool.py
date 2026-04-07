@@ -63,6 +63,23 @@ def _count_today_completed(user_id: int, business_date_start: datetime) -> int:
     ).scalar() or 0
 
 
+def _ensure_unique_batch_assigned_at(user_id: int, device_id: str, assigned_at: datetime) -> datetime:
+    """
+    Keep B-mode batch grouping stable by ensuring the current device does not reuse
+    the exact same assigned_at timestamp across concurrent/rapid downloads.
+    """
+    latest_existing = LotteryTicket.query.filter(
+        LotteryTicket.assigned_user_id == user_id,
+        LotteryTicket.assigned_device_id == device_id,
+        LotteryTicket.status == 'assigned',
+        LotteryTicket.assigned_at.isnot(None),
+    ).order_by(LotteryTicket.assigned_at.desc()).first()
+
+    if latest_existing and latest_existing.assigned_at and latest_existing.assigned_at >= assigned_at:
+        return latest_existing.assigned_at + timedelta(microseconds=1)
+    return assigned_at
+
+
 def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None,
                          daily_limit: int = None, blocked_lottery_types: List[str] = None) -> Optional[LotteryTicket]:
     """
@@ -334,7 +351,7 @@ def assign_tickets_batch(
     Returns:
         (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
     """
-    now = beijing_now()
+    now = _ensure_unique_batch_assigned_at(user_id, device_id, beijing_now())
     lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
     RESERVE = 20  # B模式至少保留20张给A模式/管理员上传缓冲
 

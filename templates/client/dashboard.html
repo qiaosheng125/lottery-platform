@@ -199,9 +199,9 @@
         </div>
         <div class="col-4 col-md-3">
           <button class="btn btn-primary btn-lg w-100" @click="downloadBatch"
-                  :disabled="!poolStatus.total_pending || downloading">
+                  :disabled="!poolStatus.total_pending || downloading || bDownloadCooldownUntil > Date.now()">
             <span v-if="downloading" class="spinner-border spinner-border-sm me-1"></span>
-            <i class="bi bi-download"></i> 下载
+            <i class="bi bi-download"></i> {{ bDownloadCooldownUntil > Date.now() ? '冷却中' : '下载' }}
           </button>
         </div>
       </div>
@@ -427,6 +427,7 @@ createApp({
       poolStatus: { total_pending: 0, by_type: [] },
       bPreview: null,
       downloading: false,
+      bDownloadCooldownUntil: 0,
       // 出票中列表：[{filename, ticket_ids, count, amount, downloaded_at}]
       bPendingBatches: [],
       // 中奖记录弹窗
@@ -699,7 +700,17 @@ createApp({
       }
     },
     async downloadBatch() {
+      if (this.bDownloadCooldownUntil > Date.now()) {
+        showToast('请等待 1 秒后再下载', 'warning');
+        return;
+      }
       this.downloading = true;
+      this.bDownloadCooldownUntil = Date.now() + 1000;
+      setTimeout(() => {
+        if (Date.now() >= this.bDownloadCooldownUntil) {
+          this.bDownloadCooldownUntil = 0;
+        }
+      }, 1000);
       try {
         const actualCount = (this.bPreview && this.bPreview.available < this.bCount)
           ? this.bPreview.available : this.bCount;
