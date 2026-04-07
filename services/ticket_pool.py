@@ -209,15 +209,15 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
 
         candidate_ids = []
         if redis_ticket_id is not None:
-            candidate_ids.append(redis_ticket_id)
+            candidate_ids.append((redis_ticket_id, True))
 
         fallback_ticket_id = _fetch_pending_ticket_id_from_db()
-        if fallback_ticket_id is not None and fallback_ticket_id not in candidate_ids:
-            candidate_ids.append(fallback_ticket_id)
+        if fallback_ticket_id is not None and fallback_ticket_id not in [candidate_id for candidate_id, _ in candidate_ids]:
+            candidate_ids.append((fallback_ticket_id, False))
         if not candidate_ids:
             return None
 
-        for ticket_id in candidate_ids:
+        for ticket_id, from_redis in candidate_ids:
             try:
                 ticket = db.session.execute(
                     text("""
@@ -252,8 +252,8 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     continue
 
                 if ticket.lottery_type and ticket.lottery_type in blocked_types:
-                    # 该票属于禁止彩种，放回 Redis 队列供其他用户使用
-                    if rc:
+                    # 只有真正从 Redis 弹出的票才需要放回队列；数据库兜底候选本来还在队列里。
+                    if rc and from_redis:
                         try:
                             rc.rpush('pool:pending', ticket_id)
                         except Exception:

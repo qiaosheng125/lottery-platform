@@ -1080,6 +1080,69 @@ def test_mode_a_postgres_assignment_falls_back_when_redis_returns_stale_id(app, 
     assert result.id == 321
 
 
+def test_mode_a_postgres_blocked_fallback_ticket_does_not_duplicate_redis_queue(app, monkeypatch):
+    from services.ticket_pool import assign_ticket_atomic
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeRedis:
+        def __init__(self):
+            self.requeued = []
+
+        def lpop(self, key):
+            return None
+
+        def rpush(self, key, value):
+            self.requeued.append((key, value))
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    class FakeTicketRow:
+        def __init__(self):
+            self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
+            self.lottery_type = "胜平负"
+            self.source_file_id = 1
+
+    fake_redis = FakeRedis()
+    db_select_calls = {"count": 0}
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            db_select_calls["count"] += 1
+            if db_select_calls["count"] == 1:
+                return FakeResult(fetchone_data=(321,))
+            return FakeResult(fetchone_data=None)
+        if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=FakeTicketRow())
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: fake_redis)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+
+    with app.app_context():
+        result = assign_ticket_atomic(
+            user_id=1,
+            device_id="device-a",
+            username="tester",
+            device_name="设备A",
+            blocked_lottery_types=["胜平负"],
+        )
+
+    assert result is None
+    assert fake_redis.requeued == []
+
+
 def test_mode_a_sqlite_assignment_retries_after_guarded_update_miss(app, monkeypatch):
     from types import SimpleNamespace
     from services.ticket_pool import assign_ticket_atomic
