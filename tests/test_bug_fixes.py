@@ -718,7 +718,7 @@ def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeyp
         if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
             return FakeResult(fetchall_data=[(123,)])
         if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
-            return FakeResult(rowcount=1)
+            return FakeResult(fetchall_data=[(123,)], rowcount=1)
         if "UPDATE uploaded_files" in sql:
             return FakeResult(rowcount=1)
         raise AssertionError(f"Unexpected SQL: {sql}")
@@ -747,6 +747,82 @@ def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeyp
     assert any("deadline_time > :now" in sql for sql in sql_texts if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql)
     assert any("AND deadline_time > :now" in sql for sql in sql_texts if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
     assert all("NOW()" not in sql for sql in sql_texts)
+
+
+def test_mode_b_postgres_batch_assignment_updates_only_returned_ids(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+    deadline = datetime(2026, 4, 7, 18, 0, 0)
+    captured = []
+
+    class FakeResult:
+        def __init__(self, *, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    class FakeFilterQuery:
+        def __init__(self):
+            self.ids = []
+
+        def all(self):
+            return [SimpleNamespace(id=current_id) for current_id in self.ids]
+
+    class FakeColumn:
+        def __init__(self, query):
+            self.query = query
+
+        def in_(self, ids):
+            self.query.ids = list(ids)
+            return ids
+
+    fake_filter_query = FakeFilterQuery()
+
+    class FakeLotteryQuery:
+        def filter(self, *args, **kwargs):
+            return fake_filter_query
+
+    class FakeLotteryTicket:
+        id = FakeColumn(fake_filter_query)
+        query = FakeLotteryQuery()
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        params = params or {}
+        captured.append((sql, params))
+        if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
+            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="胜平负", deadline_time=deadline, cnt=25)])
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchall_data=[(101,), (102,)])
+        if "UPDATE lottery_tickets" in sql and "RETURNING id" in sql:
+            return FakeResult(fetchall_data=[(102,)])
+        if "UPDATE uploaded_files" in sql:
+            assert params["ids"] == [102]
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", lambda user_id, device_id, assigned_at: assigned_at)
+    monkeypatch.setattr("services.ticket_pool.LotteryTicket", FakeLotteryTicket)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+
+    with app.app_context():
+        tickets, adjustment_message = assign_tickets_batch(
+            user_id=1,
+            device_id="device-b",
+            username="tester",
+            count=2,
+            device_name="设备B",
+        )
+
+    assert adjustment_message is None
+    assert [ticket.id for ticket in tickets] == [102]
 
 
 def test_mode_b_endpoints_reject_mode_a_user(app, client):

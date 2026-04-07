@@ -603,7 +603,7 @@ def assign_tickets_batch(
 
     ids = [r[0] for r in rows]
 
-    db.session.execute(
+    updated_rows = db.session.execute(
         text("""
             UPDATE lottery_tickets
             SET status = 'assigned',
@@ -617,13 +617,19 @@ def assign_tickets_batch(
             WHERE id = ANY(:ids)
               AND status = 'pending'
               AND deadline_time > :now
+            RETURNING id
         """),
         {
             'user_id': user_id, 'username': username,
             'device_id': device_id, 'device_name': device_name,
             'now': now, 'lock_until': lock_until, 'ids': ids,
         }
-    )
+    ).fetchall()
+
+    assigned_ids = [row[0] for row in updated_rows]
+    if not assigned_ids:
+        db.session.rollback()
+        return [], None
 
     db.session.execute(
         text("""
@@ -638,11 +644,11 @@ def assign_tickets_batch(
             ) sub
             WHERE f.id = sub.source_file_id
         """),
-        {'ids': ids}
+        {'ids': assigned_ids}
     )
 
     db.session.commit()
-    return LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all(), None
+    return LotteryTicket.query.filter(LotteryTicket.id.in_(assigned_ids)).all(), None
 
 
 def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
