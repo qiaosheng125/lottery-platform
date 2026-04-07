@@ -47,7 +47,7 @@
         </div>
         <div class="col-md-2 d-flex gap-1">
           <button class="btn btn-sm btn-primary" @click="page=1; loadWinning()">查询</button>
-          <button class="btn btn-sm btn-outline-secondary" @click="filterUsername=''; filterDate=''; filterLotteryType=''; filterImage=''; filterChecked=''; page=1; loadWinning()">重置</button>
+          <button class="btn btn-sm btn-outline-secondary" @click="resetWinningFilters()">重置</button>
           <button class="btn btn-sm btn-outline-success" @click="exportWinning">
             <i class="bi bi-download"></i> 导出XLSX
           </button>
@@ -263,6 +263,7 @@ createApp({
       records: [], loading: false, page: 1, totalPages: 1, total: 0,
       filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '', filterChecked: '',
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
+      currentBusinessDate: '',
       summaryAmount: 0, summaryCount: 0, summaryTax: 0, summaryMissing: 0,
       markingCheckedId: null,
       // 上传赛果
@@ -278,9 +279,9 @@ createApp({
       previewUrl: null,
     };
   },
-  mounted() {
-    this.loadFilterOptions();
-    this.loadWinning();
+  async mounted() {
+    await this.loadFilterOptions();
+    await this.loadWinning();
     this.loadMatchResults();
   },
   methods: {
@@ -294,12 +295,26 @@ createApp({
         this.usernameOptions = data.usernames || [];
         this.winningDateOptions = data.dates || [];
         this.lotteryTypeOptions = data.lottery_types || [];
+        this.currentBusinessDate = data.current_business_date || '';
+        if (!this.filterDate && this.currentBusinessDate) {
+          this.filterDate = this.currentBusinessDate;
+        }
       } catch(e) {
         this.usernameOptions = [];
         this.winningDateOptions = [];
         this.lotteryTypeOptions = [];
+        this.currentBusinessDate = '';
         showToast(e.message || '加载筛选项失败', 'danger');
       }
+    },
+    async resetWinningFilters() {
+      this.filterUsername = '';
+      this.filterDate = this.currentBusinessDate || '';
+      this.filterLotteryType = '';
+      this.filterImage = '';
+      this.filterChecked = '';
+      this.page = 1;
+      await this.loadWinning();
     },
     async loadWinning() {
       this.loading = true;

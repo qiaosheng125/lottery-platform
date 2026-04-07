@@ -639,6 +639,7 @@ def api_winning_filter_options():
         'usernames': [u[0] for u in usernames if u[0]],
         'dates': dates,
         'lottery_types': [t[0] for t in types_raw if t[0]],
+        'current_business_date': str(get_business_date()),
     })
 
 

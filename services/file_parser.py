@@ -5,6 +5,7 @@
 """
 
 import os
+import shutil
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -31,6 +32,57 @@ def _generate_display_id() -> str:
     return f"{date_str}-{count + 1:02d}"
 
 
+def build_uploaded_txt_relative_path(filename: str, upload_dt=None) -> str:
+    upload_dt = upload_dt or beijing_now()
+    safe_name = os.path.basename(filename)
+    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    unique_id = uuid.uuid4().hex[:8]
+    business_date = get_business_date(upload_dt).isoformat()
+    stored_name = f"{timestamp}_{unique_id}_{safe_name}"
+    return os.path.join('txt', business_date, stored_name)
+
+
+def resolve_uploaded_txt_path(stored_filename: str, upload_folder: str) -> str:
+    candidates = [
+        os.path.join(upload_folder, stored_filename),
+        os.path.join(upload_folder, os.path.basename(stored_filename)),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return candidates[0]
+
+
+def archive_uploaded_txt_file(uploaded_file: UploadedFile, upload_folder: str) -> bool:
+    current_path = resolve_uploaded_txt_path(uploaded_file.stored_filename, upload_folder)
+    if not os.path.exists(current_path):
+        return False
+
+    normalized = uploaded_file.stored_filename.replace('\\', '/')
+    if normalized.startswith('archive/'):
+        return False
+
+    if normalized.startswith('txt/'):
+        archive_relative = os.path.join('archive', uploaded_file.stored_filename)
+    else:
+        business_date = get_business_date(uploaded_file.uploaded_at or beijing_now()).isoformat()
+        archive_relative = os.path.join('archive', 'txt', business_date, os.path.basename(uploaded_file.stored_filename))
+
+    archive_path = os.path.join(upload_folder, archive_relative)
+    os.makedirs(os.path.dirname(archive_path), exist_ok=True)
+    shutil.move(current_path, archive_path)
+    uploaded_file.stored_filename = archive_relative
+    return True
+
+
+def delete_uploaded_txt_file(uploaded_file: UploadedFile, upload_folder: str) -> bool:
+    current_path = resolve_uploaded_txt_path(uploaded_file.stored_filename, upload_folder)
+    if not os.path.exists(current_path):
+        return False
+    os.remove(current_path)
+    return True
+
+
 def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     """
     处理单个上传的文件：
@@ -46,15 +98,13 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     from extensions import redis_client
     from services.notify_service import notify_all
 
-    filename = file_storage.filename
+    filename = os.path.basename(file_storage.filename or '')
     upload_folder = current_app.config['UPLOAD_FOLDER']
-    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
-    unique_id = uuid.uuid4().hex[:8]
-    stored_filename = f"{timestamp}_{unique_id}_{filename}"
-    file_path = os.path.join(upload_folder, stored_filename)
-    file_storage.save(file_path)
-
     upload_dt = beijing_now()
+    stored_filename = build_uploaded_txt_relative_path(filename, upload_dt)
+    file_path = os.path.join(upload_folder, stored_filename)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    file_storage.save(file_path)
 
     # Parse filename
     parsed_meta = parse_filename(filename, upload_dt)

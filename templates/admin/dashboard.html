@@ -102,6 +102,25 @@
     <!-- Pool by type -->
     <div class="col-lg-4">
       <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-megaphone"></i> 发送公告</span>
+          <span class="badge bg-secondary" id="announcement-status">未加载</span>
+        </div>
+        <div class="card-body">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="announcement-enabled">
+            <label class="form-check-label" for="announcement-enabled">显示公告并立即推送</label>
+          </div>
+          <textarea id="announcement-input" class="form-control mb-2" rows="4" placeholder="输入公告内容"></textarea>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary btn-sm" id="announcement-save-btn" onclick="saveAnnouncement()">发送公告</button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadAnnouncementSettings()">重新加载</button>
+          </div>
+          <div class="form-text">这里发送的公告与系统设置中的公告字段相同，保存后客户端会按现有逻辑显示。</div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
         <div class="card-header"><i class="bi bi-bar-chart"></i> 票池分布</div>
         <div class="card-body p-0">
           <div id="pool-by-type" class="p-2">
@@ -240,6 +259,58 @@ async function refreshDashboard() {
   }
 }
 
+async function loadAnnouncementSettings() {
+  const status = document.getElementById('announcement-status');
+  const input = document.getElementById('announcement-input');
+  const enabled = document.getElementById('announcement-enabled');
+  try {
+    const res = await fetch('/admin/api/settings');
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || '公告加载失败');
+    }
+    input.value = data.announcement || '';
+    enabled.checked = !!data.announcement_enabled;
+    status.textContent = enabled.checked ? '已启用' : '未启用';
+    status.className = `badge ${enabled.checked ? 'bg-success' : 'bg-secondary'}`;
+  } catch (e) {
+    status.textContent = '加载失败';
+    status.className = 'badge bg-danger';
+    showToast(e.message || '公告加载失败', 'danger');
+  }
+}
+
+async function saveAnnouncement() {
+  const status = document.getElementById('announcement-status');
+  const input = document.getElementById('announcement-input');
+  const enabled = document.getElementById('announcement-enabled');
+  const btn = document.getElementById('announcement-save-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/admin/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        announcement: input.value,
+        announcement_enabled: enabled.checked,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || '公告发送失败');
+    }
+    status.textContent = enabled.checked ? '已启用' : '未启用';
+    status.className = `badge ${enabled.checked ? 'bg-success' : 'bg-secondary'}`;
+    showToast(enabled.checked ? '公告已发送' : '公告已保存', 'success');
+  } catch (e) {
+    status.textContent = '保存失败';
+    status.className = 'badge bg-danger';
+    showToast(e.message || '公告发送失败', 'danger');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function forceLogout(userId) {
   if (!confirm('确认踢出该用户？')) return;
   try {
@@ -257,6 +328,7 @@ async function forceLogout(userId) {
 }
 
 refreshDashboard();
+loadAnnouncementSettings();
 setInterval(refreshDashboard, 5000);
 
 // 心跳：每30秒更新会话活跃时间

@@ -91,15 +91,15 @@ def record_winning():
 @login_required
 @login_required_json
 def my_winning():
-    """Return the current user's winning tickets from the last 3 business days."""
+    """Return the current user's winning tickets from the last 4 business days."""
     from datetime import datetime, timedelta
 
     date_str = request.args.get('date', '').strip()
     lottery_type = request.args.get('lottery_type', '').strip()
 
     today = get_business_date()
-    three_days_ago = today - timedelta(days=2)
-    start_time = datetime.combine(three_days_ago, datetime.min.time()) + timedelta(hours=12)
+    four_days_ago = today - timedelta(days=3)
+    start_time = datetime.combine(four_days_ago, datetime.min.time()) + timedelta(hours=12)
     end_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=36)
 
     q = LotteryTicket.query.filter(

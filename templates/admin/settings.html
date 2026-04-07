@@ -69,15 +69,6 @@
           <div class="form-text">用逗号分隔多个数字</div>
         </div>
 
-        <h6 class="border-bottom pb-2 mb-3">公告</h6>
-        <div class="mb-3">
-          <div class="form-check form-switch mb-2">
-            <input class="form-check-input" type="checkbox" v-model="s.announcement_enabled" id="ann">
-            <label class="form-check-label" for="ann">显示公告</label>
-          </div>
-          <textarea v-model="s.announcement" class="form-control" rows="3" placeholder="公告内容"></textarea>
-        </div>
-
         <button class="btn btn-primary" @click="saveSettings" :disabled="saving">
           <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
           保存设置

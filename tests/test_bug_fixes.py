@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import io
 
 import pytest
+from werkzeug.datastructures import FileStorage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -152,6 +153,10 @@ def create_pending_ticket(raw_content: str, line_number: int) -> LotteryTicket:
     db.session.add(ticket)
     db.session.commit()
     return ticket
+
+
+def make_upload_file(filename: str, content: str) -> FileStorage:
+    return FileStorage(stream=io.BytesIO(content.encode("utf-8")), filename=filename, content_type="text/plain")
 
 
 def test_mode_b_processing_without_device_id_returns_all_batches(app, client):
@@ -675,6 +680,52 @@ def test_archive_old_tickets_uses_fallback_terminal_time_for_expired_and_revoked
     assert archived_ids == {expired_id, revoked_id}
 
 
+def test_process_uploaded_file_stores_txt_under_business_date_folder(app):
+    from services.file_parser import process_uploaded_file
+
+    with app.app_context():
+        user = create_user("upload_folder_user", "secret123", client_mode="mode_b")
+        result = process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        assert result["success"] is True
+
+        uploaded = UploadedFile.query.get(result["file_id"])
+        assert uploaded is not None
+        normalized = uploaded.stored_filename.replace("\\", "/")
+        assert normalized.startswith("txt/")
+        assert "/202" in normalized
+
+
+def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
+    from services.file_parser import process_uploaded_file, resolve_uploaded_txt_path
+    from tasks.archive import archive_old_uploaded_txt_files
+
+    with app.app_context():
+        user = create_user("archive_txt_user", "secret123", client_mode="mode_b")
+        result = process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        uploaded = UploadedFile.query.get(result["file_id"])
+        old_path = resolve_uploaded_txt_path(uploaded.stored_filename, app.config["UPLOAD_FOLDER"])
+        assert os.path.exists(old_path)
+
+        uploaded.uploaded_at = beijing_now() - timedelta(days=31)
+        uploaded.pending_count = 0
+        uploaded.assigned_count = 0
+        uploaded.completed_count = uploaded.total_tickets
+        db.session.commit()
+
+        moved = archive_old_uploaded_txt_files(days_ago=30)
+        remaining = UploadedFile.query.get(result["file_id"])
+
+    assert moved == 1
+    assert not os.path.exists(old_path)
+    assert remaining is None
+
+
 def test_public_register_page_redirects_to_login(client):
     resp = client.get("/auth/register", follow_redirects=False)
     assert resp.status_code == 302
@@ -950,6 +1001,47 @@ def test_my_winning_returns_business_date(app, client):
     records = [item for items in data["grouped"].values() for item in items]
     assert records
     assert records[0]["business_date"]
+
+
+def test_my_winning_keeps_recent_four_business_days(app, client, monkeypatch):
+    business_today = datetime(2026, 4, 7, 13, 0, 0)
+
+    with app.app_context():
+        user = create_user("winning_recent_four", "secret123", client_mode="mode_a")
+        keep_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-KEEP-4D",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 4, 13, 0, 0),
+            is_winning=True,
+        )
+        drop_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-DROP-5D",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 3, 11, 0, 0),
+            is_winning=True,
+        )
+        db.session.add_all([keep_ticket, drop_ticket])
+        db.session.commit()
+
+    monkeypatch.setattr("routes.winning.get_business_date", lambda dt=None: (dt or business_today).date() if dt else business_today.date())
+
+    resp = login(client, "winning_recent_four", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    records = [item["raw_content"] for items in data["grouped"].values() for item in items]
+    assert "WIN-KEEP-4D" in records
+    assert "WIN-DROP-5D" not in records
 
 
 def test_admin_file_list_uses_business_date_for_date_filter(app, client):
@@ -1251,6 +1343,17 @@ def test_admin_winning_template_handles_list_and_detail_load_failures():
     assert "showToast(e.message || '加载赛果列表失败', 'danger');" in content
     assert "throw new Error(data.error || '加载赛果详情失败');" in content
     assert "showToast(e.message || '加载赛果详情失败', 'danger');" in content
+
+
+def test_admin_winning_defaults_date_filter_to_current_business_day():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "currentBusinessDate: ''" in content
+    assert "this.currentBusinessDate = data.current_business_date || '';" in content
+    assert "if (!this.filterDate && this.currentBusinessDate) {" in content
+    assert "this.filterDate = this.currentBusinessDate;" in content
+    assert "resetWinningFilters()" in content
+
 def test_client_dashboard_handles_mode_b_network_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
@@ -1271,6 +1374,23 @@ def test_admin_dashboard_marks_refresh_failure_in_indicator():
     assert "throw new Error(data.error ||" in content
     assert "onlineIndicator.textContent = '连接异常';" in content
     assert "onlineIndicator.className = 'badge bg-danger';" in content
+
+
+def test_admin_dashboard_contains_announcement_panel():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "发送公告" in content
+    assert "id=\"announcement-input\"" in content
+    assert "async function loadAnnouncementSettings()" in content
+    assert "async function saveAnnouncement()" in content
+    assert "loadAnnouncementSettings();" in content
+
+
+def test_admin_settings_no_longer_renders_announcement_editor():
+    settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
+    content = settings_template.read_text(encoding="utf-8")
+    assert "公告内容" not in content
+    assert "显示公告" not in content
 def test_client_dashboard_validates_winning_image_type_and_handles_password_http_errors():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

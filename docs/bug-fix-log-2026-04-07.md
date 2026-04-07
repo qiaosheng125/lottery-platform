@@ -152,6 +152,35 @@
   - `test_admin_winning_uses_business_date_for_date_filter`
   - `test_admin_match_results_use_business_date_for_date_filter`
 
+### 6. 历史保留策略收敛为“只保留 30 天”，不再做长期历史归档
+
+### 背景
+
+当前业务不需要长期保留很远的历史数据：
+
+- 管理员不需要查询太远的文件和中奖历史
+- 用户也不需要查询太远的数据
+- 用户中奖记录最多只需要最近 4 个业务日
+
+因此继续做“长期归档仓库”意义不大，反而会增加复杂度。
+
+### 调整后的策略
+
+- 业务表数据原则上只保留最近 30 天
+- 清理任务每周执行一次，因此允许最多不到 7 天的浮动窗口
+- 用户中奖记录接口最多只展示最近 4 个业务日
+- 原始 TXT 上传时即按业务日分目录：
+  - `uploads/txt/<业务日>/...`
+- 超过保留期且已闭环的原始 TXT 会被定时删除
+
+### 涉及范围
+
+- [archive.py](/C:/Users/徐逸飞/Desktop/file-hub/tasks/archive.py)
+- [scheduler.py](/C:/Users/徐逸飞/Desktop/file-hub/tasks/scheduler.py)
+- [file_parser.py](/C:/Users/徐逸飞/Desktop/file-hub/services/file_parser.py)
+- [winning.py](/C:/Users/徐逸飞/Desktop/file-hub/routes/winning.py)
+- [README.md](/C:/Users/徐逸飞/Desktop/file-hub/README.md)
+
 ## 本次验证结论
 
 - 仓库内相关 Python 文件 `py_compile` 通过

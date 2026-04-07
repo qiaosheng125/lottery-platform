@@ -60,7 +60,23 @@ def start_scheduler(app):
         func=_run_with_context(app, 'tasks.archive', 'archive_old_tickets'),
         trigger=CronTrigger(day_of_week='mon', hour=6, minute=0, timezone='Asia/Shanghai'),
         id='archive_tickets',
-        name='数据归档',
+        name='历史票据清理',
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.archive', 'archive_old_uploaded_txt_files'),
+        trigger=CronTrigger(day_of_week='mon', hour=6, minute=10, timezone='Asia/Shanghai'),
+        id='archive_uploaded_txt_files',
+        name='原始TXT历史清理',
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.archive', 'purge_old_auxiliary_records'),
+        trigger=CronTrigger(day_of_week='mon', hour=6, minute=20, timezone='Asia/Shanghai'),
+        id='purge_old_auxiliary_records',
+        name='辅助历史清理',
         replace_existing=True,
     )
 
