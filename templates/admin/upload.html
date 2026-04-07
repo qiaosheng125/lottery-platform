@@ -216,6 +216,9 @@ createApp({
       try {
         const res = await fetch('/admin/files/upload', { method: 'POST', body: fd });
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '上传失败');
+        }
         if (data.results) {
           data.results.forEach((r, i) => {
             const item = this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));
@@ -234,7 +237,8 @@ createApp({
           this.uploadQueue = this.uploadQueue.filter(i => i.status !== 'done');
         }
       } catch(e) {
-        this.uploadQueue.forEach(i => { if(i.status==='pending') { i.status='error'; i.message='上传失败'; } });
+        this.uploadQueue.forEach(i => { if(i.status==='pending') { i.status='error'; i.message=e.message || '上传失败'; } });
+        showToast(e.message || '上传失败', 'danger');
       }
       this.uploading = false;
     },
