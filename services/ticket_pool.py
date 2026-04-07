@@ -715,6 +715,7 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
             WHERE id = ANY(:ids)
               AND assigned_user_id = :user_id
               AND status = 'assigned'
+            RETURNING id
         """),
         {'ids': ticket_ids, 'user_id': user_id, 'now': now}
     ).fetchall()
@@ -801,24 +802,11 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
         db.session.commit()
         return {'completed_count': completed_total, 'expired_count': expired_total}
 
-    existing_ids = {
-        row.id
-        for row in db.session.execute(
-            text("""
-                SELECT id
-                FROM lottery_tickets
-                WHERE id = ANY(:ids)
-                  AND assigned_user_id = :user_id
-                  AND status = 'assigned'
-            """),
-            {'ids': ticket_ids, 'user_id': user_id}
-        ).fetchall()
-    }
-    valid_completed_ids = [current_id for current_id in completed_ids if current_id in existing_ids]
-    valid_expired_ids = [current_id for current_id in expired_ids if current_id in existing_ids]
+    valid_completed_ids = []
+    valid_expired_ids = []
 
-    if valid_completed_ids:
-        db.session.execute(
+    if completed_ids:
+        completed_rows = db.session.execute(
             text("""
                 UPDATE lottery_tickets
                 SET status = 'completed',
@@ -827,9 +815,13 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
                 WHERE id = ANY(:ids)
                   AND assigned_user_id = :user_id
                   AND status = 'assigned'
+                RETURNING id
             """),
-            {'ids': valid_completed_ids, 'user_id': user_id, 'now': now}
-        )
+            {'ids': completed_ids, 'user_id': user_id, 'now': now}
+        ).fetchall()
+        valid_completed_ids = [row[0] for row in completed_rows]
+
+    if valid_completed_ids:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f
@@ -846,8 +838,8 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
             {'ids': valid_completed_ids}
         )
 
-    if valid_expired_ids:
-        db.session.execute(
+    if expired_ids:
+        expired_rows = db.session.execute(
             text("""
                 UPDATE lottery_tickets
                 SET status = 'expired',
@@ -855,9 +847,13 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
                 WHERE id = ANY(:ids)
                   AND assigned_user_id = :user_id
                   AND status = 'assigned'
+                RETURNING id
             """),
-            {'ids': valid_expired_ids, 'user_id': user_id}
-        )
+            {'ids': expired_ids, 'user_id': user_id}
+        ).fetchall()
+        valid_expired_ids = [row[0] for row in expired_rows]
+
+    if valid_expired_ids:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f

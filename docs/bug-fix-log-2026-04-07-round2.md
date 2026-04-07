@@ -377,6 +377,18 @@
 - 这意味着只要请求里混进了已完成、非当前用户或并发失败的票，文件计数就可能被多减/多加，和真实完成结果不一致。
 - 现已修复：Postgres 分支改成只按 `UPDATE ... RETURNING id` 真正完成成功的票更新文件计数，并以这批真实完成的票数作为返回值。
 
+### 51. Postgres 下“部分完成其余过期”确认链路也会按错票据集合更新计数
+
+- `finalize_tickets_batch()` 的 Postgres 分支之前先用一次 `SELECT` 预筛可操作票，再分别执行 completed / expired 更新，但两个 `uploaded_files` 计数更新都还是按预筛后的 `valid_*_ids` 整批统计。
+- 这意味着如果某些票在预筛后到真正 `UPDATE` 前已经被别的请求改走，文件计数仍会把这些没真正更新成功的票算进去。
+- 现已修复：completed 和 expired 两段都改成只按各自 `UPDATE ... RETURNING id` 真正成功的票更新文件计数，并以这两批真实成功的票数作为返回结果。
+
+### 52. Postgres 批量标完成链路缺少 `RETURNING id`
+
+- 在把 `complete_tickets_batch()` 改成按真实成功票更新计数后，这条 SQL 仍然漏了 `RETURNING id`，代码却已经开始按 `fetchall()` 读取更新结果。
+- 这在真实 Postgres 下会拿不到完成成功的票 ID，属于一处不完整修复。
+- 现已补上：批量标完成 SQL 现在明确带 `RETURNING id`，和后续文件计数更新逻辑保持一致。
+
 ## 本轮验证
 
 已通过的定向回归包括：
@@ -433,6 +445,8 @@
 - Postgres 下 B 模式下载现在也会严格执行 `max_processing` 上限，并返回正确的自动调整提示
 - B 模式下载服务层现在会区分“票池无票 / 今日上限 / 处理中上限”，不再一律误报处理中上限
 - Postgres 批量标完成现在只按真正完成成功的票更新文件计数，不再按原始请求整批统计
+- Postgres 下“部分完成其余过期”链路现在也只按真正更新成功的票更新文件计数
+- Postgres 批量标完成 SQL 现在明确带 `RETURNING id`，和后续真实成功票计数逻辑一致
 
 定向回归结果：
 
@@ -449,7 +463,9 @@
 - Postgres 下 B 模式批量分配会按处理中剩余额度自动收缩本次请求量，并返回调整提示
 - B 模式下载服务层会正确区分“票池空”和“达到今日/处理中上限”的错误原因
 - Postgres 批量标完成现在只按 `RETURNING` 的真实完成票更新文件计数
-- `99 passed`
+- Postgres 下“部分完成其余过期”确认链路现在也只按 `RETURNING` 的真实成功票更新文件计数
+- Postgres 批量标完成 SQL 现在明确携带 `RETURNING id`
+- `100 passed`
 
 备注：
 
