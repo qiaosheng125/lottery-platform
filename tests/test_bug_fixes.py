@@ -4871,10 +4871,12 @@ def test_client_dashboard_replaces_processing_batches_from_server():
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
+    assert "window.addEventListener('pool_updated', this._onPoolUpdated);" in content
     assert "window.addEventListener('announcement', this._onAnnouncement);" in content
     assert "window.addEventListener('pool_disabled', this._onPoolDisabled);" in content
     assert "window.addEventListener('pool_enabled', this._onPoolEnabled);" in content
     assert "window.addEventListener('file_revoked', this._onFileRevoked);" in content
+    assert "this._onPoolUpdated = () => {" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
 

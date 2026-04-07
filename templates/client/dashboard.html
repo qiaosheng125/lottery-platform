@@ -455,6 +455,10 @@ createApp({
     this._onAnnouncement = (event) => {
       this.announcement = (event.detail && event.detail.content) || '';
     };
+    this._onPoolUpdated = () => {
+      this.loadPoolStatus();
+      this.loadStats();
+    };
     this._onPoolDisabled = () => {
       this.loadPoolStatus();
       this.loadStats();
@@ -476,6 +480,7 @@ createApp({
       this.loadPoolStatus();
       this.loadStats();
     };
+    window.addEventListener('pool_updated', this._onPoolUpdated);
     window.addEventListener('announcement', this._onAnnouncement);
     window.addEventListener('pool_disabled', this._onPoolDisabled);
     window.addEventListener('pool_enabled', this._onPoolEnabled);
@@ -1008,6 +1013,9 @@ createApp({
     }
     if (this._onAnnouncement) {
       window.removeEventListener('announcement', this._onAnnouncement);
+    }
+    if (this._onPoolUpdated) {
+      window.removeEventListener('pool_updated', this._onPoolUpdated);
     }
     if (this._onPoolDisabled) {
       window.removeEventListener('pool_disabled', this._onPoolDisabled);
