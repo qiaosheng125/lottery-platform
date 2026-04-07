@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -175,6 +176,9 @@ def create_app(config_name=None):
                 return invalidate_current_session()
 
             sess.last_seen = beijing_now()
+            from models.settings import SystemSettings
+            hours = SystemSettings.get().session_lifetime_hours
+            sess.expires_at = sess.last_seen + timedelta(hours=hours)
             try:
                 db.session.commit()
             except Exception:

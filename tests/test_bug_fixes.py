@@ -544,9 +544,19 @@ def test_heartbeat_can_backfill_session_device_id(app, client):
     with app.app_context():
         user = create_user("heartbeat_device_user", "secret123", client_mode="mode_b")
         user_id = user.id
+        settings = SystemSettings.get()
+        settings.session_lifetime_hours = 6
+        db.session.commit()
 
     resp = login(client, "heartbeat_device_user", "secret123")
     assert resp.status_code == 200
+
+    with app.app_context():
+        from models.user import UserSession
+
+        session = UserSession.query.filter_by(user_id=user_id).first()
+        session.expires_at = beijing_now() + timedelta(minutes=1)
+        db.session.commit()
 
     resp = client.post("/auth/heartbeat", json={"device_id": "device-01"})
     assert resp.status_code == 200
@@ -558,6 +568,8 @@ def test_heartbeat_can_backfill_session_device_id(app, client):
         session = UserSession.query.filter_by(user_id=user_id).first()
         assert session is not None
         assert session.device_id == "device-01"
+        remaining_hours = (session.expires_at - beijing_now()).total_seconds() / 3600
+        assert remaining_hours > 5.8
 
 
 def test_create_session_uses_db_session_lifetime_setting(app):
@@ -574,6 +586,35 @@ def test_create_session_uses_db_session_lifetime_setting(app):
         delta_hours = (session.expires_at - before).total_seconds() / 3600
 
     assert 5.9 <= delta_hours <= 6.1
+
+
+def test_authenticated_request_extends_session_expiry(app, client):
+    with app.app_context():
+        user = create_user("session_extend_user", "secret123", client_mode="mode_a")
+        settings = SystemSettings.get()
+        settings.session_lifetime_hours = 6
+        db.session.commit()
+
+    resp = login(client, "session_extend_user", "secret123")
+    assert resp.status_code == 200
+
+    with app.app_context():
+        from models.user import UserSession
+
+        session = UserSession.query.first()
+        session.expires_at = beijing_now() + timedelta(minutes=1)
+        db.session.commit()
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+
+    with app.app_context():
+        from models.user import UserSession
+
+        session = UserSession.query.first()
+        remaining_hours = (session.expires_at - beijing_now()).total_seconds() / 3600
+
+    assert remaining_hours > 5.8
 
 
 def test_time_utils_use_configured_daily_reset_hour(app):
@@ -593,6 +634,48 @@ def test_time_utils_use_configured_daily_reset_hour(app):
 
         deadline = resolve_deadline_datetime("05.30", datetime(2026, 4, 7, 7, 0, 0))
         assert deadline == datetime(2026, 4, 8, 5, 30, 0)
+
+
+def test_my_winning_uses_configured_business_reset_hour(app, client):
+    with app.app_context():
+        user = create_user("winning_reset_hour_user", "secret123", client_mode="mode_a")
+        settings = SystemSettings.get()
+        settings.daily_reset_hour = 6
+
+        inside_window = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-RESET-INSIDE",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 7, 5, 30, 0),
+            is_winning=True,
+        )
+        outside_window = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-RESET-OUTSIDE",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 7, 6, 30, 0),
+            is_winning=True,
+        )
+        db.session.add_all([inside_window, outside_window])
+        db.session.commit()
+
+    resp = login(client, "winning_reset_hour_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my?date=2026-04-06")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    records = data["grouped"]["2026-04-06"]
+    raw_contents = [record["raw_content"] for record in records]
+    assert "WIN-RESET-INSIDE" in raw_contents
+    assert "WIN-RESET-OUTSIDE" not in raw_contents
 
 
 def test_user_daily_stats_uses_current_business_window_before_noon(app, client, monkeypatch):

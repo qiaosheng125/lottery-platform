@@ -118,7 +118,10 @@ def heartbeat():
             device_id = (data.get('device_id') or '').strip()
             if device_id:
                 session_record.device_id = device_id
-            session_record.last_seen = beijing_now()
+            now = beijing_now()
+            session_record.last_seen = now
+            settings = SystemSettings.get()
+            session_record.expires_at = now + timedelta(hours=settings.session_lifetime_hours)
             db.session.commit()
     return jsonify({'success': True})
 

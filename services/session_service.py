@@ -42,7 +42,17 @@ def get_session_by_token(token: str) -> Optional[UserSession]:
 
 def touch_session(token: str):
     """更新 last_seen"""
-    UserSession.query.filter_by(session_token=token).update({'last_seen': beijing_now()})
+    now = beijing_now()
+    try:
+        from models.settings import SystemSettings
+
+        hours = SystemSettings.get().session_lifetime_hours
+    except Exception:
+        hours = current_app.config.get('SESSION_LIFETIME_HOURS', 3)
+    UserSession.query.filter_by(session_token=token).update({
+        'last_seen': now,
+        'expires_at': now + timedelta(hours=hours),
+    })
     db.session.commit()
 
 

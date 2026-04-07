@@ -5,7 +5,7 @@ from extensions import db
 from models.ticket import LotteryTicket
 from models.winning import WinningRecord
 from utils.decorators import login_required_json
-from utils.time_utils import beijing_now, get_business_date
+from utils.time_utils import beijing_now, get_business_date, get_business_window
 
 winning_bp = Blueprint('winning', __name__)
 
@@ -159,8 +159,8 @@ def my_winning():
 
     today = get_business_date()
     four_days_ago = today - timedelta(days=3)
-    start_time = datetime.combine(four_days_ago, datetime.min.time()) + timedelta(hours=12)
-    end_time = datetime.combine(today, datetime.min.time()) + timedelta(hours=36)
+    start_time, _ = get_business_window(four_days_ago)
+    _, end_time = get_business_window(today)
 
     q = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
@@ -174,8 +174,7 @@ def my_winning():
             filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
-        filter_start = datetime.combine(filter_date, datetime.min.time()) + timedelta(hours=12)
-        filter_end = filter_start + timedelta(days=1)
+        filter_start, filter_end = get_business_window(filter_date)
         q = q.filter(
             LotteryTicket.completed_at >= filter_start,
             LotteryTicket.completed_at < filter_end,
