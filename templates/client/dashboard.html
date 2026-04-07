@@ -452,6 +452,30 @@ createApp({
     setInterval(this.loadStats, 15000);
     setInterval(this.loadPoolStatus, 15000);
 
+    this._onAnnouncement = (event) => {
+      this.announcement = (event.detail && event.detail.content) || '';
+    };
+    this._onPoolDisabled = () => {
+      this.loadPoolStatus();
+      this.loadStats();
+    };
+    this._onFileRevoked = (event) => {
+      const fileId = event.detail && event.detail.file_id;
+      if (fileId && this.currentTicket && this.currentTicket.source_file_id === fileId) {
+        this.currentTicket = null;
+        this.modeAActive = false;
+        this.historyOffset = 0;
+        clearInterval(this.countdownTimer);
+        document.body.classList.remove('mode-a-active');
+      }
+      this.loadProcessingBatches();
+      this.loadPoolStatus();
+      this.loadStats();
+    };
+    window.addEventListener('announcement', this._onAnnouncement);
+    window.addEventListener('pool_disabled', this._onPoolDisabled);
+    window.addEventListener('file_revoked', this._onFileRevoked);
+
     // 心跳：每30秒更新会话活跃时间
     setInterval(() => {
       fetch('/auth/heartbeat', {
@@ -976,6 +1000,15 @@ createApp({
     clearInterval(this.countdownTimer);
     if (this.pwdSuccessTimer) {
       clearTimeout(this.pwdSuccessTimer);
+    }
+    if (this._onAnnouncement) {
+      window.removeEventListener('announcement', this._onAnnouncement);
+    }
+    if (this._onPoolDisabled) {
+      window.removeEventListener('pool_disabled', this._onPoolDisabled);
+    }
+    if (this._onFileRevoked) {
+      window.removeEventListener('file_revoked', this._onFileRevoked);
     }
   }
 }).mount('#client-dashboard');

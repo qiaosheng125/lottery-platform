@@ -3215,6 +3215,16 @@ def test_client_dashboard_replaces_processing_batches_from_server():
     assert "this.bPendingBatches = data.batches || [];" in content
 
 
+def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "window.addEventListener('announcement', this._onAnnouncement);" in content
+    assert "window.addEventListener('pool_disabled', this._onPoolDisabled);" in content
+    assert "window.addEventListener('file_revoked', this._onFileRevoked);" in content
+    assert "this.loadProcessingBatches();" in content
+    assert "this.currentTicket = null;" in content
+
+
 def test_client_dashboard_handles_mode_b_preview_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
@@ -3238,6 +3248,13 @@ def test_admin_winning_template_merges_returned_winning_record_after_upload():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "Object.assign(record, data.record || {}, { winning_image_url: data.image_url });" in content
+
+
+def test_socket_client_dispatches_realtime_custom_events():
+    socket_client = Path(__file__).resolve().parents[1] / "static" / "js" / "socket_client.js"
+    content = socket_client.read_text(encoding="utf-8")
+    assert "window.dispatchEvent(new CustomEvent('announcement', { detail: data }));" in content
+    assert "window.dispatchEvent(new CustomEvent('pool_disabled', { detail: data }));" in content
 
 
 def test_admin_upload_template_uses_xlsx_export_label():

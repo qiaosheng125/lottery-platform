@@ -35,10 +35,12 @@
       text.textContent = data.content;
       bar.classList.remove('d-none');
     }
+    window.dispatchEvent(new CustomEvent('announcement', { detail: data }));
   });
 
   socket.on('pool_disabled', (data) => {
     showToast(data.message || '票池已关闭', 'warning');
+    window.dispatchEvent(new CustomEvent('pool_disabled', { detail: data }));
   });
 
   socket.on('file_revoked', (data) => {
