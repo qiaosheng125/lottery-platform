@@ -12,6 +12,7 @@ from services.ticket_pool import get_pool_status
 from utils.decorators import can_receive_required, login_required_json, mode_b_required
 
 mode_b_bp = Blueprint('mode_b', __name__)
+MODE_B_POOL_RESERVE = 20
 
 
 def _validate_device_info(device_id: str, device_name: str = ''):
@@ -36,6 +37,26 @@ def _parse_batch_count(value, default: int = 100):
     return count
 
 
+def _trim_status_for_mode_b(status: dict) -> dict:
+    available_total = max(0, int(status.get('total_pending') or 0) - MODE_B_POOL_RESERVE)
+    trimmed_by_type = []
+    remaining = available_total
+    for item in status.get('by_type') or []:
+        if remaining <= 0:
+            break
+        raw_count = int(item.get('count') or 0)
+        if raw_count <= 0:
+            continue
+        visible_count = min(raw_count, remaining)
+        trimmed_by_type.append({**item, 'count': visible_count})
+        remaining -= visible_count
+    return {
+        **status,
+        'total_pending': available_total,
+        'by_type': trimmed_by_type,
+    }
+
+
 @mode_b_bp.route('/pool-status')
 @login_required_json
 @login_required
@@ -46,7 +67,7 @@ def pool_status():
     if not settings.pool_enabled:
         return jsonify({'success': True, 'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0})
 
-    status = get_pool_status()
+    status = _trim_status_for_mode_b(get_pool_status())
     if not current_user.can_receive:
         status['total_pending'] = 0
         status['by_type'] = []

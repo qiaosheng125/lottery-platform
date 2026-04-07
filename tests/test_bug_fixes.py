@@ -592,6 +592,50 @@ def test_mode_b_processing_with_device_id_filters_batches(app, client):
     assert data["batches"][0]["count"] == 1
 
 
+def test_mode_b_pool_status_reflects_reserve_adjusted_available_counts(app, client):
+    with app.app_context():
+        user = create_user("modeb_pool_status_user", "secret123", client_mode="mode_b")
+        first_deadline = beijing_now() + timedelta(hours=1)
+        second_deadline = beijing_now() + timedelta(hours=2)
+        tickets = []
+        for idx in range(12):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=idx + 1,
+                    raw_content=f"EARLY-{idx}",
+                    status="pending",
+                    lottery_type="胜平负",
+                    deadline_time=first_deadline,
+                )
+            )
+        for idx in range(13):
+            tickets.append(
+                LotteryTicket(
+                    source_file_id=1,
+                    line_number=100 + idx,
+                    raw_content=f"LATE-{idx}",
+                    status="pending",
+                    lottery_type="让球胜平负",
+                    deadline_time=second_deadline,
+                )
+            )
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "modeb_pool_status_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/pool-status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["total_pending"] == 5
+    assert len(data["by_type"]) == 1
+    assert data["by_type"][0]["lottery_type"] == "胜平负"
+    assert data["by_type"][0]["count"] == 5
+
+
 def test_mode_a_routes_reject_invalid_device_id_and_name(app, client):
     with app.app_context():
         create_user("mode_a_device_guard_user", "secret123", client_mode="mode_a")
