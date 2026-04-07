@@ -111,6 +111,33 @@
 
 - `pytest -q tests\test_bug_fixes.py -k "login_json_returns_client_mode or mode_b_endpoints_reject_mode_a_user"`
 
+### 5. 后台按日期筛选的文件列表、中奖管理、结果文件列表统一改为业务日口径
+
+### 问题
+
+虽然前面的“今日统计”和用户端逻辑已经按业务日 `12:00 -> 次日12:00` 计算，但后台仍有几处“按日期筛选/导出”走的是自然日：
+
+- 文件列表 `/admin/api/files`
+- 按日期导出投注内容 `/admin/api/tickets/export-by-date`
+- 中奖管理筛选与导出 `/admin/api/winning*`
+- 结果计算状态列表 `/admin/api/match-results`
+
+这会导致同一天上午 12 点前的数据，在后台被挂到自然日，而不是你系统定义的业务日。
+
+### 修复方式
+
+- 在 [time_utils.py](/C:/Users/徐逸飞/Desktop/file-hub/utils/time_utils.py) 新增 `get_business_window(target_date)`，统一返回 `[当天12:00, 次日12:00)`。
+- 更新 [admin.py](/C:/Users/徐逸飞/Desktop/file-hub/routes/admin.py)：
+  - 文件列表日期筛选与日期选项改为按业务日
+  - 按日期导出投注内容改为按业务日
+  - 中奖管理筛选、日期选项、导出改为按业务日
+  - 结果计算状态日期筛选与日期选项改为按业务日
+- 顺手修复管理员当日 CSV 导出文件名里遗漏的 `today` 变量，改为直接使用 `get_business_date()`。
+
+### 验证
+
+- `pytest -q tests\test_bug_fixes.py -k "admin_file_list_uses_business_date_for_date_filter or admin_winning_uses_business_date_for_date_filter or admin_match_results_use_business_date_for_date_filter"`
+
 ## 本次新增回归测试
 
 - [test_bug_fixes.py](/C:/Users/徐逸飞/Desktop/file-hub/tests/test_bug_fixes.py)
@@ -121,6 +148,9 @@
   - `test_heartbeat_can_backfill_session_device_id`
   - `test_user_daily_stats_uses_current_business_window_before_noon`
   - `test_file_display_id_uses_business_date_before_noon`
+  - `test_admin_file_list_uses_business_date_for_date_filter`
+  - `test_admin_winning_uses_business_date_for_date_filter`
+  - `test_admin_match_results_use_business_date_for_date_filter`
 
 ## 本次验证结论
 

@@ -23,7 +23,7 @@ from services.session_service import force_logout_user
 from services.ticket_pool import get_pool_status
 from services.notify_service import notify_admins, notify_all
 from utils.decorators import admin_required, get_client_ip
-from utils.time_utils import beijing_now, get_today_noon
+from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -248,7 +248,6 @@ def files_list():
 @login_required
 @admin_required
 def api_files_list():
-    from sqlalchemy import func
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 20))
     status_filter = request.args.get('status', '')
@@ -258,17 +257,24 @@ def api_files_list():
     if status_filter:
         q = q.filter_by(status=status_filter)
     if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+        start_at, end_at = get_business_window(selected_date)
         q = q.filter(
-            func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')) == date_str
+            UploadedFile.uploaded_at >= start_at,
+            UploadedFile.uploaded_at < end_at,
         )
 
-    # 日期选项（北京时间）
-    dates_raw = db.session.query(
-        func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours'))
-    ).distinct().order_by(
-        func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')).desc()
+    # 日期选项（业务日）
+    uploaded_rows = db.session.query(UploadedFile.uploaded_at).filter(
+        UploadedFile.uploaded_at.isnot(None)
     ).all()
-    date_options = [d[0] for d in dates_raw if d[0]]
+    date_options = sorted(
+        {str(get_business_date(row[0])) for row in uploaded_rows if row[0]},
+        reverse=True,
+    )
 
     pagination = q.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify({
@@ -350,7 +356,7 @@ def export_tickets():
 
     output.seek(0)
     from flask import Response
-    filename = f"tickets_{today}.csv"
+    filename = f"tickets_{get_business_date()}.csv"
     return Response(
         output.getvalue().encode('utf-8-sig'),
         mimetype='text/csv',
@@ -367,15 +373,20 @@ def export_tickets_by_date():
     """按上传日期导出该日所有票数据 XLSX"""
     import io as _io
     from openpyxl import Workbook
-    from sqlalchemy import func
     from urllib.parse import quote
 
     date_str = request.args.get('date', '').strip()
 
     q = LotteryTicket.query
     if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+        start_at, end_at = get_business_window(selected_date)
         file_ids = db.session.query(UploadedFile.id).filter(
-            func.date(func.datetime(UploadedFile.uploaded_at, '+8 hours')) == date_str
+            UploadedFile.uploaded_at >= start_at,
+            UploadedFile.uploaded_at < end_at,
         ).all()
         file_ids = [r[0] for r in file_ids]
         if not file_ids:
@@ -607,26 +618,26 @@ def winning_page():
 @login_required
 @admin_required
 def api_winning_filter_options():
-    from sqlalchemy import distinct, func
+    from sqlalchemy import distinct
     usernames = db.session.query(distinct(LotteryTicket.assigned_username))\
         .filter(LotteryTicket.assigned_username.isnot(None),
                 LotteryTicket.is_winning == True)\
         .order_by(LotteryTicket.assigned_username).all()
-    dates_raw = db.session.query(
-        func.date(func.datetime(LotteryTicket.completed_at, '+8 hours'))
-    ).filter(
+    completed_rows = db.session.query(LotteryTicket.completed_at).filter(
         LotteryTicket.is_winning == True,
         LotteryTicket.completed_at.isnot(None)
-    ).distinct().order_by(
-        func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')).desc()
     ).all()
+    dates = sorted(
+        {str(get_business_date(row[0])) for row in completed_rows if row[0]},
+        reverse=True,
+    )
     types_raw = db.session.query(distinct(LotteryTicket.lottery_type))\
         .filter(LotteryTicket.is_winning == True,
                 LotteryTicket.lottery_type.isnot(None))\
         .order_by(LotteryTicket.lottery_type).all()
     return jsonify({
         'usernames': [u[0] for u in usernames if u[0]],
-        'dates': [d[0] for d in dates_raw if d[0]],
+        'dates': dates,
         'lottery_types': [t[0] for t in types_raw if t[0]],
     })
 
@@ -636,7 +647,6 @@ def api_winning_filter_options():
 @admin_required
 def api_winning_list():
     """查询中奖票列表（从 LotteryTicket 查 is_winning=True）"""
-    from sqlalchemy import func
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 50))
     username = request.args.get('username', '').strip()
@@ -649,8 +659,14 @@ def api_winning_list():
     if username:
         q = q.filter(LotteryTicket.assigned_username == username)
     if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+        start_at, end_at = get_business_window(selected_date)
         q = q.filter(
-            func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')) == date_str
+            LotteryTicket.completed_at >= start_at,
+            LotteryTicket.completed_at < end_at,
         )
     if lottery_type:
         q = q.filter(LotteryTicket.lottery_type == lottery_type)
@@ -749,7 +765,6 @@ def api_winning_export():
     """导出当前筛选条件下的所有中奖条目为 XLSX"""
     import io as _io
     from openpyxl import Workbook
-    from sqlalchemy import func
 
     username     = request.args.get('username', '').strip()
     date_str     = request.args.get('date', '').strip()
@@ -761,8 +776,14 @@ def api_winning_export():
     if username:
         q = q.filter(LotteryTicket.assigned_username == username)
     if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+        start_at, end_at = get_business_window(selected_date)
         q = q.filter(
-            func.date(func.datetime(LotteryTicket.completed_at, '+8 hours')) == date_str
+            LotteryTicket.completed_at >= start_at,
+            LotteryTicket.completed_at < end_at,
         )
     if lottery_type:
         q = q.filter(LotteryTicket.lottery_type == lottery_type)
@@ -976,23 +997,30 @@ def upload_match_result():
 @login_required
 @admin_required
 def api_match_results():
-    from sqlalchemy import func
     date_str = request.args.get('date', '').strip()
     q = MatchResult.query.order_by(MatchResult.uploaded_at.desc())
     if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+        start_at, end_at = get_business_window(selected_date)
         q = q.filter(
-            func.date(func.datetime(MatchResult.uploaded_at, '+8 hours')) == date_str
+            MatchResult.uploaded_at >= start_at,
+            MatchResult.uploaded_at < end_at,
         )
     results = q.limit(100).all()
     # 附带日期列表供前端筛选
-    dates_raw = db.session.query(
-        func.date(func.datetime(MatchResult.uploaded_at, '+8 hours'))
-    ).distinct().order_by(
-        func.date(func.datetime(MatchResult.uploaded_at, '+8 hours')).desc()
+    uploaded_rows = db.session.query(MatchResult.uploaded_at).filter(
+        MatchResult.uploaded_at.isnot(None)
     ).all()
+    dates = sorted(
+        {str(get_business_date(row[0])) for row in uploaded_rows if row[0]},
+        reverse=True,
+    )
     return jsonify({
         'results': [r.to_dict() for r in results],
-        'dates': [d[0] for d in dates_raw if d[0]],
+        'dates': dates,
     })
 
 

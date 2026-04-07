@@ -16,6 +16,7 @@ from models.settings import SystemSettings
 from models.file import UploadedFile
 from models.ticket import LotteryTicket
 from models.user import User
+from models.result import MatchResult
 from models.winning import WinningRecord
 from utils.time_utils import beijing_now
 from routes.admin import _database_display_info
@@ -855,6 +856,129 @@ def test_my_winning_returns_business_date(app, client):
     records = [item for items in data["grouped"].values() for item in items]
     assert records
     assert records[0]["business_date"]
+
+
+def test_admin_file_list_uses_business_date_for_date_filter(app, client):
+    with app.app_context():
+        admin = User(username="admin_file_date", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        file_prev_business = UploadedFile(
+            display_id="2026/04/06-01",
+            original_filename="before_noon.txt",
+            stored_filename="before_noon.txt",
+            uploaded_by=admin.id,
+            total_tickets=1,
+            pending_count=1,
+            uploaded_at=datetime(2026, 4, 7, 11, 0, 0),
+        )
+        file_current_business = UploadedFile(
+            display_id="2026/04/07-01",
+            original_filename="after_noon.txt",
+            stored_filename="after_noon.txt",
+            uploaded_by=admin.id,
+            total_tickets=1,
+            pending_count=1,
+            uploaded_at=datetime(2026, 4, 7, 13, 0, 0),
+        )
+        db.session.add_all([file_prev_business, file_current_business])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_file_date", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files?date=2026-04-06")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [f["original_filename"] for f in data["files"]] == ["before_noon.txt"]
+    assert "2026-04-06" in data["date_options"]
+    assert "2026-04-07" in data["date_options"]
+
+
+def test_admin_winning_uses_business_date_for_date_filter(app, client):
+    with app.app_context():
+        admin = User(username="admin_winning_date", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("winning_date_user", "secret123", client_mode="mode_a")
+
+        db.session.add(admin)
+        db.session.commit()
+
+        ticket_prev_business = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-PREV-BIZ",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 7, 11, 0, 0),
+            is_winning=True,
+        )
+        ticket_current_business = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-CUR-BIZ",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 7, 13, 0, 0),
+            is_winning=True,
+        )
+        db.session.add_all([ticket_prev_business, ticket_current_business])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_winning_date", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/winning/filter-options")
+    assert resp.status_code == 200
+    options = resp.get_json()
+    assert "2026-04-06" in options["dates"]
+    assert "2026-04-07" in options["dates"]
+
+    resp = client.get("/admin/api/winning?date=2026-04-06")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [r["raw_content"] for r in data["records"]] == ["WIN-PREV-BIZ"]
+
+    export_resp = client.get("/admin/api/winning/export?date=2026-04-06")
+    assert export_resp.status_code == 200
+    assert export_resp.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_admin_match_results_use_business_date_for_date_filter(app, client):
+    with app.app_context():
+        admin = User(username="admin_match_result_date", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        prev_business = MatchResult(
+            detail_period="26034",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=admin.id,
+            uploaded_at=datetime(2026, 4, 7, 11, 0, 0),
+        )
+        current_business = MatchResult(
+            detail_period="26035",
+            result_data={"1": {"SPF": {"result": "1", "sp": 2.34}}},
+            uploaded_by=admin.id,
+            uploaded_at=datetime(2026, 4, 7, 13, 0, 0),
+        )
+        db.session.add_all([prev_business, current_business])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_match_result_date", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/match-results?date=2026-04-06")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [r["detail_period"] for r in data["results"]] == ["26034"]
+    assert "2026-04-06" in data["dates"]
+    assert "2026-04-07" in data["dates"]
 
 
 def test_admin_user_management_endpoints_reject_admin_targets(app, client):

@@ -26,6 +26,13 @@ def get_today_noon() -> datetime:
     return noon
 
 
+def get_business_window(target_date: date) -> tuple[datetime, datetime]:
+    """根据业务日期返回 [当天12:00, 次日12:00) 时间窗口。"""
+    start = datetime.combine(target_date, datetime.min.time()) + timedelta(hours=12)
+    end = start + timedelta(days=1)
+    return start, end
+
+
 def resolve_deadline_datetime(hhmm_str: str, upload_dt: datetime = None) -> datetime:
     """
     将文件名中的 HH:MM 截止时间字符串解析为完整 datetime。
