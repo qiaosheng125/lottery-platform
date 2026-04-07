@@ -459,6 +459,10 @@ createApp({
       this.loadPoolStatus();
       this.loadStats();
     };
+    this._onPoolEnabled = () => {
+      this.loadPoolStatus();
+      this.loadStats();
+    };
     this._onFileRevoked = (event) => {
       const fileId = event.detail && event.detail.file_id;
       if (fileId && this.currentTicket && this.currentTicket.source_file_id === fileId) {
@@ -474,6 +478,7 @@ createApp({
     };
     window.addEventListener('announcement', this._onAnnouncement);
     window.addEventListener('pool_disabled', this._onPoolDisabled);
+    window.addEventListener('pool_enabled', this._onPoolEnabled);
     window.addEventListener('file_revoked', this._onFileRevoked);
 
     // 心跳：每30秒更新会话活跃时间
@@ -1006,6 +1011,9 @@ createApp({
     }
     if (this._onPoolDisabled) {
       window.removeEventListener('pool_disabled', this._onPoolDisabled);
+    }
+    if (this._onPoolEnabled) {
+      window.removeEventListener('pool_enabled', this._onPoolEnabled);
     }
     if (this._onFileRevoked) {
       window.removeEventListener('file_revoked', this._onFileRevoked);

@@ -43,6 +43,11 @@
     window.dispatchEvent(new CustomEvent('pool_disabled', { detail: data }));
   });
 
+  socket.on('pool_enabled', (data) => {
+    showToast(data.message || '票池已开启', 'success');
+    window.dispatchEvent(new CustomEvent('pool_enabled', { detail: data }));
+  });
+
   socket.on('file_revoked', (data) => {
     showToast(`文件已撤回，${data.revoked_count} 张票已取消`, 'warning');
     window.dispatchEvent(new CustomEvent('file_revoked', { detail: data }));

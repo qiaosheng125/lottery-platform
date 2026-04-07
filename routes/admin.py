@@ -1353,7 +1353,10 @@ def api_update_settings():
     if data.get('announcement_enabled') and data.get('announcement'):
         notify_all('announcement', {'content': data['announcement']})
 
-    if not data.get('pool_enabled', True):
-        notify_all('pool_disabled', {'message': '票池已关闭'})
+    if 'pool_enabled' in data:
+        if data['pool_enabled']:
+            notify_all('pool_enabled', {'message': '票池已开启'})
+        else:
+            notify_all('pool_disabled', {'message': '票池已关闭'})
 
     return jsonify({'success': True, 'settings': settings.to_dict()})

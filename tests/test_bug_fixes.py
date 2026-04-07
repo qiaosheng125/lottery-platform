@@ -362,6 +362,32 @@ def test_admin_update_settings_parses_boolean_flags(app, client):
     assert settings["announcement_enabled"] is True
 
 
+def test_admin_update_settings_emits_pool_toggle_events(app, client, monkeypatch):
+    emitted = []
+
+    def fake_notify(event, payload):
+        emitted.append((event, payload))
+
+    monkeypatch.setattr("routes.admin.notify_all", fake_notify)
+
+    with app.app_context():
+        admin = User(username="admin_settings_pool_events", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_pool_events", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"pool_enabled": False})
+    assert resp.status_code == 200
+    resp = client.put("/admin/api/settings", json={"pool_enabled": True})
+    assert resp.status_code == 200
+
+    assert ("pool_disabled", {"message": "票池已关闭"}) in emitted
+    assert ("pool_enabled", {"message": "票池已开启"}) in emitted
+
+
 def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
     with app.app_context():
         admin = User(username="admin_settings_invalid_bool", is_admin=True)
@@ -4818,6 +4844,7 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     content = dashboard_template.read_text(encoding="utf-8")
     assert "window.addEventListener('announcement', this._onAnnouncement);" in content
     assert "window.addEventListener('pool_disabled', this._onPoolDisabled);" in content
+    assert "window.addEventListener('pool_enabled', this._onPoolEnabled);" in content
     assert "window.addEventListener('file_revoked', this._onFileRevoked);" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
@@ -4853,6 +4880,7 @@ def test_socket_client_dispatches_realtime_custom_events():
     content = socket_client.read_text(encoding="utf-8")
     assert "window.dispatchEvent(new CustomEvent('announcement', { detail: data }));" in content
     assert "window.dispatchEvent(new CustomEvent('pool_disabled', { detail: data }));" in content
+    assert "window.dispatchEvent(new CustomEvent('pool_enabled', { detail: data }));" in content
 
 
 def test_admin_upload_template_uses_xlsx_export_label():
