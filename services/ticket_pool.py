@@ -339,7 +339,7 @@ def complete_ticket(ticket_id: int, user_id: int) -> bool:
         {'id': ticket_id, 'user_id': user_id, 'now': now}
     ).rowcount
 
-    if rows:
+    if updated_rows:
         db.session.execute(
             text("""
                 UPDATE uploaded_files
@@ -350,7 +350,7 @@ def complete_ticket(ticket_id: int, user_id: int) -> bool:
             {'id': ticket_id}
         )
         db.session.commit()
-    return rows > 0
+    return updated_rows > 0
 
 
 def assign_tickets_batch(

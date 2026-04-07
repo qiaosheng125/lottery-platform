@@ -14,7 +14,7 @@
         <i class="bi bi-file-earmark-arrow-up fs-1 text-muted"></i>
         <div class="mt-2 text-muted">点击选择或拖拽 TXT 文件</div>
         <div class="small text-muted">支持批量上传，文件名格式: 标识_代码类型N倍_金额X元_N张_HH.MM_编号.txt</div>
-        <input type="file" ref="fileInput" multiple accept=".txt" class="d-none" @change="handleFiles">
+        <input type="file" ref="fileInput" multiple accept=".txt,.TXT" class="d-none" @change="handleFiles">
       </div>
 
       <div v-if="uploadQueue.length > 0" class="mb-3">
@@ -202,7 +202,7 @@ createApp({
       return { pending:'待处理', assigned:'处理中', completed:'已完成', revoked:'已撤回', expired:'已过期' }[s] || s;
     },
     handleDrop(e) {
-      const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.txt'));
+      const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.txt'));
       files.forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
     },
     handleFiles(e) {

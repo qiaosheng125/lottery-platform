@@ -1309,6 +1309,39 @@ def test_mode_b_postgres_complete_updates_file_counts_only_for_completed_ids(app
     assert result == 1
 
 
+def test_mode_a_postgres_complete_ticket_uses_updated_rowcount(app, monkeypatch):
+    from services.ticket_pool import complete_ticket
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeResult:
+        def __init__(self, *, rowcount=0):
+            self.rowcount = rowcount
+
+    calls = []
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        calls.append((sql, params or {}))
+        if "UPDATE lottery_tickets" in sql and "SET status = 'completed'" in sql:
+            return FakeResult(rowcount=1)
+        if "UPDATE uploaded_files" in sql and "completed_count = completed_count + 1" in sql:
+            assert params["id"] == 501
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+
+    with app.app_context():
+        assert complete_ticket(501, user_id=7) is True
+
+    assert any("UPDATE lottery_tickets" in sql for sql, _ in calls)
+    assert any("UPDATE uploaded_files" in sql for sql, _ in calls)
+
+
 def test_mode_b_postgres_finalize_updates_counts_only_for_returned_ids(app, monkeypatch):
     from services.ticket_pool import finalize_tickets_batch
 
@@ -4396,6 +4429,15 @@ def test_admin_upload_template_loads_all_detail_pages():
     assert "} while (page <= totalPages);" in content
     assert "showToast('加载详情失败，请稍后重试', 'danger');" in content
     assert "showToast('撤回失败，请稍后重试', 'danger');" in content
+
+
+def test_admin_upload_template_accepts_uppercase_txt_files():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert 'accept=".txt,.TXT"' in content
+    assert "f.name.toLowerCase().endsWith('.txt')" in content
+
+
 def test_admin_users_template_handles_initial_load_failures():
     users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
     content = users_template.read_text(encoding="utf-8")
