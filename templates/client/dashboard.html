@@ -715,9 +715,10 @@ createApp({
       try {
         const res = await fetch(`/api/mode-b/processing?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
-        if (data.success) {
-          this.bPendingBatches = data.batches || [];
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载处理中批次失败');
         }
+        this.bPendingBatches = data.batches || [];
       } catch(e) {
         this.bPendingBatches = [];
       }
@@ -726,7 +727,10 @@ createApp({
       try {
         const res = await fetch('/api/mode-b/pool-status');
         const data = await res.json();
-        if (data.success) this.poolStatus = data;
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载票池状态失败');
+        }
+        this.poolStatus = data;
       } catch(e) {
         this.poolStatus = { total_pending: 0, by_type: [] };
       }

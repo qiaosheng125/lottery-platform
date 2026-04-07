@@ -5062,7 +5062,9 @@ def test_client_dashboard_resets_matching_state_on_load_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "} catch(e) {\n        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };\n      }\n    }," in content
+    assert "throw new Error(data.error || '加载处理中批次失败');" in content
     assert "} catch(e) {\n        this.bPendingBatches = [];\n      }\n    },\n    async loadPoolStatus()" in content
+    assert "throw new Error(data.error || '加载票池状态失败');" in content
 
 
 def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
