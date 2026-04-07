@@ -57,7 +57,9 @@ def login():
             active_sessions = UserSession.query.filter_by(user_id=user.id).filter(
                 UserSession.last_seen >= cutoff
             ).count()
-            existing = UserSession.query.filter_by(user_id=user.id, device_id=device_id).first()
+            existing = UserSession.query.filter_by(user_id=user.id, device_id=device_id).filter(
+                UserSession.last_seen >= cutoff
+            ).first()
             if not existing and active_sessions >= user.max_devices:
                 message = f'已超过最大设备数限制（{user.max_devices}台）'
                 if request.is_json:

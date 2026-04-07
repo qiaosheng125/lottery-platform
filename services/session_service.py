@@ -16,7 +16,12 @@ from utils.time_utils import beijing_now
 def create_session(user: User, device_id: str = None, ip_address: str = None) -> UserSession:
     """创建新会话"""
     token = secrets.token_urlsafe(64)
-    hours = current_app.config.get('SESSION_LIFETIME_HOURS', 3)
+    try:
+        from models.settings import SystemSettings
+
+        hours = SystemSettings.get().session_lifetime_hours
+    except Exception:
+        hours = current_app.config.get('SESSION_LIFETIME_HOURS', 3)
     expires_at = beijing_now() + timedelta(hours=hours)
 
     session = UserSession(

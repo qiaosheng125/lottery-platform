@@ -280,8 +280,6 @@ def api_files_list():
     date_str = request.args.get('date', '').strip()
 
     q = UploadedFile.query.order_by(UploadedFile.uploaded_at.desc())
-    if status_filter:
-        q = q.filter_by(status=status_filter)
     if date_str:
         try:
             selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -302,11 +300,19 @@ def api_files_list():
         reverse=True,
     )
 
-    pagination = q.paginate(page=page, per_page=per_page, error_out=False)
+    all_files = q.all()
+    if status_filter:
+        all_files = [uploaded_file for uploaded_file in all_files if uploaded_file.derived_status() == status_filter]
+
+    total = len(all_files)
+    pages = (total + per_page - 1) // per_page if total else 0
+    start = (page - 1) * per_page
+    items = all_files[start:start + per_page]
+
     return jsonify({
-        'files': [f.to_dict() for f in pagination.items],
-        'total': pagination.total,
-        'pages': pagination.pages,
+        'files': [f.to_dict() for f in items],
+        'total': total,
+        'pages': pages,
         'page': page,
         'date_options': date_options,
     })

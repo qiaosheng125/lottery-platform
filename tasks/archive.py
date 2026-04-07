@@ -19,6 +19,7 @@ from models.file import UploadedFile
 from models.result import MatchResult, ResultFile
 from models.ticket import LotteryTicket
 from models.winning import WinningRecord
+from services.oss_service import delete_stored_image
 from services.file_parser import delete_uploaded_txt_file
 from utils.time_utils import beijing_now
 
@@ -55,7 +56,10 @@ def archive_old_tickets(days_ago=30):
 
     ticket_ids = [ticket.id for ticket in to_delete]
 
-    WinningRecord.query.filter(WinningRecord.ticket_id.in_(ticket_ids)).delete(synchronize_session=False)
+    winning_records = WinningRecord.query.filter(WinningRecord.ticket_id.in_(ticket_ids)).all()
+    for winning_record in winning_records:
+        delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
+        db.session.delete(winning_record)
     ArchivedLotteryTicket.query.filter(
         ArchivedLotteryTicket.original_ticket_id.in_(ticket_ids)
     ).delete(synchronize_session=False)
@@ -89,7 +93,10 @@ def archive_old_uploaded_txt_files(days_ago=30):
         if remaining_ticket_count > 0:
             continue
 
-        WinningRecord.query.filter_by(source_file_id=uploaded_file.id).delete(synchronize_session=False)
+        winning_records = WinningRecord.query.filter_by(source_file_id=uploaded_file.id).all()
+        for winning_record in winning_records:
+            delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
+            db.session.delete(winning_record)
         delete_uploaded_txt_file(uploaded_file, upload_folder)
         db.session.delete(uploaded_file)
         deleted_count += 1

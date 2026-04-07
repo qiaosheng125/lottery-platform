@@ -45,7 +45,18 @@ class UploadedFile(db.Model):
     uploader = db.relationship('User', foreign_keys=[uploaded_by], backref='uploaded_files')
     revoker = db.relationship('User', foreign_keys=[revoked_by])
 
+    def derived_status(self, now=None):
+        now = now or beijing_now()
+        if self.status == 'revoked':
+            return 'revoked'
+        if self.total_tickets > 0 and self.completed_count >= self.total_tickets:
+            return 'exhausted'
+        if self.pending_count == 0 and self.assigned_count == 0 and self.deadline_time and self.deadline_time < now:
+            return 'expired'
+        return 'active'
+
     def to_dict(self):
+        current_status = self.derived_status()
         return {
             'id': self.id,
             'display_id': self.display_id,
@@ -58,7 +69,7 @@ class UploadedFile(db.Model):
             'declared_count': self.declared_count,
             'deadline_time': self.deadline_time.isoformat() if self.deadline_time else None,
             'detail_period': self.detail_period,
-            'status': self.status,
+            'status': current_status,
             'uploaded_by': self.uploaded_by,
             'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
             'total_tickets': self.total_tickets,

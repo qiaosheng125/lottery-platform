@@ -99,6 +99,42 @@ def test_login_handles_empty_json_body(app, client):
     assert "用户名或密码错误" in data["error"]
 
 
+def test_login_does_not_treat_stale_same_device_session_as_active(app, client):
+    with app.app_context():
+        user = create_user("login_stale_device_user", "secret123", client_mode="mode_b")
+        user.max_devices = 1
+        db.session.commit()
+
+        from models.user import UserSession
+
+        db.session.add_all([
+            UserSession(
+                user_id=user.id,
+                session_token="active-other-device",
+                device_id="device-active",
+                last_seen=beijing_now(),
+                expires_at=beijing_now() + timedelta(hours=3),
+            ),
+            UserSession(
+                user_id=user.id,
+                session_token="stale-same-device",
+                device_id="device-stale",
+                last_seen=beijing_now() - timedelta(hours=5),
+                expires_at=beijing_now() - timedelta(hours=2),
+            ),
+        ])
+        db.session.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "login_stale_device_user", "password": "secret123", "device_id": "device-stale"},
+    )
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "最大设备数" in data["error"]
+
+
 def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
     db_path = tmp_path / "bootstrap.sqlite"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -524,6 +560,22 @@ def test_heartbeat_can_backfill_session_device_id(app, client):
         assert session.device_id == "device-01"
 
 
+def test_create_session_uses_db_session_lifetime_setting(app):
+    from services.session_service import create_session
+
+    with app.app_context():
+        user = create_user("session_lifetime_user", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.session_lifetime_hours = 6
+        db.session.commit()
+
+        before = beijing_now()
+        session = create_session(user, device_id="device-session")
+        delta_hours = (session.expires_at - before).total_seconds() / 3600
+
+    assert 5.9 <= delta_hours <= 6.1
+
+
 def test_user_daily_stats_uses_current_business_window_before_noon(app, client, monkeypatch):
     business_start = datetime(2026, 4, 6, 12, 0, 0)
     business_end = datetime(2026, 4, 7, 12, 0, 0)
@@ -810,6 +862,54 @@ def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
     assert deleted_count == 1
     assert archived is None
     assert remaining is None
+
+
+def test_archive_old_tickets_deletes_stale_winning_image_files(app):
+    from tasks.archive import archive_old_tickets
+
+    with app.app_context():
+        user = create_user("archive_winning_image_user", "secret123", client_mode="mode_b")
+        uploaded_file = UploadedFile(
+            display_id="2026/03/01-03",
+            original_filename="archive_winning_image.txt",
+            stored_filename="archive_winning_image.txt",
+            uploaded_by=user.id,
+            total_tickets=1,
+            completed_count=1,
+        )
+        db.session.add(uploaded_file)
+        db.session.commit()
+
+        image_dir = Path(app.config["UPLOAD_FOLDER"]) / "images"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        image_path = image_dir / "archive-winning-stale.png"
+        image_path.write_bytes(b"stale-image")
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="ARCHIVE-WIN-IMAGE",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now() - timedelta(days=35),
+            is_winning=True,
+            winning_image_url="/uploads/images/archive-winning-stale.png",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=uploaded_file.id,
+            winning_image_url=ticket.winning_image_url,
+            uploaded_by=user.id,
+        ))
+        db.session.commit()
+
+        deleted_count = archive_old_tickets(days_ago=30)
+
+    assert deleted_count == 1
+    assert not image_path.exists()
 
 
 def test_archive_old_tickets_uses_fallback_terminal_time_for_expired_and_revoked(app):
@@ -1191,6 +1291,77 @@ def test_admin_files_list_rejects_invalid_page_params(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "分页参数" in data["error"]
+
+
+def test_uploaded_file_to_dict_uses_derived_status(app):
+    with app.app_context():
+        completed_file = UploadedFile(
+            display_id="2026/04/07-01",
+            original_filename="done.txt",
+            stored_filename="txt/2026-04-07/done.txt",
+            uploaded_by=1,
+            total_tickets=5,
+            completed_count=5,
+            pending_count=0,
+            assigned_count=0,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        expired_file = UploadedFile(
+            display_id="2026/04/07-02",
+            original_filename="expired.txt",
+            stored_filename="txt/2026-04-07/expired.txt",
+            uploaded_by=1,
+            total_tickets=5,
+            completed_count=2,
+            pending_count=0,
+            assigned_count=0,
+            deadline_time=beijing_now() - timedelta(hours=1),
+        )
+        db.session.add_all([completed_file, expired_file])
+        db.session.commit()
+
+        assert completed_file.to_dict()["status"] == "exhausted"
+        assert expired_file.to_dict()["status"] == "expired"
+
+
+def test_admin_files_list_filters_by_derived_status(app, client):
+    with app.app_context():
+        admin = User(username="admin_file_status_filter", is_admin=True)
+        admin.set_password("secret123")
+        exhausted_file = UploadedFile(
+            display_id="2026/04/07-03",
+            original_filename="exhausted.txt",
+            stored_filename="txt/2026-04-07/exhausted.txt",
+            uploaded_by=1,
+            total_tickets=3,
+            completed_count=3,
+            pending_count=0,
+            assigned_count=0,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        active_file = UploadedFile(
+            display_id="2026/04/07-04",
+            original_filename="active.txt",
+            stored_filename="txt/2026-04-07/active.txt",
+            uploaded_by=1,
+            total_tickets=3,
+            completed_count=1,
+            pending_count=2,
+            assigned_count=0,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        db.session.add_all([admin, exhausted_file, active_file])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_file_status_filter", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files?status=exhausted")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    names = [item["original_filename"] for item in data["files"]]
+    assert "exhausted.txt" in names
+    assert "active.txt" not in names
 
 
 def test_admin_create_user_rejects_invalid_max_devices(app, client):
