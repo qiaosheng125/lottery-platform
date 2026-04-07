@@ -256,6 +256,37 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
         assert refreshed_user.can_receive is True
 
 
+def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
+    with app.app_context():
+        admin = User(username="admin_delete_guard", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("delete_guard_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="DELETE-GUARD-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_delete_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.delete(f"/admin/api/users/{user_id}")
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "不能直接删除" in data["error"]
+
+    with app.app_context():
+        assert User.query.get(user_id) is not None
+
+
 def create_assigned_ticket(user: User, device_id: str, raw_content: str, line_number: int) -> LotteryTicket:
     ticket = LotteryTicket(
         source_file_id=1,

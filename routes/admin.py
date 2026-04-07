@@ -658,6 +658,25 @@ def api_delete_user(user_id):
     user = User.query.get_or_404(user_id)
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口删除管理员账号'}), 403
+
+    has_ticket_refs = LotteryTicket.query.filter(LotteryTicket.assigned_user_id == user_id).first() is not None
+    has_uploaded_file_refs = UploadedFile.query.filter(UploadedFile.uploaded_by == user_id).first() is not None
+    has_winning_refs = WinningRecord.query.filter(
+        (WinningRecord.uploaded_by == user_id) |
+        (WinningRecord.verified_by == user_id) |
+        (WinningRecord.checked_by == user_id)
+    ).first() is not None
+    has_result_refs = ResultFile.query.filter(ResultFile.uploaded_by == user_id).first() is not None or MatchResult.query.filter(
+        MatchResult.uploaded_by == user_id
+    ).first() is not None
+    has_audit_refs = AuditLog.query.filter(AuditLog.user_id == user_id).first() is not None
+
+    if has_ticket_refs or has_uploaded_file_refs or has_winning_refs or has_result_refs or has_audit_refs:
+        return jsonify({
+            'success': False,
+            'error': '该用户已有历史业务数据，不能直接删除，请改为禁用账号',
+        }), 409
+
     db.session.delete(user)
     db.session.commit()
     return jsonify({'success': True})
