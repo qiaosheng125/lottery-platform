@@ -206,6 +206,27 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         os.remove(file_path)
         return {'success': False, 'message': '文件内容为空', 'file_id': None, 'filename': filename}
 
+    declared_count = int(parsed_meta['declared_count'])
+    declared_amount = Decimal(str(parsed_meta['declared_amount']))
+    if len(tickets) != declared_count:
+        db.session.rollback()
+        os.remove(file_path)
+        return {
+            'success': False,
+            'message': f'文件名声明 {declared_count} 张，实际解析 {len(tickets)} 张',
+            'file_id': None,
+            'filename': filename,
+        }
+    if total_amount != declared_amount:
+        db.session.rollback()
+        os.remove(file_path)
+        return {
+            'success': False,
+            'message': f'文件名声明金额 {declared_amount} 元，实际解析金额 {total_amount} 元',
+            'file_id': None,
+            'filename': filename,
+        }
+
     db.session.bulk_save_objects(tickets, return_defaults=True)
 
     # Update file counters
