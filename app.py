@@ -65,6 +65,17 @@ def ensure_sqlite_bootstrap(app):
         app.logger.warning('Bootstrapped default admin account: zucaixu')
 
 
+def ensure_runtime_aux_tables(app):
+    from models.archive import ArchivedLotteryTicket
+
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    if ArchivedLotteryTicket.__tablename__ not in existing_tables:
+        app.logger.warning('Creating missing auxiliary table: %s', ArchivedLotteryTicket.__tablename__)
+        ArchivedLotteryTicket.__table__.create(bind=db.engine, checkfirst=True)
+
+
 def create_app(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
@@ -101,6 +112,7 @@ def create_app(config_name=None):
 
     with app.app_context():
         ensure_sqlite_bootstrap(app)
+        ensure_runtime_aux_tables(app)
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message = '请先登录'

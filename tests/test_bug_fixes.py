@@ -17,6 +17,7 @@ from models.file import UploadedFile
 from models.ticket import LotteryTicket
 from models.user import User
 from models.result import MatchResult
+from models.archive import ArchivedLotteryTicket
 from models.winning import WinningRecord
 from utils.time_utils import beijing_now
 from routes.admin import _database_display_info
@@ -579,6 +580,99 @@ def test_expire_overdue_tickets_updates_file_counters(app):
         assert statuses == {"expired"}
         assert refreshed.pending_count == 0
         assert refreshed.assigned_count == 0
+
+
+def test_archive_old_tickets_moves_completed_ticket_to_archive_table(app):
+    from tasks.archive import archive_old_tickets
+
+    with app.app_context():
+        user = create_user("archive_completed_user", "secret123", client_mode="mode_b")
+        uploaded_file = UploadedFile(
+            display_id="2026/03/01-01",
+            original_filename="archive_completed.txt",
+            stored_filename="archive_completed.txt",
+            uploaded_by=user.id,
+            total_tickets=1,
+            completed_count=1,
+        )
+        db.session.add(uploaded_file)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="ARCHIVE-COMPLETED",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            assigned_device_name="device-a",
+            admin_upload_time=beijing_now() - timedelta(days=40),
+            assigned_at=beijing_now() - timedelta(days=40),
+            completed_at=beijing_now() - timedelta(days=35),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+        archived_count = archive_old_tickets(days_ago=30)
+
+        archived = ArchivedLotteryTicket.query.filter_by(original_ticket_id=ticket_id).first()
+        remaining = LotteryTicket.query.get(ticket_id)
+
+    assert archived_count == 1
+    assert archived is not None
+    assert archived.raw_content == "ARCHIVE-COMPLETED"
+    assert archived.status == "completed"
+    assert remaining is None
+
+
+def test_archive_old_tickets_uses_fallback_terminal_time_for_expired_and_revoked(app):
+    from tasks.archive import archive_old_tickets
+
+    with app.app_context():
+        user = create_user("archive_terminal_user", "secret123", client_mode="mode_a")
+        uploaded_file = UploadedFile(
+            display_id="2026/03/01-02",
+            original_filename="archive_terminal.txt",
+            stored_filename="archive_terminal.txt",
+            uploaded_by=user.id,
+            total_tickets=2,
+        )
+        db.session.add(uploaded_file)
+        db.session.commit()
+
+        expired_ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="ARCHIVE-EXPIRED",
+            status="expired",
+            deadline_time=beijing_now() - timedelta(days=31),
+            admin_upload_time=beijing_now() - timedelta(days=32),
+        )
+        revoked_ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=2,
+            raw_content="ARCHIVE-REVOKED",
+            status="revoked",
+            admin_upload_time=beijing_now() - timedelta(days=33),
+        )
+        db.session.add_all([expired_ticket, revoked_ticket])
+        db.session.commit()
+        expired_id = expired_ticket.id
+        revoked_id = revoked_ticket.id
+
+        archived_count = archive_old_tickets(days_ago=30)
+
+        archived_ids = {
+            row.original_ticket_id
+            for row in ArchivedLotteryTicket.query.filter(
+                ArchivedLotteryTicket.original_ticket_id.in_([expired_id, revoked_id])
+            ).all()
+        }
+
+    assert archived_count == 2
+    assert archived_ids == {expired_id, revoked_id}
 
 
 def test_public_register_page_redirects_to_login(client):
