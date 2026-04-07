@@ -316,7 +316,7 @@ def complete_ticket(ticket_id: int, user_id: int) -> bool:
         db.session.commit()
         return True
 
-    rows = db.session.execute(
+    updated_rows = db.session.execute(
         text("""
             UPDATE lottery_tickets
             SET status = 'completed',
@@ -706,7 +706,7 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
         db.session.commit()
         return len(tickets)
 
-    rows = db.session.execute(
+    updated_rows = db.session.execute(
         text("""
             UPDATE lottery_tickets
             SET status = 'completed',
@@ -717,9 +717,11 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
               AND status = 'assigned'
         """),
         {'ids': ticket_ids, 'user_id': user_id, 'now': now}
-    ).rowcount
+    ).fetchall()
 
-    if rows:
+    updated_ids = [row[0] for row in updated_rows]
+
+    if updated_ids:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f
@@ -733,11 +735,11 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
                 ) sub
                 WHERE f.id = sub.source_file_id
             """),
-            {'ids': ticket_ids}
+            {'ids': updated_ids}
         )
         db.session.commit()
 
-    return rows
+    return len(updated_ids)
 
 
 def finalize_ticket(ticket_id: int, user_id: int, final_status: str = 'completed') -> bool:

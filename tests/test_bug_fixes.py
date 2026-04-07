@@ -1152,6 +1152,38 @@ def test_mode_b_postgres_batch_assignment_enforces_max_processing_limit(app, mon
     assert adjustment_message == "已自动调整为1张（当前处理中4张，上限5张）"
 
 
+def test_mode_b_postgres_complete_updates_file_counts_only_for_completed_ids(app, monkeypatch):
+    from services.ticket_pool import complete_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeResult:
+        def __init__(self, *, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "UPDATE lottery_tickets" in sql and "SET status = 'completed'" in sql:
+            return FakeResult(fetchall_data=[(201,)])
+        if "UPDATE uploaded_files f" in sql:
+            assert params["ids"] == [201]
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+
+    with app.app_context():
+        result = complete_tickets_batch([201, 202], user_id=1)
+
+    assert result == 1
+
+
 def test_mode_b_endpoints_reject_mode_a_user(app, client):
     with app.app_context():
         create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")
