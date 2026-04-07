@@ -59,7 +59,7 @@ def preview():
 @mode_b_required
 @can_receive_required
 def download():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     count = _parse_batch_count(data.get('count', 100) if data else 100)
     if count is None:
         return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
@@ -99,7 +99,7 @@ def processing():
 @login_required_json
 @mode_b_required
 def confirm():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     ticket_ids = data.get('ticket_ids', [])
     completed_count = data.get('completed_count')
     if not ticket_ids:

@@ -84,6 +84,32 @@
   - `POST /admin/api/users` 的 `max_devices`
   - `PUT /admin/api/users/<id>` 的 `max_devices`
 
+### 12. 多个 JSON 接口在空 body 时会直接 500
+
+- 修复了以下接口在 `Content-Type: application/json` 但 body 为空或解析失败时，因 `None.get(...)` 触发 500 的问题：
+  - `POST /api/device/register`
+  - `POST /api/user/change-password`
+  - `POST /api/mode-b/confirm`
+  - `POST /api/winning/record`
+  - `PUT /admin/api/settings`
+  - `POST /admin/api/winning/record`
+- 现在统一会回到正常的业务错误响应，而不是直接抛异常。
+
+### 13. 登录接口在空 JSON body 时响应不稳定
+
+- `/auth/login` 之前在 JSON 请求体为空时，可能直接抛出解析错误。
+- 现在会稳定返回登录失败 JSON，而不是框架级 400/HTML 响应。
+
+### 14. 设备注册可抢占其他用户的设备 ID
+
+- 之前任意已登录用户只要提交相同 `device_id`，就能把 `DeviceRegistry.user_id` 改成自己。
+- 现在如果该设备 ID 已属于其他用户，会直接返回 409，阻止设备归属被劫持。
+
+### 15. 管理员回填中奖图的“已检查”报错文案是乱码
+
+- `/admin/api/winning/record` 在记录已检查时，返回的错误文案本身是乱码。
+- 现已恢复为正常中文提示。
+
 ## 本轮验证
 
 已通过的定向回归包括：
@@ -99,6 +125,10 @@
 - 本地上传的 `ticket_id/key` 权限校验
 - 管理员当日 CSV 导出
 - 多个非法整数参数返回 400
+- 多个空 JSON body 接口稳定返回业务错误
+- 登录空 JSON body 返回统一错误 JSON
+- 设备 ID 归属劫持拦截
+- 管理员回填中奖图报错文案恢复正常中文
 
 定向回归结果：
 

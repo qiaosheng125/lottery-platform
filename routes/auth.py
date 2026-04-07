@@ -32,7 +32,7 @@ def login():
         return redirect(url_for('index'))
 
     if request.method == 'POST':
-        data = request.get_json() if request.is_json else request.form
+        data = (request.get_json(silent=True) or {}) if request.is_json else request.form
         username = (data.get('username') or '').strip()
         password = data.get('password') or ''
         device_id = data.get('device_id') or ''

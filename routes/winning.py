@@ -90,7 +90,7 @@ def upload_local():
 @login_required
 @login_required_json
 def record_winning():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     ticket_id = data.get('ticket_id')
     oss_key = data.get('oss_key')
     winning_amount = data.get('winning_amount')

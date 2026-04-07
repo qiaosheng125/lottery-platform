@@ -152,7 +152,7 @@ def export_daily():
 @login_required
 @login_required_json
 def change_password():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
 

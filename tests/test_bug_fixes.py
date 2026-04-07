@@ -91,6 +91,14 @@ def test_login_json_returns_client_mode(app, client):
     assert data["client_mode"] == "mode_b"
 
 
+def test_login_handles_empty_json_body(app, client):
+    resp = client.post("/auth/login", data="", content_type="application/json")
+    assert resp.status_code == 401
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "用户名或密码错误" in data["error"]
+
+
 def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
     db_path = tmp_path / "bootstrap.sqlite"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
@@ -416,6 +424,67 @@ def test_expired_user_session_invalidates_api_access(app, client):
     assert resp.status_code == 401
     data = resp.get_json()
     assert data["success"] is False
+
+
+def test_device_register_handles_empty_json_body(app, client):
+    with app.app_context():
+        create_user("device_empty_body_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "device_empty_body_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/device/register", data="", content_type="application/json")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "设备ID" in data["error"]
+
+
+def test_device_register_rejects_claiming_other_users_device_id(app, client):
+    with app.app_context():
+        user_a = create_user("device_owner_user", "secret123", client_mode="mode_b")
+        create_user("device_other_user", "secret123", client_mode="mode_b")
+        from models.device import DeviceRegistry
+
+        db.session.add(DeviceRegistry(device_id="shared-device", user_id=user_a.id, device_name="A设备"))
+        db.session.commit()
+
+    resp = login(client, "device_other_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/device/register", json={"device_id": "shared-device", "device_name": "B设备"})
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "其他用户" in data["error"]
+
+
+def test_change_password_handles_empty_json_body(app, client):
+    with app.app_context():
+        create_user("change_password_empty_body_user", "secret123", client_mode="mode_a")
+
+    resp = login(client, "change_password_empty_body_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/user/change-password", data="", content_type="application/json")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请填写完整" in data["error"]
+
+
+def test_mode_b_confirm_handles_empty_json_body(app, client):
+    with app.app_context():
+        create_user("modeb_empty_confirm_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "modeb_empty_confirm_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", data="", content_type="application/json")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "票ID列表" in data["error"]
 
 
 def test_heartbeat_can_backfill_session_device_id(app, client):
@@ -1107,6 +1176,23 @@ def test_admin_create_user_rejects_invalid_max_devices(app, client):
     assert "最大设备数" in data["error"]
 
 
+def test_admin_update_settings_handles_empty_json_body(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_empty_body", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_empty_body", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", data="", content_type="application/json")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert "settings" in data
+
+
 def test_admin_winning_template_uses_readable_chinese_labels():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")
@@ -1360,6 +1446,21 @@ def test_record_winning_does_not_delete_reuploaded_same_oss_key(app, client, mon
     assert deleted == []
 
 
+def test_record_winning_handles_empty_json_body(app, client):
+    with app.app_context():
+        user = create_user("winning_record_empty_body_user", "secret123", client_mode="mode_a")
+        create_assigned_ticket(user, "device-win-empty", "WIN-EMPTY", 1)
+
+    resp = login(client, "winning_record_empty_body_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/winning/record", data="", content_type="application/json")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "参数不完整" in data["error"]
+
+
 def test_admin_winning_record_does_not_delete_reuploaded_same_oss_key(app, client, monkeypatch):
     deleted = []
     monkeypatch.setattr("services.oss_service.delete_stored_image", lambda key=None, url=None: deleted.append((key, url)))
@@ -1432,6 +1533,63 @@ def test_admin_winning_record_rejects_empty_oss_key(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "oss_key" in data["error"]
+
+
+def test_admin_winning_record_handles_empty_json_body(app, client):
+    with app.app_context():
+        admin = User(username="admin_winning_empty_body", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-WIN-EMPTY",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_winning_empty_body", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/winning/record", data="", content_type="application/json")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "oss_key" in data["error"]
+
+
+def test_admin_winning_record_checked_error_uses_readable_chinese(app, client):
+    with app.app_context():
+        admin = User(username="admin_checked_record_text", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-CHECKED-TEXT",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+        db.session.add(WinningRecord(ticket_id=ticket.id, is_checked=True, uploaded_by=admin.id))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_checked_record_text", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/test/admin-checked.jpg"},
+    )
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "已检查" in data["error"]
+    assert "璇" not in data["error"]
 
 
 def test_admin_upload_winning_image_creates_winning_record(app, client):

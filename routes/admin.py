@@ -500,7 +500,7 @@ def api_lottery_types():
 @login_required
 @admin_required
 def api_create_user():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
     client_mode = data.get('client_mode', 'mode_a')
@@ -558,7 +558,7 @@ def api_update_user(user_id):
     user = User.query.get_or_404(user_id)
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     if 'client_mode' in data:
         user.client_mode = data['client_mode']
@@ -632,7 +632,7 @@ def api_force_logout(user_id):
 @admin_required
 def api_toggle_can_receive(user_id):
     user = User.query.get_or_404(user_id)
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     user.can_receive = bool(data.get('can_receive', True))
     db.session.commit()
     return jsonify({'success': True, 'can_receive': user.can_receive})
@@ -932,7 +932,7 @@ def admin_winning_presign(ticket_id):
 @admin_required
 def admin_winning_record():
     """管理员更新中奖图片URL"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ticket_id = data.get('ticket_id')
     oss_key = data.get('oss_key', '')
     if not oss_key:
@@ -944,7 +944,7 @@ def admin_winning_record():
     image_url = get_public_url(oss_key) if oss_key else ''
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record and record.is_checked:
-        return jsonify({'success': False, 'error': '璇ヤ腑濂栬褰曞凡琚爣璁颁负宸叉鏌ワ紝鏃犳硶鏇存崲鍥剧墖'}), 403
+        return jsonify({'success': False, 'error': '该中奖记录已被标记为已检查，无法更换图片'}), 403
     if record:
         if record.image_oss_key != (oss_key or None) or record.winning_image_url != image_url:
             delete_stored_image(record.image_oss_key, record.winning_image_url)
@@ -1188,7 +1188,7 @@ def api_get_settings():
 @login_required
 @admin_required
 def api_update_settings():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     settings = SystemSettings.get()
 
     for field in ['registration_enabled', 'pool_enabled', 'mode_a_enabled', 'mode_b_enabled',
