@@ -3827,6 +3827,83 @@ def test_uploaded_file_to_dict_uses_derived_status(app):
         assert expired_file.to_dict()["status"] == "expired"
 
 
+def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
+    from decimal import Decimal
+    from services import file_parser
+
+    with app.app_context():
+        admin = User(username="revoke_notify_admin", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("revoke_notify_user", "secret123", client_mode="mode_b")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded = UploadedFile(
+            display_id="2026/04/07-03",
+            original_filename="revoke-test.txt",
+            stored_filename="txt/2026-04-07/revoke-test.txt",
+            uploaded_by=admin.id,
+            total_tickets=2,
+            pending_count=1,
+            assigned_count=1,
+            completed_count=0,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+
+        pending_ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|2",
+            lottery_type="胜平负",
+            multiplier=1,
+            detail_period="26034",
+            ticket_amount=Decimal("4"),
+            deadline_time=uploaded.deadline_time,
+            status="pending",
+            admin_upload_time=beijing_now(),
+        )
+        assigned_ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=2,
+            raw_content="SPF|1=0|1*1|2",
+            lottery_type="胜平负",
+            multiplier=1,
+            detail_period="26034",
+            ticket_amount=Decimal("4"),
+            deadline_time=uploaded.deadline_time,
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-rv",
+            assigned_device_name="设备RV",
+            assigned_at=beijing_now(),
+            admin_upload_time=beijing_now(),
+        )
+        db.session.add_all([pending_ticket, assigned_ticket])
+        db.session.commit()
+
+        monkeypatch.setattr(
+            "services.notify_service.notify_all",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("socket down")),
+        )
+
+        result = file_parser.revoke_file(uploaded.id, admin.id)
+
+        assert result["success"] is True
+
+        refreshed_file = UploadedFile.query.get(uploaded.id)
+        statuses = {
+            ticket.status
+            for ticket in LotteryTicket.query.filter_by(source_file_id=uploaded.id).all()
+        }
+        assert refreshed_file.status == "revoked"
+        assert refreshed_file.pending_count == 0
+        assert refreshed_file.assigned_count == 0
+        assert statuses == {"revoked"}
+
+
 def test_admin_files_list_filters_by_derived_status(app, client):
     with app.app_context():
         admin = User(username="admin_file_status_filter", is_admin=True)

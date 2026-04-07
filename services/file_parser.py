@@ -326,11 +326,14 @@ def revoke_file(file_id: int, admin_id: int) -> dict:
         except Exception as e:
             current_app.logger.warning(f"Redis revoke cleanup failed: {e}")
 
-    notify_all('file_revoked', {
-        'file_id': file_id,
-        'revoked_count': revoked_count,
-        'completed_count': completed_count,
-    })
+    try:
+        notify_all('file_revoked', {
+            'file_id': file_id,
+            'revoked_count': revoked_count,
+            'completed_count': completed_count,
+        })
+    except Exception as e:
+        current_app.logger.warning(f"file_revoked notify failed for file {file_id}: {e}")
 
     return {
         'success': True,
