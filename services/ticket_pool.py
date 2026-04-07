@@ -142,7 +142,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                         assigned_at = :now,
                         locked_until = :lock_until,
                         version = version + 1
-                    WHERE id = :id AND status = 'pending'
+                    WHERE id = :id AND status = 'pending' AND deadline_time > :now
                 """),
                 {
                     'user_id': user_id, 'username': username,
@@ -247,7 +247,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                         pass
                 continue
 
-            db.session.execute(
+            updated = db.session.execute(
                 text("""
                     UPDATE lottery_tickets
                     SET status = 'assigned',
@@ -258,14 +258,18 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                         assigned_at = :now,
                         locked_until = :lock_until,
                         version = version + 1
-                    WHERE id = :id AND status = 'pending'
+                    WHERE id = :id AND status = 'pending' AND deadline_time > :now
                 """),
                 {
                     'user_id': user_id, 'username': username,
                     'device_id': device_id, 'device_name': device_name,
                     'now': now, 'lock_until': lock_until, 'id': ticket_id,
                 }
-            )
+            ).rowcount
+
+            if not updated:
+                db.session.rollback()
+                continue
 
             db.session.execute(
                 text("""
@@ -496,6 +500,7 @@ def assign_tickets_batch(
                         version = version + 1
                     WHERE id IN ({placeholders})
                       AND status = 'pending'
+                      AND deadline_time > :now
                 """),
                 {
                     'user_id': user_id, 'username': username,
@@ -504,7 +509,17 @@ def assign_tickets_batch(
                     **id_params,
                 }
             )
-            for tid in ids:
+            assigned_tickets = LotteryTicket.query.filter(
+                LotteryTicket.id.in_(ids),
+                LotteryTicket.assigned_user_id == user_id,
+                LotteryTicket.status == 'assigned',
+                LotteryTicket.assigned_at == now,
+            ).all()
+            assigned_ids = [ticket.id for ticket in assigned_tickets]
+            if not assigned_ids:
+                db.session.rollback()
+                return [], None
+            for tid in assigned_ids:
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
@@ -516,8 +531,7 @@ def assign_tickets_batch(
                     {'id': tid}
                 )
             db.session.commit()
-            tickets = LotteryTicket.query.filter(LotteryTicket.id.in_(ids)).all()
-            return tickets, adjustment_message
+            return assigned_tickets, adjustment_message
 
     # PostgreSQL: 检查每日上限
     if daily_limit is not None:

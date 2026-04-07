@@ -825,6 +825,128 @@ def test_mode_b_postgres_batch_assignment_updates_only_returned_ids(app, monkeyp
     assert [ticket.id for ticket in tickets] == [102]
 
 
+def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_ticket_atomic
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+    captured = []
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    class FakeTicketRow:
+        def __init__(self):
+            self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
+            self.lottery_type = "胜平负"
+            self.source_file_id = 1
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        captured.append((sql, params or {}))
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=(321,))
+        if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=FakeTicketRow())
+        if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
+            assert "deadline_time > :now" in sql
+            return FakeResult(rowcount=1)
+        if "UPDATE uploaded_files" in sql:
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.LotteryTicket", SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id, assigned_at=fixed_now))))
+
+    with app.app_context():
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+
+    assert result is not None
+    assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
+
+
+def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeRow:
+        def __init__(self, value):
+            self.value = value
+
+        def __getitem__(self, idx):
+            return self.value
+
+    class FakeTicketRecord:
+        def __init__(self, ticket_id):
+            self.id = ticket_id
+
+    class FakeAssignedQuery:
+        def all(self):
+            return [FakeTicketRecord(202)]
+
+    class FakeLotteryQuery:
+        def filter(self, *args, **kwargs):
+            return FakeAssignedQuery()
+
+    class FakeLotteryTicket:
+        query = FakeLotteryQuery()
+        id = SimpleNamespace(in_=lambda ids: ids)
+        assigned_user_id = object()
+        status = object()
+        assigned_at = object()
+
+    call_state = {"count": 0}
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT COUNT(*) FROM lottery_tickets WHERE status='pending'" in sql:
+            call_state["count"] += 1
+            return SimpleNamespace(scalar=lambda: 25)
+        if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
+            return SimpleNamespace(fetchall=lambda: [SimpleNamespace(lottery_type="胜平负", deadline_time=datetime(2026, 4, 7, 18, 0, 0), cnt=25)])
+        if "SELECT id FROM lottery_tickets" in sql and "LIMIT :count" in sql:
+            return SimpleNamespace(fetchall=lambda: [FakeRow(201), FakeRow(202)])
+        if "UPDATE lottery_tickets" in sql and "WHERE id IN" in sql:
+            assert "deadline_time > :now" in sql
+            return SimpleNamespace(rowcount=1)
+        if "UPDATE uploaded_files" in sql:
+            assert params["id"] == 202
+            return SimpleNamespace(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: False)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", lambda user_id, device_id, assigned_at: assigned_at)
+    monkeypatch.setattr("services.ticket_pool.LotteryTicket", FakeLotteryTicket)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+
+    with app.app_context():
+        tickets, adjustment_message = assign_tickets_batch(
+            user_id=1,
+            device_id="device-b",
+            username="tester",
+            count=2,
+            device_name="设备B",
+        )
+
+    assert adjustment_message is None
+    assert [ticket.id for ticket in tickets] == [202]
+
+
 def test_mode_b_endpoints_reject_mode_a_user(app, client):
     with app.app_context():
         create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")
