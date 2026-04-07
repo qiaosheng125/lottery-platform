@@ -7,7 +7,7 @@ from services.mode_a_service import (
     get_previous_ticket,
     stop_receiving,
 )
-from utils.decorators import can_receive_required, login_required_json
+from utils.decorators import can_receive_required, login_required_json, mode_a_required
 
 mode_a_bp = Blueprint('mode_a', __name__)
 
@@ -34,6 +34,7 @@ def _parse_non_negative_int(value):
 @mode_a_bp.route('/next', methods=['POST'])
 @login_required
 @login_required_json
+@mode_a_required
 @can_receive_required
 def next_ticket():
     device_id, device_name, complete_current_ticket_id, complete_current_ticket_action = _get_device_info()
@@ -54,6 +55,7 @@ def next_ticket():
 @mode_a_bp.route('/current', methods=['GET'])
 @login_required
 @login_required_json
+@mode_a_required
 def current_ticket():
     """Return the currently assigned ticket without mutating status."""
     device_id = request.args.get('device_id', '')
@@ -69,6 +71,7 @@ def current_ticket():
 @mode_a_bp.route('/stop', methods=['POST'])
 @login_required
 @login_required_json
+@mode_a_required
 def stop():
     device_id, _, _, complete_current_ticket_action = _get_device_info()
     if not device_id:
@@ -81,6 +84,7 @@ def stop():
 @mode_a_bp.route('/previous', methods=['GET'])
 @login_required
 @login_required_json
+@mode_a_required
 def previous_ticket():
     device_id = request.args.get('device_id', '')
     offset = _parse_non_negative_int(request.args.get('offset', 0))

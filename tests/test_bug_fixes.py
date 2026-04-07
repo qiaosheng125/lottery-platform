@@ -169,6 +169,93 @@ def test_database_display_info_uses_runtime_sqlite_path(app):
         assert "test.sqlite" in info["path"]
 
 
+def test_admin_create_user_rejects_invalid_client_mode(app, client):
+    with app.app_context():
+        admin = User(username="admin_invalid_create_mode", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_invalid_create_mode", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/users",
+        json={"username": "bad_mode_user", "password": "secret123", "client_mode": "desktop"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "mode_a 或 mode_b" in data["error"]
+
+
+def test_admin_update_user_rejects_invalid_client_mode(app, client):
+    with app.app_context():
+        admin = User(username="admin_invalid_update_mode", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("update_bad_mode_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_invalid_update_mode", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}", json={"client_mode": "desktop"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "mode_a 或 mode_b" in data["error"]
+
+    with app.app_context():
+        refreshed_user = User.query.get(user_id)
+        assert refreshed_user.client_mode == "mode_a"
+
+
+def test_admin_update_user_parses_string_boolean_flags(app, client):
+    with app.app_context():
+        admin = User(username="admin_bool_flag_update", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("bool_flag_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_bool_flag_update", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}", json={"is_active": "false", "can_receive": "0"})
+    assert resp.status_code == 200
+
+    with app.app_context():
+        refreshed_user = User.query.get(user_id)
+        assert refreshed_user.is_active is False
+        assert refreshed_user.can_receive is False
+
+
+def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
+    with app.app_context():
+        admin = User(username="admin_toggle_invalid_bool", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("toggle_invalid_bool_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_toggle_invalid_bool", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}/can-receive", json={"can_receive": "not-bool"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "必须是布尔值" in data["error"]
+
+    with app.app_context():
+        refreshed_user = User.query.get(user_id)
+        assert refreshed_user.can_receive is True
+
+
 def create_assigned_ticket(user: User, device_id: str, raw_content: str, line_number: int) -> LotteryTicket:
     ticket = LotteryTicket(
         source_file_id=1,
@@ -267,6 +354,27 @@ def test_mode_b_endpoints_reject_mode_a_user(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "仅 B 模式用户" in data["error"]
+
+
+def test_mode_a_endpoints_reject_mode_b_user(app, client):
+    with app.app_context():
+        create_user("mode_b_blocked_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    responses = [
+        client.post("/api/mode-a/next", json={"device_id": "device-a"}),
+        client.get("/api/mode-a/current?device_id=device-a"),
+        client.post("/api/mode-a/stop", json={"device_id": "device-a"}),
+        client.get("/api/mode-a/previous?device_id=device-a"),
+    ]
+
+    for resp in responses:
+        assert resp.status_code == 403
+        data = resp.get_json()
+        assert data["success"] is False
+        assert "仅 A 模式用户" in data["error"]
 
 
 def test_mode_a_next_does_not_complete_current_ticket_without_explicit_ticket_id(app, client):

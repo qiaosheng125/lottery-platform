@@ -43,6 +43,15 @@ def mode_b_required(f):
     return decorated
 
 
+def mode_a_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if getattr(current_user, 'client_mode', None) != 'mode_a':
+            return jsonify({'success': False, 'error': '仅 A 模式用户可使用此功能'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def get_client_ip():
     if request.headers.get('X-Forwarded-For'):
         return request.headers.get('X-Forwarded-For').split(',')[0].strip()

@@ -65,6 +65,26 @@ def _parse_int_arg(value, minimum=None):
     return parsed
 
 
+def _parse_client_mode(value):
+    if value not in {'mode_a', 'mode_b'}:
+        return None
+    return value
+
+
+def _parse_bool_flag(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'true', '1'}:
+            return True
+        if normalized in {'false', '0'}:
+            return False
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    return None
+
+
 def _database_display_info():
     db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if db_uri.startswith('sqlite:///'):
@@ -522,7 +542,9 @@ def api_create_user():
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
-    client_mode = data.get('client_mode', 'mode_a')
+    client_mode = _parse_client_mode(data.get('client_mode', 'mode_a'))
+    if client_mode is None:
+        return jsonify({'success': False, 'error': '客户端模式必须是 mode_a 或 mode_b'}), 400
     max_devices = _parse_int_arg(data.get('max_devices', 1), minimum=1)
     if max_devices is None:
         return jsonify({'success': False, 'error': '最大设备数必须是大于 0 的整数'}), 400
@@ -580,7 +602,10 @@ def api_update_user(user_id):
     data = request.get_json(silent=True) or {}
 
     if 'client_mode' in data:
-        user.client_mode = data['client_mode']
+        parsed_client_mode = _parse_client_mode(data['client_mode'])
+        if parsed_client_mode is None:
+            return jsonify({'success': False, 'error': '客户端模式必须是 mode_a 或 mode_b'}), 400
+        user.client_mode = parsed_client_mode
     if 'max_devices' in data:
         parsed_max_devices = _parse_int_arg(data['max_devices'], minimum=1)
         if parsed_max_devices is None:
@@ -603,9 +628,15 @@ def api_update_user(user_id):
         except (ValueError, TypeError):
             return jsonify({'success': False, 'error': '每日上限必须是整数'}), 400
     if 'is_active' in data:
-        user.is_active = bool(data['is_active'])
+        parsed_is_active = _parse_bool_flag(data['is_active'])
+        if parsed_is_active is None:
+            return jsonify({'success': False, 'error': 'is_active 必须是布尔值'}), 400
+        user.is_active = parsed_is_active
     if 'can_receive' in data:
-        user.can_receive = bool(data['can_receive'])
+        parsed_can_receive = _parse_bool_flag(data['can_receive'])
+        if parsed_can_receive is None:
+            return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
+        user.can_receive = parsed_can_receive
     if 'password' in data and data['password']:
         user.set_password(data['password'])
     if 'blocked_lottery_types' in data:
@@ -652,7 +683,10 @@ def api_force_logout(user_id):
 def api_toggle_can_receive(user_id):
     user = User.query.get_or_404(user_id)
     data = request.get_json(silent=True) or {}
-    user.can_receive = bool(data.get('can_receive', True))
+    parsed_can_receive = _parse_bool_flag(data.get('can_receive', True))
+    if parsed_can_receive is None:
+        return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
+    user.can_receive = parsed_can_receive
     db.session.commit()
     return jsonify({'success': True, 'can_receive': user.can_receive})
 
