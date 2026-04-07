@@ -2009,6 +2009,35 @@ def test_pool_status_hides_blocked_lottery_types_for_user(app, client):
     assert data["by_type"][0]["lottery_type"] == "让球胜平负"
 
 
+def test_pool_status_uses_mode_b_reserve_rule_for_mode_b_users(app, client):
+    with app.app_context():
+        user = create_user("pool_mode_b_reserve_user", "secret123", client_mode="mode_b")
+        deadline = beijing_now() + timedelta(hours=1)
+        tickets = [
+            LotteryTicket(
+                source_file_id=1,
+                line_number=index + 1,
+                raw_content=f"POOL-MODEB-{index}",
+                status="pending",
+                lottery_type="胜平负",
+                deadline_time=deadline,
+            )
+            for index in range(25)
+        ]
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "pool_mode_b_reserve_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total_pending"] == 5
+    assert len(data["by_type"]) == 1
+    assert data["by_type"][0]["count"] == 5
+
+
 def test_pool_status_requires_login_json_response(app, client):
     resp = client.get("/api/pool/status")
     assert resp.status_code == 401
