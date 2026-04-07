@@ -60,7 +60,7 @@ def daily_stats():
         status='assigned',
     ).count()
 
-    pool = get_pool_status()
+    pool = get_pool_status(current_user.get_blocked_lottery_types())
     settings = SystemSettings.get()
     pool_total_pending = pool['total_pending'] if current_user.can_receive else 0
 

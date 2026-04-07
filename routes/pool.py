@@ -16,7 +16,7 @@ def pool_status():
     if not settings.pool_enabled:
         return jsonify({'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0, 'pool_enabled': False})
 
-    status = get_pool_status()
+    status = get_pool_status(current_user.get_blocked_lottery_types())
     status['pool_enabled'] = settings.pool_enabled
 
     if not current_user.can_receive:

@@ -1960,6 +1960,29 @@ def test_pool_status_returns_empty_when_pool_disabled(app, client):
     assert data["by_type"] == []
 
 
+def test_pool_status_hides_blocked_lottery_types_for_user(app, client):
+    with app.app_context():
+        user = create_user("pool_blocked_user", "secret123", client_mode="mode_a")
+        user.set_blocked_lottery_types(["胜平负"])
+        blocked_deadline = beijing_now() + timedelta(hours=1)
+        allowed_deadline = beijing_now() + timedelta(hours=2)
+        db.session.add_all([
+            LotteryTicket(source_file_id=1, line_number=1, raw_content="POOL-BLOCKED-1", status="pending", lottery_type="胜平负", deadline_time=blocked_deadline),
+            LotteryTicket(source_file_id=1, line_number=2, raw_content="POOL-ALLOWED-1", status="pending", lottery_type="让球胜平负", deadline_time=allowed_deadline),
+        ])
+        db.session.commit()
+
+    resp = login(client, "pool_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total_pending"] == 1
+    assert len(data["by_type"]) == 1
+    assert data["by_type"][0]["lottery_type"] == "让球胜平负"
+
+
 def test_pool_status_requires_login_json_response(app, client):
     resp = client.get("/api/pool/status")
     assert resp.status_code == 401
@@ -2340,6 +2363,28 @@ def test_user_daily_stats_uses_current_business_window_before_noon(app, client, 
     assert data["today"] == "2026-04-06"
     assert data["device_stats"][0]["count"] == 1
     assert data["device_stats"][0]["amount"] == 2.0
+
+
+def test_user_daily_stats_pool_total_pending_excludes_blocked_lottery_types(app, client):
+    with app.app_context():
+        user = create_user("daily_stats_blocked_user", "secret123", client_mode="mode_a")
+        user.set_blocked_lottery_types(["胜平负"])
+        blocked_deadline = beijing_now() + timedelta(hours=1)
+        allowed_deadline = beijing_now() + timedelta(hours=2)
+        db.session.add_all([
+            LotteryTicket(source_file_id=1, line_number=1, raw_content="STATS-BLOCKED-1", status="pending", lottery_type="胜平负", deadline_time=blocked_deadline),
+            LotteryTicket(source_file_id=1, line_number=2, raw_content="STATS-ALLOWED-1", status="pending", lottery_type="让球胜平负", deadline_time=allowed_deadline),
+        ])
+        db.session.commit()
+
+    resp = login(client, "daily_stats_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["pool_total_pending"] == 1
 
 
 def test_file_display_id_uses_business_date_before_noon(app, monkeypatch):
