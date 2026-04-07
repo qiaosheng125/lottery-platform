@@ -349,6 +349,23 @@ def test_mode_a_previous_rejects_invalid_offset(app, client):
     assert "offset" in data["error"]
 
 
+def test_mode_a_stop_reports_finalize_race_failure(app, client, monkeypatch):
+    with app.app_context():
+        user = create_user("modea_stop_race_user", "secret123", client_mode="mode_a")
+        create_assigned_ticket(user, "device-stop-race", "STOP-RACE-001", 1)
+
+    resp = login(client, "modea_stop_race_user", "secret123")
+    assert resp.status_code == 200
+
+    monkeypatch.setattr("services.mode_a_service.finalize_ticket", lambda *args, **kwargs: False)
+
+    resp = client.post("/api/mode-a/stop", json={"device_id": "device-stop-race"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "状态已变化" in data["error"]
+
+
 def test_pool_status_returns_empty_when_pool_disabled(app, client):
     with app.app_context():
         user = create_user("pool_user", "secret123", client_mode="mode_b")
@@ -1191,6 +1208,40 @@ def test_admin_update_settings_handles_empty_json_body(app, client):
     data = resp.get_json()
     assert data["success"] is True
     assert "settings" in data
+
+
+def test_admin_update_settings_rejects_invalid_session_hours(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_hours_guard", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_hours_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"session_lifetime_hours": 0})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "无活动超时" in data["error"]
+
+
+def test_admin_update_settings_normalizes_mode_b_options(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_modeb_guard", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_modeb_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"mode_b_options": [200, "50", 200, "100"]})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["settings"]["mode_b_options"] == [200, 50, 100]
 
 
 def test_admin_winning_template_uses_readable_chinese_labels():
@@ -2184,6 +2235,75 @@ def test_upload_match_result_falls_back_to_sync_calc_when_scheduler_missing(app,
     assert match_result is not None
     assert match_result.calc_status == "done"
     assert ticket.is_winning is True
+
+
+def test_upload_match_result_rejects_empty_filename(app, client):
+    with app.app_context():
+        admin = User(username="admin_result_empty_name", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_empty_name", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "26100",
+            "file": (io.BytesIO(b"payload"), ""),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "文件名不能为空" in data["error"]
+
+
+def test_parse_result_file_updates_latest_duplicate_match_result(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="result_duplicate_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+        older = MatchResult(
+            detail_period="26099",
+            result_data={"61": {"SPF": {"result": "0", "sp": 1.1}}},
+            uploaded_by=admin_id,
+            uploaded_at=beijing_now() - timedelta(days=2),
+        )
+        newer = MatchResult(
+            detail_period="26099",
+            result_data={"61": {"SPF": {"result": "1", "sp": 1.2}}},
+            uploaded_by=admin_id,
+            uploaded_at=beijing_now() - timedelta(days=1),
+        )
+        db.session.add_all([older, newer])
+        db.session.commit()
+        older_id = older.id
+        newer_id = newer.id
+
+    result_file = tmp_path / "result_duplicate.txt"
+    result_file.write_text(
+        "序号\t让球胜平负彩果\t让球胜平负SP值\n61\t3\t1.88\n",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        result = parse_result_file(str(result_file), "26099", admin_id)
+        assert result["success"] is True
+        assert result["match_result_id"] == newer_id
+
+        refreshed_older = MatchResult.query.get(older_id)
+        refreshed_newer = MatchResult.query.get(newer_id)
+
+    assert refreshed_older.result_data == {"61": {"SPF": {"result": "0", "sp": 1.1}}}
+    assert refreshed_newer.result_data["61"]["SPF"]["result"] == "3"
 
 
 def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeypatch):

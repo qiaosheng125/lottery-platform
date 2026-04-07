@@ -1049,6 +1049,8 @@ def upload_match_result():
         return jsonify({'success': False, 'error': '请选择文件'}), 400
 
     file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': '文件名不能为空'}), 400
     detail_period = (request.form.get('detail_period') or '').strip()
     if not detail_period:
         return jsonify({'success': False, 'error': '请输入期号'}), 400
@@ -1190,6 +1192,34 @@ def api_get_settings():
 def api_update_settings():
     data = request.get_json(silent=True) or {}
     settings = SystemSettings.get()
+
+    if 'session_lifetime_hours' in data:
+        parsed_hours = _parse_int_arg(data.get('session_lifetime_hours'), minimum=1)
+        if parsed_hours is None or parsed_hours > 24:
+            return jsonify({'success': False, 'error': '无活动超时必须是 1 到 24 之间的整数'}), 400
+        data['session_lifetime_hours'] = parsed_hours
+
+    if 'daily_reset_hour' in data:
+        parsed_reset_hour = _parse_int_arg(data.get('daily_reset_hour'), minimum=0)
+        if parsed_reset_hour is None or parsed_reset_hour > 23:
+            return jsonify({'success': False, 'error': '每日重置时间必须是 0 到 23 之间的整数'}), 400
+        data['daily_reset_hour'] = parsed_reset_hour
+
+    if 'mode_b_options' in data:
+        mode_b_options = data.get('mode_b_options')
+        if not isinstance(mode_b_options, list) or not mode_b_options:
+            return jsonify({'success': False, 'error': 'B模式批量选项必须是非空整数数组'}), 400
+
+        normalized_options = []
+        seen = set()
+        for value in mode_b_options:
+            parsed_value = _parse_int_arg(value, minimum=1)
+            if parsed_value is None:
+                return jsonify({'success': False, 'error': 'B模式批量选项必须全部是大于 0 的整数'}), 400
+            if parsed_value not in seen:
+                seen.add(parsed_value)
+                normalized_options.append(parsed_value)
+        data['mode_b_options'] = normalized_options
 
     for field in ['registration_enabled', 'pool_enabled', 'mode_a_enabled', 'mode_b_enabled',
                   'mode_b_options', 'announcement', 'announcement_enabled',

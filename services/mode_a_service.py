@@ -146,7 +146,9 @@ def stop_receiving(user_id: int, device_id: str, current_ticket_action: str = 'c
 
     if current_ticket:
         final_status = _normalize_ticket_action(current_ticket_action)
-        finalize_ticket(current_ticket.id, user_id, final_status=final_status)
+        finalized = finalize_ticket(current_ticket.id, user_id, final_status=final_status)
+        if not finalized:
+            return {'success': False, 'error': '当前票状态已变化，请刷新后重试'}
         if final_status != 'expired':
             _push_history(user_id, device_id, current_ticket.id)
         if final_status == 'expired':

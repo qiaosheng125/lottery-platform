@@ -148,7 +148,10 @@ def parse_result_file(file_path: str, detail_period: str, uploader_id: int, resu
         return {'success': False, 'error': '未能解析任何赛果数据', 'count': 0}
 
     # Upsert MatchResult
-    existing = MatchResult.query.filter_by(detail_period=detail_period).first()
+    existing = MatchResult.query.filter_by(detail_period=detail_period).order_by(
+        MatchResult.uploaded_at.desc(),
+        MatchResult.id.desc(),
+    ).first()
     if existing:
         existing.result_data = result_data
         existing.calc_status = 'pending'
