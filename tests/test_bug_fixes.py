@@ -988,6 +988,43 @@ def test_mode_b_preview_excludes_blocked_lottery_types(app, client):
     assert data["sufficient"] is False
 
 
+def test_mode_b_preview_matches_single_batch_selection_capacity(app, client):
+    with app.app_context():
+        user = create_user("mode_b_preview_batch_capacity", "secret123", client_mode="mode_b")
+        early_deadline = beijing_now() + timedelta(hours=1)
+        later_deadline = beijing_now() + timedelta(hours=2)
+        for idx in range(30):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=idx + 1,
+                raw_content=f"PREVIEW-EARLY-{idx}",
+                status="pending",
+                lottery_type="胜平负",
+                deadline_time=early_deadline,
+            ))
+        for idx in range(70):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=100 + idx,
+                raw_content=f"PREVIEW-LATER-{idx}",
+                status="pending",
+                lottery_type="让球胜平负",
+                deadline_time=later_deadline,
+            ))
+        db.session.commit()
+
+    resp = login(client, "mode_b_preview_batch_capacity", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=50")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["available"] == 30
+    assert data["requested"] == 50
+    assert data["sufficient"] is False
+
+
 def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(app):
     from services.mode_b_service import download_batch
 

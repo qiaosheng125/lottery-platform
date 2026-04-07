@@ -13,7 +13,7 @@ from flask import current_app
 from extensions import db
 from models.ticket import LotteryTicket
 from models.settings import SystemSettings
-from services.ticket_pool import assign_tickets_batch, finalize_tickets_batch, get_pool_total_pending
+from services.ticket_pool import assign_tickets_batch, finalize_tickets_batch, get_mode_b_preview_available
 from utils.time_utils import beijing_now
 
 
@@ -31,7 +31,7 @@ def preview_batch(requested_count: int, user_id: int = None) -> dict:
         from models.user import User
         user = User.query.get(user_id)
         blocked_lottery_types = user.get_blocked_lottery_types() if user else []
-    available = get_pool_total_pending(blocked_lottery_types=blocked_lottery_types)
+    available = get_mode_b_preview_available(blocked_lottery_types=blocked_lottery_types)
     return {
         'available': available,
         'requested': requested_count,

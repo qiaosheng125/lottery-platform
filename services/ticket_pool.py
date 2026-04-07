@@ -1006,3 +1006,67 @@ def get_pool_total_pending(blocked_lottery_types: List[str] = None) -> int:
         {'now': now, **blocked_params}
     ).scalar()
     return max(0, (result or 0) - RESERVE)
+
+
+def get_mode_b_preview_available(blocked_lottery_types: List[str] = None) -> int:
+    """
+    Return the maximum number of tickets B mode can download right now in a single batch,
+    using the same selection rules as assign_tickets_batch().
+    """
+    now = beijing_now()
+    RESERVE = 20
+    blocked_types = blocked_lottery_types or []
+
+    if not _is_postgres():
+        query = db.session.query(
+            LotteryTicket.lottery_type,
+            LotteryTicket.deadline_time,
+            db.func.count(LotteryTicket.id).label('cnt'),
+        ).filter(
+            LotteryTicket.status == 'pending',
+            LotteryTicket.deadline_time > now,
+        )
+        if blocked_types:
+            query = query.filter((LotteryTicket.lottery_type == None) | (~LotteryTicket.lottery_type.in_(blocked_types)))
+        type_stats = query.group_by(
+            LotteryTicket.lottery_type, LotteryTicket.deadline_time
+        ).order_by(
+            LotteryTicket.deadline_time, LotteryTicket.lottery_type
+        ).all()
+    else:
+        blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
+        type_stats = db.session.execute(
+            text(f"""
+                SELECT lottery_type, deadline_time, COUNT(*) as cnt
+                FROM lottery_tickets
+                WHERE status = 'pending'
+                  AND deadline_time > :now
+                  {blocked_condition}
+                GROUP BY lottery_type, deadline_time
+                ORDER BY deadline_time, lottery_type
+            """),
+            {'now': now, **blocked_params}
+        ).fetchall()
+
+    if not type_stats:
+        return 0
+
+    total_pending = sum(r.cnt for r in type_stats)
+    available_total = max(0, total_pending - RESERVE)
+    if available_total <= 0:
+        return 0
+
+    first_type = type_stats[0].lottery_type
+    first_deadline = type_stats[0].deadline_time
+    first_count = type_stats[0].cnt
+
+    if first_count >= available_total:
+        selected_count = first_count
+    else:
+        same_deadline_types = [
+            r.cnt for r in type_stats
+            if r.deadline_time == first_deadline
+        ]
+        selected_count = max(same_deadline_types) if same_deadline_types else first_count
+
+    return min(available_total, selected_count)
