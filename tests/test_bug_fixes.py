@@ -5085,10 +5085,11 @@ def test_admin_upload_template_loads_all_detail_pages():
     assert "let page = 1;" in content
     assert "let totalPages = 1;" in content
     assert "detail?page=${page}&per_page=100" in content
+    assert "if (!res.ok || data.success === false) {" in content
     assert "detailTickets.push(...(data.tickets || []));" in content
     assert "} while (page <= totalPages);" in content
-    assert "showToast('加载详情失败，请稍后重试', 'danger');" in content
-    assert "showToast('撤回失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '加载详情失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '撤回失败，请稍后重试', 'danger');" in content
 
 
 def test_admin_upload_template_accepts_uppercase_txt_files():
@@ -5139,6 +5140,7 @@ def test_admin_upload_template_handles_http_upload_failures():
     assert "throw new Error(data.error || '上传失败');" in content
     assert "i.message=e.message || '上传失败'" in content
     assert "showToast(e.message || '上传失败', 'danger');" in content
+    assert "throw new Error(data.error || data.message || '撤回失败');" in content
 
 
 def test_admin_winning_template_handles_list_and_detail_load_failures():

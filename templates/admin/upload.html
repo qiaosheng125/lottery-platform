@@ -252,10 +252,13 @@ createApp({
       try {
         const res = await fetch(`/admin/api/files/${id}/revoke`, { method: 'POST' });
         const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || data.message || '撤回失败');
+        }
         showToast(data.message || (data.success ? '撤回成功' : '撤回失败'), data.success ? 'success' : 'danger');
         if (data.success) this.loadFiles();
       } catch (e) {
-        showToast('撤回失败，请稍后重试', 'danger');
+        showToast(e.message || '撤回失败，请稍后重试', 'danger');
       }
     },
     async viewDetail(fileId) {
@@ -267,6 +270,9 @@ createApp({
         do {
           const res = await fetch(`/admin/api/files/${fileId}/detail?page=${page}&per_page=100`);
           const data = await res.json();
+          if (!res.ok || data.success === false) {
+            throw new Error(data.error || '加载详情失败');
+          }
           detailTickets.push(...(data.tickets || []));
           totalPages = data.pages || 1;
           page += 1;
@@ -275,7 +281,7 @@ createApp({
         this.detailTickets = detailTickets;
         new bootstrap.Modal(document.getElementById('detailModal')).show();
       } catch (e) {
-        showToast('加载详情失败，请稍后重试', 'danger');
+        showToast(e.message || '加载详情失败，请稍后重试', 'danger');
       }
     },
   }
