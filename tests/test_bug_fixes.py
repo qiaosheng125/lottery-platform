@@ -413,6 +413,10 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
             uploader_id=user.id,
         )
         assert result["success"] is True
+        assert result["ticket_count"] == 2
+        assert result["pending_ticket_count"] == 0
+        assert result["expired_ticket_count"] == 2
+        assert "全部已过截止时间" in result["message"]
 
         uploaded = UploadedFile.query.get(result["file_id"])
         tickets = LotteryTicket.query.filter_by(source_file_id=uploaded.id).all()

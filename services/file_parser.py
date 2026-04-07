@@ -196,6 +196,9 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
 
     db.session.flush()
 
+    pending_ticket_count = uploaded_file.pending_count
+    expired_ticket_count = len(tickets) - pending_ticket_count
+
     # Get ticket IDs for Redis
     ticket_objs = LotteryTicket.query.filter_by(
         source_file_id=uploaded_file.id, status='pending'
@@ -225,19 +228,29 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     try:
         notify_all('file_uploaded', {
             'lottery_type': parsed_meta['lottery_type'],
-            'count': len(tickets),
+            'count': pending_ticket_count,
+            'expired_count': expired_ticket_count,
             'deadline': parsed_meta['deadline_time'].isoformat() if parsed_meta['deadline_time'] else None,
             'file_id': uploaded_file.id,
         })
     except Exception:
         pass
 
+    message = f'成功上传 {len(tickets)} 条数据'
+    if expired_ticket_count:
+        if pending_ticket_count:
+            message += f'（其中 {expired_ticket_count} 条已过截止时间，已标记为过期）'
+        else:
+            message += '（全部已过截止时间，已标记为过期）'
+
     return {
         'success': True,
         'file_id': uploaded_file.id,
         'filename': filename,
-        'message': f'成功上传 {len(tickets)} 条数据',
+        'message': message,
         'ticket_count': len(tickets),
+        'pending_ticket_count': pending_ticket_count,
+        'expired_ticket_count': expired_ticket_count,
     }
 
 
