@@ -343,7 +343,10 @@ def complete_ticket(ticket_id: int, user_id: int) -> bool:
         db.session.execute(
             text("""
                 UPDATE uploaded_files
-                SET assigned_count = assigned_count - 1,
+                SET assigned_count = CASE
+                        WHEN assigned_count > 0 THEN assigned_count - 1
+                        ELSE 0
+                    END,
                     completed_count = completed_count + 1
                 WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
             """),
@@ -736,7 +739,7 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f
-                SET assigned_count = assigned_count - sub.cnt,
+                SET assigned_count = GREATEST(assigned_count - sub.cnt, 0),
                     completed_count = completed_count + sub.cnt
                 FROM (
                     SELECT source_file_id, COUNT(*) as cnt
@@ -836,7 +839,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f
-                SET assigned_count = assigned_count - sub.cnt,
+                SET assigned_count = GREATEST(assigned_count - sub.cnt, 0),
                     completed_count = completed_count + sub.cnt
                 FROM (
                     SELECT source_file_id, COUNT(*) as cnt
@@ -868,7 +871,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
         db.session.execute(
             text("""
                 UPDATE uploaded_files f
-                SET assigned_count = assigned_count - sub.cnt
+                SET assigned_count = GREATEST(assigned_count - sub.cnt, 0)
                 FROM (
                     SELECT source_file_id, COUNT(*) as cnt
                     FROM lottery_tickets

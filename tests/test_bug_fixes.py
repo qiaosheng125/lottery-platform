@@ -1584,6 +1584,36 @@ def test_mode_b_postgres_complete_updates_file_counts_only_for_completed_ids(app
     assert result == 1
 
 
+def test_mode_b_postgres_complete_clamps_assigned_count_when_updating_files(app, monkeypatch):
+    from services.ticket_pool import complete_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeResult:
+        def __init__(self, *, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "UPDATE lottery_tickets" in sql and "SET status = 'completed'" in sql:
+            return FakeResult(fetchall_data=[(201,)])
+        if "UPDATE uploaded_files f" in sql and "completed_count = completed_count + sub.cnt" in sql:
+            assert "GREATEST(assigned_count - sub.cnt, 0)" in sql
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+
+    with app.app_context():
+        assert complete_tickets_batch([201], user_id=1) == 1
+
+
 def test_mode_a_postgres_complete_ticket_uses_updated_rowcount(app, monkeypatch):
     from services.ticket_pool import complete_ticket
 
@@ -1615,6 +1645,33 @@ def test_mode_a_postgres_complete_ticket_uses_updated_rowcount(app, monkeypatch)
 
     assert any("UPDATE lottery_tickets" in sql for sql, _ in calls)
     assert any("UPDATE uploaded_files" in sql for sql, _ in calls)
+
+
+def test_mode_a_postgres_complete_ticket_clamps_negative_assigned_count(app, monkeypatch):
+    from services.ticket_pool import complete_ticket
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeResult:
+        def __init__(self, *, rowcount=0):
+            self.rowcount = rowcount
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "UPDATE lottery_tickets" in sql and "SET status = 'completed'" in sql:
+            return FakeResult(rowcount=1)
+        if "UPDATE uploaded_files" in sql and "completed_count = completed_count + 1" in sql:
+            assert "WHEN assigned_count > 0 THEN assigned_count - 1" in sql
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+
+    with app.app_context():
+        assert complete_ticket(501, user_id=7) is True
 
 
 def test_mode_a_complete_ticket_repairs_file_completed_count_when_assigned_counter_drifted(app):
@@ -1734,7 +1791,7 @@ def test_mode_b_postgres_finalize_updates_counts_only_for_returned_ids(app, monk
         if "UPDATE uploaded_files f" in sql and "completed_count = completed_count + sub.cnt" in sql:
             assert params["ids"] == [301]
             return FakeResult(fetchall_data=[])
-        if "UPDATE uploaded_files f" in sql and "SET assigned_count = assigned_count - sub.cnt" in sql:
+        if "UPDATE uploaded_files f" in sql and "SET assigned_count = GREATEST(assigned_count - sub.cnt, 0)" in sql:
             assert params["ids"] == [303]
             return FakeResult(fetchall_data=[])
         raise AssertionError(f"Unexpected SQL: {sql}")
@@ -1748,6 +1805,42 @@ def test_mode_b_postgres_finalize_updates_counts_only_for_returned_ids(app, monk
         result = finalize_tickets_batch([301, 302, 303], user_id=1, completed_count=2)
 
     assert update_calls == [("completed", [301, 302]), ("expired", [303])]
+    assert result == {"completed_count": 1, "expired_count": 1}
+
+
+def test_mode_b_postgres_finalize_clamps_assigned_count_when_updating_files(app, monkeypatch):
+    from services.ticket_pool import finalize_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+
+    class FakeResult:
+        def __init__(self, *, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "UPDATE lottery_tickets" in sql and "SET status = 'completed'" in sql and "RETURNING id" in sql:
+            return FakeResult(fetchall_data=[(301,)])
+        if "UPDATE lottery_tickets" in sql and "SET status = 'expired'" in sql and "RETURNING id" in sql:
+            return FakeResult(fetchall_data=[(302,)])
+        if "UPDATE uploaded_files f" in sql and "completed_count = completed_count + sub.cnt" in sql:
+            assert "GREATEST(assigned_count - sub.cnt, 0)" in sql
+            return FakeResult(fetchall_data=[])
+        if "UPDATE uploaded_files f" in sql and "SET assigned_count = GREATEST(assigned_count - sub.cnt, 0)" in sql:
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+
+    with app.app_context():
+        result = finalize_tickets_batch([301, 302], user_id=1, completed_count=1)
+
     assert result == {"completed_count": 1, "expired_count": 1}
 
 
