@@ -511,7 +511,7 @@ createApp({
           }
         }
       } catch(e) {
-        this.bPendingBatches = [];
+        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };
       }
     },
     // Mode A methods
@@ -706,7 +706,7 @@ createApp({
           this.bPendingBatches = data.batches || [];
         }
       } catch(e) {
-        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };
+        this.bPendingBatches = [];
       }
     },
     async loadPoolStatus() {

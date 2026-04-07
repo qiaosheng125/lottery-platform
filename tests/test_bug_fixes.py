@@ -4868,6 +4868,13 @@ def test_client_dashboard_replaces_processing_batches_from_server():
     assert "this.bPendingBatches = data.batches || [];" in content
 
 
+def test_client_dashboard_resets_matching_state_on_load_failures():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "} catch(e) {\n        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };\n      }\n    }," in content
+    assert "} catch(e) {\n        this.bPendingBatches = [];\n      }\n    },\n    async loadPoolStatus()" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
