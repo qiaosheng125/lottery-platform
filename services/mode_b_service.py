@@ -61,12 +61,29 @@ def download_batch(
     )
 
     if not tickets:
-        # 如果是因为达到上限而返回空列表，返回友好的错误提示
+        if adjustment_message:
+            return {'success': False, 'error': adjustment_message}
+
+        if daily_limit is not None:
+            from utils.time_utils import get_today_noon
+            from services.ticket_pool import _count_today_completed
+
+            business_start = get_today_noon()
+            today_count = _count_today_completed(user_id, business_start)
+            if today_count >= daily_limit:
+                return {'success': False, 'error': '已达到今日处理上限'}
+
         if max_processing is not None:
-            return {
-                'success': False,
-                'error': f'已达到处理中票数上限（{max_processing}张），请先完成当前票据'
-            }
+            current_processing = LotteryTicket.query.filter_by(
+                assigned_user_id=user_id,
+                status='assigned',
+            ).count()
+            if current_processing >= max_processing:
+                return {
+                    'success': False,
+                    'error': f'已达到处理中票数上限（{max_processing}张），请先完成当前票据'
+                }
+
         return {'success': False, 'error': '当前票池无可用票'}
 
     now = beijing_now()

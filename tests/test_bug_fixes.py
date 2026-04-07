@@ -679,6 +679,83 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
         assert assigned_ticket.assigned_at == fixed_now + timedelta(microseconds=1)
 
 
+def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
+    from services.mode_b_service import download_batch
+
+    with app.app_context():
+        user = create_user("modeb_empty_pool_user", "secret123", client_mode="mode_b")
+        user.max_processing_b_mode = 5
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ASSIGNED-ONLY-001",
+            lottery_type="胜平负",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-b",
+            assigned_device_name="device-b",
+            assigned_at=beijing_now(),
+            deadline_time=beijing_now() + timedelta(hours=1),
+            ticket_amount=2,
+        ))
+        db.session.commit()
+
+        result = download_batch(
+            user_id=user.id,
+            device_id="device-b",
+            username=user.username,
+            count=1,
+            device_name="device-b",
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "当前票池无可用票"
+
+
+def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(app):
+    from services.mode_b_service import download_batch
+
+    with app.app_context():
+        user = create_user("modeb_daily_limit_user", "secret123", client_mode="mode_b")
+        user.max_processing_b_mode = 5
+        user.daily_ticket_limit = 1
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="COMPLETED-TODAY-001",
+            lottery_type="胜平负",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            deadline_time=beijing_now() + timedelta(hours=1),
+            ticket_amount=2,
+        ))
+        for idx in range(2, 24):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=idx,
+                raw_content=f"PENDING-TICKET-{idx:03d}",
+                lottery_type="胜平负",
+                status="pending",
+                deadline_time=beijing_now() + timedelta(hours=1),
+                ticket_amount=2,
+            ))
+        db.session.commit()
+
+        result = download_batch(
+            user_id=user.id,
+            device_id="device-b",
+            username=user.username,
+            count=1,
+            device_name="device-b",
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "已达到今日处理上限"
+
+
 def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeypatch):
     from types import SimpleNamespace
     from services.ticket_pool import assign_tickets_batch
@@ -879,6 +956,58 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
 
 
+def test_mode_a_sqlite_assignment_retries_after_guarded_update_miss(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_ticket_atomic
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+    selected_ids = iter([101, 102])
+    update_attempts = []
+    rollbacks = []
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT id FROM lottery_tickets" in sql and "LIMIT 1" in sql:
+            try:
+                return FakeResult(fetchone_data=(next(selected_ids),))
+            except StopIteration:
+                return FakeResult(fetchone_data=None)
+        if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
+            update_attempts.append(params["id"])
+            return FakeResult(rowcount=0 if params["id"] == 101 else 1)
+        if "UPDATE uploaded_files" in sql:
+            assert params["id"] == 102
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: False)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: rollbacks.append(True))
+    monkeypatch.setattr(
+        "services.ticket_pool.LotteryTicket",
+        SimpleNamespace(query=SimpleNamespace(get=lambda ticket_id: SimpleNamespace(id=ticket_id, assigned_at=fixed_now))),
+    )
+
+    with app.app_context():
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+
+    assert result is not None
+    assert result.id == 102
+    assert update_attempts == [101, 102]
+    assert len(rollbacks) == 1
+
+
 def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(app, monkeypatch):
     from types import SimpleNamespace
     from services.ticket_pool import assign_tickets_batch
@@ -949,6 +1078,78 @@ def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(ap
 
     assert adjustment_message is None
     assert [ticket.id for ticket in tickets] == [202]
+
+
+def test_mode_b_postgres_batch_assignment_enforces_max_processing_limit(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_tickets_batch
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+    deadline = datetime(2026, 4, 7, 18, 0, 0)
+
+    class FakeResult:
+        def __init__(self, *, fetchall_data=None, scalar_data=None, rowcount=1):
+            self._fetchall_data = fetchall_data or []
+            self._scalar_data = scalar_data
+            self.rowcount = rowcount
+
+        def fetchall(self):
+            return self._fetchall_data
+
+        def scalar(self):
+            return self._scalar_data
+
+    class FakeTicketRecord:
+        def __init__(self, ticket_id):
+            self.id = ticket_id
+
+    class FakeAssignedQuery:
+        def all(self):
+            return [FakeTicketRecord(123)]
+
+    class FakeLotteryQuery:
+        def filter(self, *args, **kwargs):
+            return FakeAssignedQuery()
+
+    class FakeLotteryTicket:
+        query = FakeLotteryQuery()
+        id = SimpleNamespace(in_=lambda ids: ids)
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT COUNT(*) FROM lottery_tickets WHERE assigned_user_id = :user_id AND status = 'assigned'" in sql:
+            return FakeResult(scalar_data=4)
+        if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
+            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="胜平负", deadline_time=deadline, cnt=25)])
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            assert params["count"] == 1
+            return FakeResult(fetchall_data=[(123,)])
+        if "UPDATE lottery_tickets" in sql and "RETURNING id" in sql:
+            return FakeResult(fetchall_data=[(123,)], rowcount=1)
+        if "UPDATE uploaded_files f" in sql:
+            assert params["ids"] == [123]
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", lambda user_id, device_id, assigned_at: assigned_at)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.LotteryTicket", FakeLotteryTicket)
+
+    with app.app_context():
+        tickets, adjustment_message = assign_tickets_batch(
+            user_id=1,
+            device_id="device-b",
+            username="tester",
+            count=3,
+            device_name="设备B",
+            max_processing=5,
+        )
+
+    assert [ticket.id for ticket in tickets] == [123]
+    assert adjustment_message == "已自动调整为1张（当前处理中4张，上限5张）"
 
 
 def test_mode_b_endpoints_reject_mode_a_user(app, client):

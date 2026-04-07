@@ -115,56 +115,59 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
 
             blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
 
-            # 先找一张 pending 票的 id（排除禁止的彩种）
-            row = db.session.execute(
-                text(f"""
-                    SELECT id FROM lottery_tickets
-                    WHERE status = 'pending'
-                      AND deadline_time > :now
-                      {blocked_condition}
-                    ORDER BY id
-                    LIMIT 1
-                """),
-                {'now': now, **blocked_params}
-            ).fetchone()
-            if not row:
-                return None
-            ticket_id = row[0]
-            # 原子 UPDATE：只有 status='pending' 时才成功
-            updated = db.session.execute(
-                text("""
-                    UPDATE lottery_tickets
-                    SET status = 'assigned',
-                        assigned_user_id = :user_id,
-                        assigned_username = :username,
-                        assigned_device_id = :device_id,
-                        assigned_device_name = :device_name,
-                        assigned_at = :now,
-                        locked_until = :lock_until,
-                        version = version + 1
-                    WHERE id = :id AND status = 'pending' AND deadline_time > :now
-                """),
-                {
-                    'user_id': user_id, 'username': username,
-                    'device_id': device_id, 'device_name': device_name,
-                    'now': now, 'lock_until': lock_until, 'id': ticket_id,
-                }
-            ).rowcount
-            if not updated:
-                db.session.rollback()
-                return None
-            db.session.execute(
-                text("""
-                    UPDATE uploaded_files
-                    SET pending_count = pending_count - 1,
-                        assigned_count = assigned_count + 1
-                    WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
-                      AND pending_count > 0
-                """),
-                {'id': ticket_id}
-            )
-            db.session.commit()
-            return LotteryTicket.query.get(ticket_id)
+            max_attempts = 10
+            for _ in range(max_attempts):
+                # 先找一张 pending 票的 id（排除禁止的彩种）
+                row = db.session.execute(
+                    text(f"""
+                        SELECT id FROM lottery_tickets
+                        WHERE status = 'pending'
+                          AND deadline_time > :now
+                          {blocked_condition}
+                        ORDER BY id
+                        LIMIT 1
+                    """),
+                    {'now': now, **blocked_params}
+                ).fetchone()
+                if not row:
+                    return None
+                ticket_id = row[0]
+                # 原子 UPDATE：只有 status='pending' 时才成功
+                updated = db.session.execute(
+                    text("""
+                        UPDATE lottery_tickets
+                        SET status = 'assigned',
+                            assigned_user_id = :user_id,
+                            assigned_username = :username,
+                            assigned_device_id = :device_id,
+                            assigned_device_name = :device_name,
+                            assigned_at = :now,
+                            locked_until = :lock_until,
+                            version = version + 1
+                        WHERE id = :id AND status = 'pending' AND deadline_time > :now
+                    """),
+                    {
+                        'user_id': user_id, 'username': username,
+                        'device_id': device_id, 'device_name': device_name,
+                        'now': now, 'lock_until': lock_until, 'id': ticket_id,
+                    }
+                ).rowcount
+                if not updated:
+                    db.session.rollback()
+                    continue
+                db.session.execute(
+                    text("""
+                        UPDATE uploaded_files
+                        SET pending_count = pending_count - 1,
+                            assigned_count = assigned_count + 1
+                        WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
+                          AND pending_count > 0
+                    """),
+                    {'id': ticket_id}
+                )
+                db.session.commit()
+                return LotteryTicket.query.get(ticket_id)
+            return None
 
     # ── PostgreSQL production path ────────────────────────────────
     # 检查每日上限
@@ -533,6 +536,8 @@ def assign_tickets_batch(
             db.session.commit()
             return assigned_tickets, adjustment_message
 
+    adjustment_message = None
+
     # PostgreSQL: 检查每日上限
     if daily_limit is not None:
         from utils.time_utils import get_today_noon
@@ -543,6 +548,21 @@ def assign_tickets_batch(
         daily_remaining = daily_limit - today_count
         if count > daily_remaining:
             count = daily_remaining
+            adjustment_message = f'已自动调整为{daily_remaining}张（今日已处理{today_count}张，每日上限{daily_limit}张）'
+
+    if max_processing is not None:
+        current_processing = db.session.execute(
+            text("SELECT COUNT(*) FROM lottery_tickets WHERE assigned_user_id = :user_id AND status = 'assigned'"),
+            {'user_id': user_id}
+        ).scalar() or 0
+
+        if current_processing >= max_processing:
+            return [], None
+
+        remaining = max_processing - current_processing
+        if count > remaining:
+            count = remaining
+            adjustment_message = f'已自动调整为{remaining}张（当前处理中{current_processing}张，上限{max_processing}张）'
 
     blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
 
@@ -662,7 +682,7 @@ def assign_tickets_batch(
     )
 
     db.session.commit()
-    return LotteryTicket.query.filter(LotteryTicket.id.in_(assigned_ids)).all(), None
+    return LotteryTicket.query.filter(LotteryTicket.id.in_(assigned_ids)).all(), adjustment_message
 
 
 def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
