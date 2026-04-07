@@ -405,20 +405,40 @@ def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
     assert "pool_enabled 必须是布尔值" in data["error"]
 
 
-def test_process_uploaded_file_returns_filename_on_success_and_failure(app):
+def test_process_uploaded_file_returns_filename_on_success_and_failure(app, monkeypatch):
     from io import BytesIO
-    from services.file_parser import process_uploaded_file
+    from services import file_parser
 
     with app.app_context():
         user = create_user("upload_filename_user", "secret123", client_mode="mode_b")
-        good_result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+        monkeypatch.setattr(
+            file_parser,
+            "build_uploaded_txt_relative_path",
+            lambda filename, upload_dt=None: "txt/2026-04-07/mock-upload-success.txt",
+        )
+        monkeypatch.setattr(
+            file_parser,
+            "parse_filename",
+            lambda filename, upload_dt=None: {
+                "identifier": "AA",
+                "internal_code": "P7",
+                "lottery_type": "TEST",
+                "multiplier": 3,
+                "declared_amount": 600.0,
+                "declared_count": 47,
+                "deadline_hhmm": "23.55",
+                "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+                "detail_period": "26034",
+            },
+        )
+        good_result = file_parser.process_uploaded_file(
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
         assert good_result["success"] is True
-        assert good_result["filename"] == "芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt"
+        assert good_result["filename"] == "AA_P7TEST_600_47_00.55_26034.txt"
 
-        bad_result = process_uploaded_file(
+        bad_result = file_parser.process_uploaded_file(
             FileStorage(stream=BytesIO(b"content\n"), filename="bad-name.txt"),
             uploader_id=user.id,
         )
@@ -451,6 +471,50 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
         assert uploaded.assigned_count == 0
         assert uploaded.completed_count == 0
         assert {ticket.status for ticket in tickets} == {"expired"}
+
+
+def test_process_uploaded_file_rejects_invalid_ticket_line_without_partial_import(app, monkeypatch):
+    from services import file_parser
+
+    with app.app_context():
+        user = create_user("upload_invalid_line_user", "secret123", client_mode="mode_b")
+        before_files = UploadedFile.query.count()
+        before_tickets = LotteryTicket.query.count()
+
+        monkeypatch.setattr(
+            file_parser,
+            "build_uploaded_txt_relative_path",
+            lambda filename, upload_dt=None: "txt/2026-04-07/mock-invalid-line.txt",
+        )
+        monkeypatch.setattr(
+            file_parser,
+            "parse_filename",
+            lambda filename, upload_dt=None: {
+                "identifier": "AA",
+                "internal_code": "P7",
+                "lottery_type": "TEST",
+                "multiplier": 3,
+                "declared_amount": 600.0,
+                "declared_count": 47,
+                "deadline_hhmm": "23.55",
+                "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+                "detail_period": "26034",
+            },
+        )
+
+        result = file_parser.process_uploaded_file(
+            make_upload_file(
+                "AA_P7TEST_600_47_00.55_26034.txt",
+                "SPF|1=3|1*1|2\nbad-line\n",
+            ),
+            uploader_id=user.id,
+        )
+
+        assert result["success"] is False
+        assert result["file_id"] is None
+        assert "2" in result["message"]
+        assert UploadedFile.query.count() == before_files
+        assert LotteryTicket.query.count() == before_tickets
 
 
 def test_process_uploaded_file_rejects_unknown_text_encoding_cleanly(app, monkeypatch):

@@ -175,7 +175,16 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         if not line:
             continue
 
-        amount = calculate_ticket_amount(line) or Decimal('0')
+        amount = calculate_ticket_amount(line)
+        if amount is None:
+            db.session.rollback()
+            os.remove(file_path)
+            return {
+                'success': False,
+                'message': f'第 {line_no} 行内容格式无效',
+                'file_id': None,
+                'filename': filename,
+            }
         total_amount += amount
 
         ticket = LotteryTicket(
