@@ -602,6 +602,7 @@ def api_update_user(user_id):
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
     data = request.get_json(silent=True) or {}
+    was_active = user.is_active
 
     if 'client_mode' in data:
         parsed_client_mode = _parse_client_mode(data['client_mode'])
@@ -652,6 +653,14 @@ def api_update_user(user_id):
         user.set_blocked_lottery_types(blocked_types)
 
     db.session.commit()
+
+    if was_active and not user.is_active:
+        force_logout_user(user.id, '账号已被管理员禁用')
+        AuditLog.log('force_logout', user_id=current_user.id,
+                     resource_type='user', resource_id=user_id,
+                     details={'reason': '账号已被管理员禁用'})
+        db.session.commit()
+
     return jsonify({'success': True, 'user': user.to_dict()})
 
 

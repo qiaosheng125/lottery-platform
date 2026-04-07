@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tasks.scheduler as scheduler_module
 from app import create_app
 from extensions import db
+from models.audit import AuditLog
 from models.settings import SystemSettings
 from models.file import UploadedFile
 from models.ticket import LotteryTicket
@@ -270,6 +271,46 @@ def test_admin_update_user_parses_string_boolean_flags(app, client):
         refreshed_user = User.query.get(user_id)
         assert refreshed_user.is_active is False
         assert refreshed_user.can_receive is False
+
+
+def test_admin_disabling_user_forces_logout_existing_sessions(app, client):
+    notifications = []
+
+    with app.app_context():
+        admin = User(username="admin_disable_user", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("disable_me_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+        from services.session_service import create_session
+
+        create_session(user, device_id="device-a", ip_address="127.0.0.1")
+
+    resp = client.post("/auth/login", json={"username": "admin_disable_user", "password": "secret123"})
+    assert resp.status_code == 200
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("services.notify_service.notify_user", lambda user_id, event, data: notifications.append((user_id, event, data)))
+        resp = client.put(f"/admin/api/users/{user_id}", json={"is_active": False})
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+
+    with app.app_context():
+        refreshed_user = User.query.get(user_id)
+        assert refreshed_user.is_active is False
+        from models.user import UserSession
+        assert UserSession.query.filter_by(user_id=user_id).count() == 0
+        disable_logs = AuditLog.query.filter_by(action_type='force_logout', resource_id=str(user_id)).all()
+        assert disable_logs
+
+    assert notifications
+    assert notifications[0][0] == user_id
+    assert notifications[0][1] == 'force_logout'
+    assert '禁用' in notifications[0][2]['reason']
 
 
 def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
