@@ -12,6 +12,23 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
+def _daily_reset_trigger(hour: int):
+    return CronTrigger(hour=hour, minute=0, timezone='Asia/Shanghai')
+
+
+def reschedule_daily_reset(app, hour: int):
+    scheduler = get_scheduler()
+    if scheduler is None:
+        return
+    scheduler.add_job(
+        func=_run_with_context(app, 'tasks.daily_reset', 'daily_session_reset'),
+        trigger=_daily_reset_trigger(hour),
+        id='daily_reset',
+        name='每日会话重置',
+        replace_existing=True,
+    )
+
+
 def start_scheduler(app):
     global _scheduler
     if _scheduler is not None:
@@ -37,10 +54,14 @@ def start_scheduler(app):
         replace_existing=True,
     )
 
-    # 每日12点重置所有会话
+    with app.app_context():
+        from models.settings import SystemSettings
+
+        reset_hour = SystemSettings.get().daily_reset_hour
+
     scheduler.add_job(
         func=_run_with_context(app, 'tasks.daily_reset', 'daily_session_reset'),
-        trigger=CronTrigger(hour=12, minute=0, timezone='Asia/Shanghai'),
+        trigger=_daily_reset_trigger(reset_hour),
         id='daily_reset',
         name='每日会话重置',
         replace_existing=True,

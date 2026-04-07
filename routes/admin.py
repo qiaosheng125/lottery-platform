@@ -1239,6 +1239,14 @@ def api_update_settings():
     settings.updated_by = current_user.id
     db.session.commit()
 
+    if 'daily_reset_hour' in data:
+        try:
+            from tasks.scheduler import reschedule_daily_reset
+
+            reschedule_daily_reset(current_app._get_current_object(), settings.daily_reset_hour)
+        except Exception:
+            current_app.logger.warning('重排每日会话重置任务失败', exc_info=True)
+
     if data.get('announcement_enabled') and data.get('announcement'):
         notify_all('announcement', {'content': data['announcement']})
 

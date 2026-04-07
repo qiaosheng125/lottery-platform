@@ -576,6 +576,25 @@ def test_create_session_uses_db_session_lifetime_setting(app):
     assert 5.9 <= delta_hours <= 6.1
 
 
+def test_time_utils_use_configured_daily_reset_hour(app):
+    from utils.time_utils import get_business_date, get_business_window, resolve_deadline_datetime
+
+    with app.app_context():
+        settings = SystemSettings.get()
+        settings.daily_reset_hour = 6
+        db.session.commit()
+
+        assert str(get_business_date(datetime(2026, 4, 7, 5, 59, 0))) == "2026-04-06"
+        assert str(get_business_date(datetime(2026, 4, 7, 6, 0, 0))) == "2026-04-07"
+
+        window_start, window_end = get_business_window(datetime(2026, 4, 7).date())
+        assert window_start == datetime(2026, 4, 7, 6, 0, 0)
+        assert window_end == datetime(2026, 4, 8, 6, 0, 0)
+
+        deadline = resolve_deadline_datetime("05.30", datetime(2026, 4, 7, 7, 0, 0))
+        assert deadline == datetime(2026, 4, 8, 5, 30, 0)
+
+
 def test_user_daily_stats_uses_current_business_window_before_noon(app, client, monkeypatch):
     business_start = datetime(2026, 4, 6, 12, 0, 0)
     business_end = datetime(2026, 4, 7, 12, 0, 0)
@@ -1416,6 +1435,31 @@ def test_admin_update_settings_rejects_invalid_session_hours(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "无活动超时" in data["error"]
+
+
+def test_admin_update_settings_reschedules_daily_reset_job(app, client, monkeypatch):
+    rescheduled = []
+
+    def fake_reschedule(app_obj, hour):
+        rescheduled.append(hour)
+
+    monkeypatch.setattr("tasks.scheduler.reschedule_daily_reset", fake_reschedule)
+
+    with app.app_context():
+        admin = User(username="admin_settings_reschedule", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_reschedule", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"daily_reset_hour": 8})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["settings"]["daily_reset_hour"] == 8
+    assert rescheduled == [8]
 
 
 def test_admin_update_settings_normalizes_mode_b_options(app, client):
