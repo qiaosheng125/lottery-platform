@@ -2563,6 +2563,30 @@ def test_user_daily_stats_pool_total_pending_uses_mode_b_reserve_rule(app, clien
     assert data["pool_total_pending"] == 5
 
 
+def test_user_daily_stats_pool_total_pending_is_zero_when_pool_disabled(app, client):
+    with app.app_context():
+        create_user("daily_stats_pool_disabled", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.pool_enabled = False
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="POOL-DISABLED-1",
+            status="pending",
+            lottery_type="让球胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+
+    resp = login(client, "daily_stats_pool_disabled", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pool_total_pending"] == 0
+
+
 def test_file_display_id_uses_business_date_before_noon(app, monkeypatch):
     fixed_now = datetime(2026, 4, 7, 11, 0, 0)
 

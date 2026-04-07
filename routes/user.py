@@ -63,7 +63,7 @@ def daily_stats():
     blocked_lottery_types = current_user.get_blocked_lottery_types()
     pool = get_pool_status(blocked_lottery_types)
     settings = SystemSettings.get()
-    if current_user.can_receive:
+    if current_user.can_receive and settings.pool_enabled:
         if current_user.client_mode == 'mode_b':
             pool_total_pending = get_pool_total_pending(blocked_lottery_types)
         else:
