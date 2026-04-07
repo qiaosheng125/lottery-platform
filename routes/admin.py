@@ -42,6 +42,19 @@ def _winning_status_label(status: str) -> str:
     return status or ''
 
 
+def _get_winning_ticket_or_error(ticket_id_value):
+    parsed_ticket_id = _parse_int_arg(ticket_id_value, minimum=1)
+    if parsed_ticket_id is None:
+        return None, (jsonify({'success': False, 'error': '票ID必须是大于 0 的整数'}), 400)
+
+    ticket = db.session.get(LotteryTicket, parsed_ticket_id)
+    if not ticket:
+        return None, (jsonify({'success': False, 'error': '票据不存在'}), 404)
+    if not ticket.is_winning:
+        return None, (jsonify({'success': False, 'error': '该票未被系统判定为中奖，不能上传中奖图片'}), 400)
+    return ticket, None
+
+
 def _parse_int_arg(value, minimum=None):
     try:
         parsed = int(value)
@@ -924,7 +937,9 @@ def api_winning_export():
 @login_required
 @admin_required
 def admin_winning_presign(ticket_id):
-    ticket = LotteryTicket.query.get_or_404(ticket_id)
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record and record.is_checked:
         return jsonify({'success': False, 'error': '该中奖记录已被标记为已检查，无法更换图片'}), 403
@@ -948,7 +963,9 @@ def admin_winning_record():
         return jsonify({'success': False, 'error': '缺少 oss_key'}), 400
     if not ticket_id:
         return jsonify({'success': False, 'error': '缺少ticket_id'}), 400
-    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     from services.oss_service import delete_stored_image, get_public_url
     image_url = get_public_url(oss_key) if oss_key else ''
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
@@ -983,7 +1000,9 @@ def admin_winning_record():
 @admin_required
 def admin_winning_upload_image(ticket_id):
     """直接上传中奖图片，自动压缩后存储（本地或OSS）"""
-    ticket = LotteryTicket.query.get_or_404(ticket_id)
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
 
     if record and record.is_checked:

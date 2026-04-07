@@ -747,6 +747,8 @@ def test_upload_winning_image_creates_winning_record(app, client):
     with app.app_context():
         user = create_user("winning_user", "secret123", client_mode="mode_a")
         ticket = create_assigned_ticket(user, "device-a", "WIN001", 1)
+        ticket.is_winning = True
+        db.session.commit()
         user_id = user.id
         ticket_id = ticket.id
 
@@ -791,6 +793,8 @@ def test_upload_winning_image_works_without_pillow(app, client, monkeypatch):
     with app.app_context():
         user = create_user("winning_user_no_pillow", "secret123", client_mode="mode_a")
         ticket = create_assigned_ticket(user, "device-b", "WIN002", 2)
+        ticket.is_winning = True
+        db.session.commit()
         ticket_id = ticket.id
 
     resp = login(client, "winning_user_no_pillow", "secret123")
@@ -812,6 +816,8 @@ def test_upload_winning_image_rejects_empty_filename(app, client):
     with app.app_context():
         user = create_user("winning_empty_filename_user", "secret123", client_mode="mode_a")
         ticket = create_assigned_ticket(user, "device-empty-image", "WIN-EMPTY-NAME", 1)
+        ticket.is_winning = True
+        db.session.commit()
         ticket_id = ticket.id
 
     resp = login(client, "winning_empty_filename_user", "secret123")
@@ -834,6 +840,8 @@ def test_upload_winning_image_replaces_old_local_file(app, client):
     with app.app_context():
         user = create_user("winning_replace_user", "secret123", client_mode="mode_a")
         ticket = create_assigned_ticket(user, "device-c", "WIN003", 3)
+        ticket.is_winning = True
+        db.session.commit()
         ticket_id = ticket.id
 
     resp = login(client, "winning_replace_user", "secret123")
@@ -1281,6 +1289,8 @@ def test_winning_upload_local_saves_image_under_uploads_images(app, client):
         user = create_user("winning_local_upload_user", "secret123", client_mode="mode_a")
         upload_folder = Path(app.config["UPLOAD_FOLDER"])
         ticket = create_assigned_ticket(user, "device-local", "WIN-LOCAL-001", 1)
+        ticket.is_winning = True
+        db.session.commit()
         ticket_id = ticket.id
 
     resp = login(client, "winning_local_upload_user", "secret123")
@@ -1317,6 +1327,8 @@ def test_winning_upload_local_requires_matching_ticket_key(app, client):
     with app.app_context():
         user = create_user("winning_local_guard_user", "secret123", client_mode="mode_a")
         ticket = create_assigned_ticket(user, "device-local", "WIN-LOCAL-GUARD", 1)
+        ticket.is_winning = True
+        db.session.commit()
         ticket_id = ticket.id
 
     resp = login(client, "winning_local_guard_user", "secret123")
@@ -1746,6 +1758,7 @@ def test_admin_winning_record_creates_winning_record(app, client):
             assigned_user_id=user.id,
             assigned_username=user.username,
             completed_at=beijing_now(),
+            is_winning=True,
         )
         db.session.add(ticket)
         db.session.commit()
@@ -2060,6 +2073,101 @@ def test_admin_winning_presign_rejects_checked_record(app, client):
     assert "已检查" in data["error"]
 
 
+def test_winning_presign_rejects_invalid_ticket_id(app, client):
+    with app.app_context():
+        user = create_user("winning_invalid_ticket_id_user", "secret123", client_mode="mode_a")
+
+    resp = login(client, "winning_invalid_ticket_id_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/presign?ticket_id=abc")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "票ID必须是整数" in data["error"]
+
+
+def test_winning_record_rejects_non_winning_ticket(app, client):
+    with app.app_context():
+        user = create_user("winning_non_winning_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="NOT-WIN-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=False,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_non_winning_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/test/not-win.jpg"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "未被系统判定为中奖" in data["error"]
+
+    with app.app_context():
+        ticket = LotteryTicket.query.get(ticket_id)
+        assert ticket.is_winning is False
+        assert WinningRecord.query.filter_by(ticket_id=ticket_id).first() is None
+
+
+def test_admin_winning_record_rejects_invalid_ticket_id(app, client):
+    with app.app_context():
+        admin = User(username="admin_invalid_winning_ticket_id", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_invalid_winning_ticket_id", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/winning/record",
+        json={"ticket_id": "bad-id", "oss_key": "winning/test/admin-invalid.jpg"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "票ID必须是大于 0 的整数" in data["error"]
+
+
+def test_admin_winning_presign_rejects_non_winning_ticket(app, client):
+    with app.app_context():
+        admin = User(username="admin_presign_non_winning", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-NOT-WIN-001",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=False,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_presign_non_winning", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/winning/{ticket_id}/presign")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "未被系统判定为中奖" in data["error"]
+
+
 def test_admin_upload_winning_image_creates_winning_record(app, client):
     from io import BytesIO
     from PIL import Image
@@ -2079,6 +2187,7 @@ def test_admin_upload_winning_image_creates_winning_record(app, client):
             assigned_user_id=user.id,
             assigned_username=user.username,
             completed_at=beijing_now(),
+            is_winning=True,
         )
         db.session.add(ticket)
         db.session.commit()

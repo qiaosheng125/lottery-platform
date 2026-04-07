@@ -225,6 +225,26 @@
 - 在默认配置下没问题，但一旦 `daily_reset_hour` 改成其他小时，这里会重新统计错误。
 - 现已改为统一走 `get_business_window()`。
 
+### 33. 中奖图片接口可被普通票伪造成“中奖票”
+
+- 用户端和管理员端的中奖图片相关接口，之前只校验票据归属或管理员权限，没有校验票据是否真的被系统判定为中奖。
+- 结果是只要知道票 ID，就有机会通过 presign、图片上传或 OSS 回填，把一张普通票错误地写成 `is_winning=True` 并生成 `WinningRecord`。
+- 现已统一修复：
+  - 用户端 `/api/winning/presign`
+  - 用户端 `/api/winning/upload-local`
+  - 用户端 `/api/winning/record`
+  - 用户端 `/api/winning/upload-image/<ticket_id>`
+  - 管理员端 `/admin/api/winning/<ticket_id>/presign`
+  - 管理员端 `/admin/api/winning/record`
+  - 管理员端 `/admin/api/winning/<ticket_id>/upload-image`
+- 这些接口现在都会先验证该票 `is_winning=True`，未中奖票直接返回业务错误。
+
+### 34. 非法 `ticket_id` 会在中奖图片接口打成 500
+
+- 多条中奖图片接口之前直接对外部输入做 `int(ticket_id)`。
+- 一旦前端或调用方传入 `abc`、空串之类的非法值，会直接抛 `ValueError`，导致接口 500。
+- 现已统一改为显式校验并稳定返回 400，不再把无效参数打成服务器异常。
+
 ## 本轮验证
 
 已通过的定向回归包括：
@@ -261,10 +281,12 @@
 - 新会话过期时间与后台设置一致
 - 活跃请求和心跳都会正确续期会话
 - 用户中奖记录也已跟随可配置业务日小时
+- 只有真实中奖票才能走中奖图片上传/回填链路
+- 中奖图片接口对非法 `ticket_id` 稳定返回 400
 
 定向回归结果：
 
-- `22 passed`
+- `30 passed`
 
 备注：
 

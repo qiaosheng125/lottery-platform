@@ -10,6 +10,20 @@ from utils.time_utils import beijing_now, get_business_date, get_business_window
 winning_bp = Blueprint('winning', __name__)
 
 
+def _get_winning_ticket_or_error(ticket_id_value):
+    try:
+        ticket_id = int(ticket_id_value)
+    except (TypeError, ValueError):
+        return None, (jsonify({'success': False, 'error': '票ID必须是整数'}), 400)
+
+    ticket = db.session.get(LotteryTicket, ticket_id)
+    if not ticket:
+        return None, (jsonify({'success': False, 'error': '票据不存在'}), 404)
+    if not ticket.is_winning:
+        return None, (jsonify({'success': False, 'error': '该票未被系统判定为中奖，不能上传中奖图片'}), 400)
+    return ticket, None
+
+
 @winning_bp.route('/presign')
 @login_required
 @login_required_json
@@ -18,7 +32,9 @@ def presign():
     if not ticket_id:
         return jsonify({'success': False, 'error': '缺少票ID'}), 400
 
-    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
@@ -55,7 +71,9 @@ def upload_local():
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': '请选择图片'}), 400
 
-    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
@@ -106,7 +124,9 @@ def record_winning():
     if not ticket_id or not oss_key:
         return jsonify({'success': False, 'error': '参数不完整'}), 400
 
-    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
@@ -114,7 +134,7 @@ def record_winning():
 
     image_url = get_public_url(oss_key)
 
-    record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+    record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record:
         if record.is_checked:
             return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
@@ -258,7 +278,9 @@ def upload_winning_image(ticket_id):
 
     from flask import current_app
 
-    ticket = LotteryTicket.query.get_or_404(ticket_id)
+    ticket, error_response = _get_winning_ticket_or_error(ticket_id)
+    if error_response:
+        return error_response
     if ticket.assigned_user_id != current_user.id:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
