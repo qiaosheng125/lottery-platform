@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from extensions import db
 from models.settings import SystemSettings
 from models.ticket import LotteryTicket
-from services.ticket_pool import get_pool_status
+from services.ticket_pool import get_pool_status, get_pool_total_pending
 from utils.decorators import login_required_json
 from utils.time_utils import beijing_now, get_business_date, get_today_noon
 
@@ -60,9 +60,16 @@ def daily_stats():
         status='assigned',
     ).count()
 
-    pool = get_pool_status(current_user.get_blocked_lottery_types())
+    blocked_lottery_types = current_user.get_blocked_lottery_types()
+    pool = get_pool_status(blocked_lottery_types)
     settings = SystemSettings.get()
-    pool_total_pending = pool['total_pending'] if current_user.can_receive else 0
+    if current_user.can_receive:
+        if current_user.client_mode == 'mode_b':
+            pool_total_pending = get_pool_total_pending(blocked_lottery_types)
+        else:
+            pool_total_pending = pool['total_pending']
+    else:
+        pool_total_pending = 0
 
     return jsonify({
         'success': True,

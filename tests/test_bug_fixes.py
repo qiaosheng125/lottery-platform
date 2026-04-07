@@ -2387,6 +2387,34 @@ def test_user_daily_stats_pool_total_pending_excludes_blocked_lottery_types(app,
     assert data["pool_total_pending"] == 1
 
 
+def test_user_daily_stats_pool_total_pending_uses_mode_b_reserve_rule(app, client):
+    with app.app_context():
+        user = create_user("daily_stats_mode_b_reserve_user", "secret123", client_mode="mode_b")
+        deadline = beijing_now() + timedelta(hours=1)
+        tickets = [
+            LotteryTicket(
+                source_file_id=1,
+                line_number=index + 1,
+                raw_content=f"MODEB-POOL-{index}",
+                status="pending",
+                lottery_type="胜平负",
+                deadline_time=deadline,
+            )
+            for index in range(25)
+        ]
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "daily_stats_mode_b_reserve_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["pool_total_pending"] == 5
+
+
 def test_file_display_id_uses_business_date_before_noon(app, monkeypatch):
     fixed_now = datetime(2026, 4, 7, 11, 0, 0)
 
