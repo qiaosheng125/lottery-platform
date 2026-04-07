@@ -158,10 +158,9 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = pending_count - 1,
+                        SET pending_count = GREATEST(pending_count - 1, 0),
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
-                          AND pending_count > 0
                     """),
                     {'id': ticket_id}
                 )
@@ -287,10 +286,9 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = pending_count - 1,
+                        SET pending_count = GREATEST(pending_count - 1, 0),
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
-                          AND pending_count > 0
                     """),
                     {'id': ticket_id}
                 )
@@ -539,10 +537,9 @@ def assign_tickets_batch(
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = pending_count - 1,
+                        SET pending_count = GREATEST(pending_count - 1, 0),
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
-                          AND pending_count > 0
                     """),
                     {'id': tid}
                 )
@@ -678,10 +675,10 @@ def assign_tickets_batch(
         db.session.rollback()
         return [], None
 
-    db.session.execute(
-        text("""
-            UPDATE uploaded_files f
-            SET pending_count = pending_count - sub.cnt,
+        db.session.execute(
+            text("""
+                UPDATE uploaded_files f
+            SET pending_count = GREATEST(pending_count - sub.cnt, 0),
                 assigned_count = assigned_count + sub.cnt
             FROM (
                 SELECT source_file_id, COUNT(*) as cnt
