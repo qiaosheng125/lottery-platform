@@ -4,14 +4,63 @@
 
 ## 📋 目录
 
+- [系统概览](#系统概览)
+- [业务日口径](#业务日口径)
 - [功能特性](#功能特性)
+- [核心业务流](#核心业务流)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [项目结构](#项目结构)
+- [核心数据模型](#核心数据模型)
+- [状态流转](#状态流转)
 - [核心功能](#核心功能)
 - [使用说明](#使用说明)
 - [配置说明](#配置说明)
+- [常见排查](#常见排查)
 - [部署指南](#部署指南)
+
+---
+
+## 🧭 系统概览
+
+这个项目本质上是在做一件事：把管理员上传的 TXT 投注文件，拆成一张张票，分发给用户设备处理，并在后续叠加中奖计算、图片上传、统计和导出能力。
+
+系统里有三类主要角色：
+
+- 管理员
+  - 上传原始 TXT 文件
+  - 管理用户、设备、系统设置
+  - 查看实时处理进度
+  - 上传赛果并查看中奖记录
+- A 模式用户
+  - 一次只处理 1 张票
+  - 通过“下一张 / 上一张 / 停止”推进
+  - 适合逐张确认的工作方式
+- B 模式用户
+  - 按批量下载 TXT
+  - 处理完后批量确认
+  - 支持网页端和桌面端客户端
+
+系统里最核心的对象是：
+
+- `UploadedFile`
+  - 管理员上传的一份源文件
+- `LotteryTicket`
+  - 源文件拆出来的单张票
+- `UserSession`
+  - 用户当前在线会话，设备统计依赖它
+- `MatchResult`
+  - 开奖/赛果数据
+- `WinningRecord`
+  - 中奖图片和审核记录
+
+如果只看业务主线，可以理解为：
+
+1. 管理员上传文件
+2. 文件被解析成很多 `LotteryTicket`
+3. 用户按 A / B 模式领取并完成
+4. 已完成的票进入统计、导出、中奖计算链路
+5. 管理员查看中奖记录、审核图片和导出报表
 
 ---
 
@@ -110,6 +159,79 @@ LIMIT 1
 - 📡 **实时推送**：WebSocket推送数据池状态、文件上传等事件
 - 🗄️ **数据归档**：每周一凌晨6点自动归档，30天保留期
 - ⏰ **定时任务**：超时检测、会话清理、每日重置
+
+---
+
+## 🔄 核心业务流
+
+### 1. 文件上传到入池
+
+管理员上传 TXT 文件后，系统会：
+
+1. 解析文件名，得到彩种、倍数、金额、张数、截止时间、编号等信息
+2. 逐行解析文件内容
+3. 为每一行创建一条 `LotteryTicket`
+4. 初始化 `UploadedFile` 的计数信息
+5. 让这些票进入待分配池
+
+这一段主要在：
+
+- `services/file_parser.py`
+- `models/file.py`
+- `models/ticket.py`
+
+### 2. A 模式处理流
+
+A 模式每台设备同一时间只持有 1 张票。
+
+典型流程：
+
+1. 用户点击开始接单
+2. 后端原子领取 1 张 `pending` 票，改为 `assigned`
+3. 用户处理完成后点击“下一张”或“停止”
+4. 未超时则直接完成
+5. 已超时则先确认，未完成可标记为 `expired`
+
+这一段主要在：
+
+- `routes/mode_a.py`
+- `services/mode_a_service.py`
+
+### 3. B 模式处理流
+
+B 模式按批量下载处理，服务端负责决定给哪一批票，不由客户端自行挑选。
+
+典型流程：
+
+1. 用户选择下载张数
+2. 服务端按截止时间优先分配一批票
+3. 用户处理完成后点击确认
+4. 未超时则整批完成
+5. 已超时则确认“全部完成”或“部分完成”
+6. 部分完成时，前 N 张 `completed`，其余 `expired`
+
+这一段主要在：
+
+- `routes/mode_b.py`
+- `services/mode_b_service.py`
+- `services/ticket_pool.py`
+
+### 4. 中奖与赛果流
+
+中奖链路是独立叠加在“已完成票”之上的：
+
+1. 管理员上传赛果文件
+2. 系统生成 `MatchResult`
+3. 异步计算每张票是否中奖
+4. 用户或管理员上传中奖图片
+5. 中奖记录进入审核和导出流程
+
+这一段主要在：
+
+- `routes/winning.py`
+- `services/winning_calc_service.py`
+- `models/result.py`
+- `models/winning.py`
 
 ---
 
@@ -240,6 +362,110 @@ file-hub/
 
 ---
 
+## 🧱 核心数据模型
+
+### `users`
+
+表示账号本身，最重要字段：
+
+- `client_mode`
+  - `mode_a` 或 `mode_b`
+- `max_devices`
+  - 最大在线设备数
+- `can_receive`
+  - 是否允许接单
+- `daily_ticket_limit`
+  - 当前业务日内可处理的总票数上限
+
+### `user_sessions`
+
+表示当前在线会话，最重要字段：
+
+- `session_token`
+- `device_id`
+- `last_seen`
+- `expires_at`
+
+管理员“设备处理速度统计”依赖这里的 `device_id`，不是只看票表。
+
+### `uploaded_files`
+
+表示一份原始上传文件，常用字段：
+
+- `original_filename`
+- `display_id`
+- `uploaded_at`
+- `pending_count / assigned_count / completed_count`
+- `deadline_time / detail_period`
+
+### `lottery_tickets`
+
+系统里的核心事实表，一张票就是一行。常用字段：
+
+- `status`
+  - `pending / assigned / completed / expired / revoked`
+- `assigned_user_id / assigned_device_id`
+- `assigned_at / completed_at`
+- `deadline_time`
+- `ticket_amount`
+- `is_winning / winning_amount / winning_image_url`
+
+### `match_results`
+
+表示一条已上传的赛果/开奖结果，常用字段：
+
+- `detail_period`
+- `uploaded_at`
+- `calc_status`
+- `tickets_total / tickets_winning / total_winning_amount`
+
+### `winning_records`
+
+表示中奖图片与审核信息，常用字段：
+
+- `ticket_id`
+- `winning_image_url`
+- `uploaded_by / uploaded_at`
+- `is_checked / checked_at / checked_by`
+
+---
+
+## 🔁 状态流转
+
+### 票据状态
+
+```text
+pending -> assigned -> completed
+pending -> expired
+assigned -> expired
+pending/assigned -> revoked
+```
+
+说明：
+
+- `pending`
+  - 尚未被用户领取
+- `assigned`
+  - 已分配给某个用户/设备，正在处理
+- `completed`
+  - 已确认处理完成
+- `expired`
+  - 超过截止时间且确认未完成，或系统定时任务自动过期
+- `revoked`
+  - 来源文件被管理员撤回
+
+### 文件状态理解
+
+文件本身没有像票那样复杂的显式状态机，页面上看到的“处理中 / 已完成 / 已过期 / 已撤回”主要来自：
+
+- 文件表自己的 `status`
+- 文件下所有票的计数聚合
+- 文件截止时间是否已过
+
+也就是说，文件页展示状态本质上是“文件元数据 + 票据汇总”计算出来的结果。
+
+---
+
 ## 🔧 使用说明
 
 ### 管理员操作
@@ -253,6 +479,7 @@ file-hub/
 - 文件列表中的“日期筛选”按业务日计算，不按自然日计算
 - 中奖管理和结果计算状态中的日期筛选，也都按业务日计算
 - 如果某文件上传时间是当天中午 12 点前，它会显示在前一个业务日下
+- 如果设备在线但后台速度统计没显示，优先检查该会话是否带了 `device_id`
 
 ### 用户操作
 
@@ -268,6 +495,7 @@ file-hub/
 说明：
 - 如果点击完成时已经超过截止时间，系统会先确认是否真的完成
 - 未超时则直接按完成处理，不弹窗
+- A 模式用户不能使用 B 模式桌面端客户端
 
 #### B模式批量下载
 1. 登录用户账号
@@ -301,6 +529,62 @@ OSS_ENDPOINT=
 OSS_ACCESS_KEY_ID=
 OSS_ACCESS_KEY_SECRET=
 ```
+
+### 关键配置项说明
+
+- `DATABASE_URL`
+  - 开发默认通常使用 SQLite
+  - 生产建议 PostgreSQL
+- `REDIS_URL`
+  - 用于缓存/推送；不可用时系统会退化到部分 DB-only 模式
+- `SESSION_LIFETIME_HOURS`
+  - 会话有效期
+- `DAILY_RESET_HOUR`
+  - 默认 `12`，与业务日切换保持一致
+- `UPLOAD_FOLDER`
+  - 本地文件和中奖图片落盘目录
+
+---
+
+## 🛠 常见排查
+
+### 1. 统计数字不对
+
+优先确认三件事：
+
+1. 看的是否是业务日，而不是自然日
+2. 票是否真的已经写成 `completed`
+3. `completed_at` 是否落在当前业务日窗口内
+
+### 2. 后台设备速度统计没显示某台设备
+
+优先检查：
+
+1. 设备是否真的在线
+2. 当前 `UserSession.device_id` 是否为空
+3. 该设备最近是否有 `completed` 票
+
+### 3. 文件列表里日期看起来“差一天”
+
+这通常不是 bug，而是业务日口径导致：
+
+- 例如 `4/7 11:30` 上传的文件，会归到业务日 `4/6`
+
+### 4. 用户导不出“今日处理清单”
+
+通常有两种原因：
+
+1. 当前业务日内还没有 `completed` 票
+2. 虽然已完成，但这些票的 `deadline_time` 还没到，所以暂时不允许导出
+
+### 5. 桌面端登录了但不能接单
+
+优先检查：
+
+1. 该用户是否为 `mode_b`
+2. `can_receive` 是否被管理员关闭
+3. `max_devices` 是否超限
+4. 当前服务地址是否连到了正确实例
 
 ---
 
