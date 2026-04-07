@@ -4912,6 +4912,54 @@ def test_socket_client_dispatches_realtime_custom_events():
     assert "window.dispatchEvent(new CustomEvent('pool_enabled', { detail: data }));" in content
 
 
+def test_socket_request_pool_status_trims_mode_b_counts(app, monkeypatch):
+    from types import SimpleNamespace
+    from sockets.pool_events import on_request_pool_status
+
+    emitted = []
+
+    monkeypatch.setattr(
+        "sockets.pool_events.current_user",
+        SimpleNamespace(
+            is_authenticated=True,
+            client_mode="mode_b",
+            get_blocked_lottery_types=lambda: ["胜平负"],
+        ),
+    )
+    monkeypatch.setattr(
+        "sockets.pool_events.emit",
+        lambda event, payload: emitted.append((event, payload)),
+    )
+    monkeypatch.setattr(
+        "services.ticket_pool.get_pool_status",
+        lambda blocked_types=None: {
+            "total_pending": 25,
+            "by_type": [
+                {"lottery_type": "让球胜平负", "deadline_time": "2026-04-08T10:00:00", "count": 25}
+            ],
+            "assigned": 0,
+            "completed_today": 0,
+        },
+    )
+
+    with app.app_context():
+        on_request_pool_status()
+
+    assert emitted == [
+        (
+            "pool_updated",
+            {
+                "total_pending": 5,
+                "by_type": [
+                    {"lottery_type": "让球胜平负", "deadline_time": "2026-04-08T10:00:00", "count": 5}
+                ],
+                "assigned": 0,
+                "completed_today": 0,
+            },
+        )
+    ]
+
+
 def test_admin_upload_template_uses_xlsx_export_label():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
