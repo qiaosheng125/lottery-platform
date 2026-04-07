@@ -5088,7 +5088,7 @@ def test_client_dashboard_validates_winning_image_type_and_handles_password_http
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "if (!res.ok) {" in content
-    assert "this.pwdError = data.error || '密码修改失败';" in content
+    assert "showToast(data.error || '获取下一张失败，请稍后重试', 'danger');" in content
     assert "if (!file.type.startsWith('image/')) {" in content
     assert "showToast('请上传图片文件', 'warning');" in content
     assert "if (res.ok && data.success) {" in content

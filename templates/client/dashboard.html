@@ -558,7 +558,7 @@ createApp({
         });
         const data = await res.json();
         if (!res.ok) {
-          this.pwdError = data.error || '密码修改失败';
+          showToast(data.error || '获取下一张失败，请稍后重试', 'danger');
         } else if (data.success) {
           console.log('Received ticket data:', data.ticket);
           this.modeAActive = true;
