@@ -18,7 +18,7 @@ from models.file import UploadedFile
 from models.ticket import LotteryTicket
 from models.audit import AuditLog
 from utils.filename_parser import parse_filename
-from utils.amount_parser import calculate_ticket_amount
+from utils.amount_parser import calculate_ticket_amount, parse_ticket_line
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
 
 
@@ -170,13 +170,25 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
 
     ticket_ids = []
     initial_ticket_status = 'expired' if parsed_meta['deadline_time'] and parsed_meta['deadline_time'] <= upload_dt else 'pending'
+    lottery_code_map = {
+        '胜平负': 'SPF',
+        '让球胜平负': 'SPF',
+        '比分': 'CBF',
+        '总进球': 'JQS',
+        '总进球数': 'JQS',
+        '半全场': 'BQC',
+        '上下盘': 'SXP',
+        '上下单双': 'SXP',
+        '胜负': 'SF',
+    }
+    expected_bet_code = lottery_code_map.get((parsed_meta.get('lottery_type') or '').strip())
     for line_no, line in enumerate(lines, start=1):
         line = line.strip()
         if not line:
             continue
 
-        amount = calculate_ticket_amount(line)
-        if amount is None:
+        parsed_ticket = parse_ticket_line(line)
+        if not parsed_ticket:
             db.session.rollback()
             os.remove(file_path)
             return {
@@ -185,6 +197,16 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
                 'file_id': None,
                 'filename': filename,
             }
+        if expected_bet_code and parsed_ticket['bet_code'] != expected_bet_code:
+            db.session.rollback()
+            os.remove(file_path)
+            return {
+                'success': False,
+                'message': f'第 {line_no} 行玩法与文件名彩种不一致',
+                'file_id': None,
+                'filename': filename,
+            }
+        amount = calculate_ticket_amount(line)
         total_amount += amount
 
         ticket = LotteryTicket(
