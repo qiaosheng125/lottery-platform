@@ -22,7 +22,7 @@ from services.file_parser import process_uploaded_file, revoke_file
 from services.session_service import force_logout_user
 from services.ticket_pool import get_pool_status
 from services.notify_service import notify_admins, notify_all
-from utils.decorators import admin_required, get_client_ip
+from utils.decorators import admin_required, get_client_ip, login_required_json
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
 
 admin_bp = Blueprint('admin', __name__)
@@ -270,6 +270,7 @@ def dashboard_data():
 # ── File management ───────────────────────────────────────────────────
 
 @admin_bp.route('/files/upload', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def upload_files():
@@ -302,6 +303,7 @@ def files_list():
 
 
 @admin_bp.route('/api/files')
+@login_required_json
 @login_required
 @admin_required
 def api_files_list():
@@ -352,10 +354,13 @@ def api_files_list():
 
 
 @admin_bp.route('/api/files/<int:file_id>/detail')
+@login_required_json
 @login_required
 @admin_required
 def file_detail(file_id):
-    uploaded_file = UploadedFile.query.get_or_404(file_id)
+    uploaded_file = UploadedFile.query.get(file_id)
+    if not uploaded_file:
+        return jsonify({'success': False, 'error': '文件不存在'}), 404
     page = _parse_int_arg(request.args.get('page', 1), minimum=1)
     per_page = _parse_int_arg(request.args.get('per_page', 50), minimum=1)
     if page is None or per_page is None:
@@ -374,6 +379,7 @@ def file_detail(file_id):
 
 
 @admin_bp.route('/api/files/<int:file_id>/revoke', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def api_revoke_file(file_id):
@@ -385,6 +391,11 @@ def api_revoke_file(file_id):
             _npu(get_pool_status())
         except Exception:
             pass
+    message = result.get('message') or ''
+    if '不存在' in message:
+        return jsonify(result), 404
+    if not result['success']:
+        return jsonify(result), 400
     return jsonify(result)
 
 

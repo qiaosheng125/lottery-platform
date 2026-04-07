@@ -19,7 +19,7 @@ from models.ticket import LotteryTicket
 from models.audit import AuditLog
 from utils.filename_parser import parse_filename
 from utils.amount_parser import calculate_ticket_amount
-from utils.time_utils import beijing_now, get_business_date, get_today_noon
+from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
 
 
 def _generate_display_id() -> str:
@@ -111,6 +111,21 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not parsed_meta:
         os.remove(file_path)
         return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
+
+    business_start, business_end = get_business_window(get_business_date(upload_dt))
+    existing_same_name = UploadedFile.query.filter(
+        UploadedFile.original_filename == filename,
+        UploadedFile.uploaded_at >= business_start,
+        UploadedFile.uploaded_at < business_end,
+    ).first()
+    if existing_same_name:
+        os.remove(file_path)
+        return {
+            'success': False,
+            'message': f'当前业务日内已上传同名文件: {filename}',
+            'file_id': None,
+            'filename': filename,
+        }
 
     # Create UploadedFile record
     uploaded_file = UploadedFile(

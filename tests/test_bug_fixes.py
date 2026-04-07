@@ -423,6 +423,37 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
         assert {ticket.status for ticket in tickets} == {"expired"}
 
 
+def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app, monkeypatch):
+    from services import file_parser
+
+    first_now = datetime(2026, 4, 7, 13, 0, 0)
+    second_now = datetime(2026, 4, 7, 13, 5, 0)
+    calls = {"count": 0}
+
+    def fake_now():
+        calls["count"] += 1
+        return first_now if calls["count"] == 1 else second_now
+
+    monkeypatch.setattr(file_parser, "beijing_now", fake_now)
+
+    with app.app_context():
+        user = create_user("upload_duplicate_name_user", "secret123", client_mode="mode_b")
+        first_result = file_parser.process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        assert first_result["success"] is True
+
+        second_result = file_parser.process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "9\n8\n"),
+            uploader_id=user.id,
+        )
+        assert second_result["success"] is False
+        assert "同名文件" in second_result["message"]
+
+        assert UploadedFile.query.count() == 1
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)
@@ -1979,6 +2010,54 @@ def test_admin_files_list_filters_by_derived_status(app, client):
     names = [item["original_filename"] for item in data["files"]]
     assert "exhausted.txt" in names
     assert "active.txt" not in names
+
+
+def test_admin_file_management_endpoints_require_login_json_response(app, client):
+    list_resp = client.get("/admin/api/files")
+    assert list_resp.status_code == 401
+    assert list_resp.is_json is True
+    assert list_resp.get_json()["success"] is False
+
+    upload_resp = client.post("/admin/files/upload")
+    assert upload_resp.status_code == 401
+    assert upload_resp.is_json is True
+    assert upload_resp.get_json()["success"] is False
+
+
+def test_admin_file_detail_returns_json_for_missing_file(app, client):
+    with app.app_context():
+        admin = User(username="admin_missing_file_detail", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_missing_file_detail", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files/999999/detail")
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "文件不存在" in data["error"]
+
+
+def test_admin_revoke_missing_file_returns_404_json(app, client):
+    with app.app_context():
+        admin = User(username="admin_missing_revoke_file", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_missing_revoke_file", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/files/999999/revoke")
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "文件不存在" in data["message"]
 
 
 def test_admin_create_user_rejects_invalid_max_devices(app, client):
