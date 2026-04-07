@@ -193,13 +193,13 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 text(f"""
                     SELECT id FROM lottery_tickets
                     WHERE status = 'pending'
-                      AND deadline_time > NOW()
+                      AND deadline_time > :now
                       {blocked_condition}
                     ORDER BY id
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 """),
-                blocked_params
+                {'now': now, **blocked_params}
             ).fetchone()
             if not result:
                 return None
@@ -537,12 +537,12 @@ def assign_tickets_batch(
         text(f"""
             SELECT lottery_type, deadline_time, COUNT(*) as cnt
             FROM lottery_tickets
-            WHERE status = 'pending' AND deadline_time > NOW()
+            WHERE status = 'pending' AND deadline_time > :now
             {blocked_condition}
             GROUP BY lottery_type, deadline_time
             ORDER BY deadline_time, lottery_type
         """),
-        blocked_params
+        {'now': now, **blocked_params}
     ).fetchall()
 
     if not type_stats:
@@ -588,14 +588,14 @@ def assign_tickets_batch(
         text("""
             SELECT id FROM lottery_tickets
             WHERE status = 'pending'
-              AND deadline_time > NOW()
+              AND deadline_time > :now
               AND lottery_type = :lottery_type
               AND deadline_time = :deadline_time
             ORDER BY id
             FOR UPDATE SKIP LOCKED
             LIMIT :count
         """),
-        {'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
+        {'now': now, 'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
     ).fetchall()
 
     if not rows:
@@ -616,6 +616,7 @@ def assign_tickets_batch(
                 version = version + 1
             WHERE id = ANY(:ids)
               AND status = 'pending'
+              AND deadline_time > :now
         """),
         {
             'user_id': user_id, 'username': username,
@@ -885,10 +886,11 @@ def get_pool_status() -> dict:
                 COUNT(*) as count
             FROM lottery_tickets
             WHERE status = 'pending'
-              AND deadline_time > NOW()
+              AND deadline_time > :now
             GROUP BY lottery_type, deadline_time
             ORDER BY deadline_time, lottery_type
-        """)
+        """),
+        {'now': now}
     ).fetchall()
 
     total = sum(r.count for r in result)
@@ -934,7 +936,8 @@ def get_pool_total_pending() -> int:
         text("""
             SELECT COUNT(*) FROM lottery_tickets
             WHERE status = 'pending'
-              AND deadline_time > NOW()
-        """)
+              AND deadline_time > :now
+        """),
+        {'now': now}
     ).scalar()
     return max(0, (result or 0) - RESERVE)
