@@ -19,7 +19,7 @@ FILENAME_PATTERN = re.compile(
     r'_(?P<deadline_hhmm>\d{2}\.\d{2})'  # 21.55
     r'_(?P<detail_period>\d+)'        # 26034
     r'(?:\.txt)?$',
-    re.UNICODE,
+    re.UNICODE | re.IGNORECASE,
 )
 
 

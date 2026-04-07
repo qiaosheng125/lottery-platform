@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from flask import current_app
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 from extensions import db
 from models.file import UploadedFile
@@ -114,7 +114,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
 
     business_start, business_end = get_business_window(get_business_date(upload_dt))
     existing_same_name = UploadedFile.query.filter(
-        UploadedFile.original_filename == filename,
+        func.lower(UploadedFile.original_filename) == filename.lower(),
         UploadedFile.uploaded_at >= business_start,
         UploadedFile.uploaded_at < business_end,
     ).first()
