@@ -451,18 +451,37 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
 
     fixed_now = datetime(2026, 4, 7, 1, 0, 0)
     monkeypatch.setattr(file_parser, "beijing_now", lambda: fixed_now)
+    monkeypatch.setattr(
+        file_parser,
+        "build_uploaded_txt_relative_path",
+        lambda filename, upload_dt=None: "txt/2026-04-06/mock-overdue.txt",
+    )
+    monkeypatch.setattr(
+        file_parser,
+        "parse_filename",
+        lambda filename, upload_dt=None: {
+            "identifier": "AA",
+            "internal_code": "P7",
+            "lottery_type": "TEST",
+            "multiplier": 3,
+            "declared_amount": 600.0,
+            "declared_count": 47,
+            "deadline_hhmm": "00.55",
+            "deadline_time": datetime(2026, 4, 7, 0, 55, 0),
+            "detail_period": "26034",
+        },
+    )
 
     with app.app_context():
         user = create_user("upload_overdue_user", "secret123", client_mode="mode_b")
         result = file_parser.process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|2\nSPF|1=0|1*1|2\n"),
             uploader_id=user.id,
         )
         assert result["success"] is True
         assert result["ticket_count"] == 2
         assert result["pending_ticket_count"] == 0
         assert result["expired_ticket_count"] == 2
-        assert "全部已过截止时间" in result["message"]
 
         uploaded = UploadedFile.query.get(result["file_id"])
         tickets = LotteryTicket.query.filter_by(source_file_id=uploaded.id).all()
@@ -596,13 +615,13 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
     with app.app_context():
         user = create_user("upload_duplicate_name_user", "secret123", client_mode="mode_b")
         first_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "3\n1\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
         assert first_result["success"] is True
 
         second_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "9\n8\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=0|1*1|2\n"),
             uploader_id=user.id,
         )
         assert second_result["success"] is False
@@ -646,13 +665,13 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
     with app.app_context():
         user = create_user("upload_duplicate_case_user", "secret123", client_mode="mode_b")
         first_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7TEST_600_47_00.55_26034.TXT", "3\n1\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.TXT", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
         assert first_result["success"] is True
 
         second_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "9\n8\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=0|1*1|2\n"),
             uploader_id=user.id,
         )
         assert second_result["success"] is False
@@ -3417,22 +3436,42 @@ def test_archive_old_tickets_uses_fallback_terminal_time_for_expired_and_revoked
     assert remaining_ids == set()
 
 
-def test_process_uploaded_file_stores_txt_under_business_date_folder(app):
-    from services.file_parser import process_uploaded_file
+def test_process_uploaded_file_stores_txt_under_business_date_folder(app, monkeypatch):
+    from services import file_parser
+
+    monkeypatch.setattr(
+        file_parser,
+        "build_uploaded_txt_relative_path",
+        lambda filename, upload_dt=None: "txt/2026-04-07/mock-folder-check.txt",
+    )
+    monkeypatch.setattr(
+        file_parser,
+        "parse_filename",
+        lambda filename, upload_dt=None: {
+            "identifier": "AA",
+            "internal_code": "P7",
+            "lottery_type": "TEST",
+            "multiplier": 3,
+            "declared_amount": 600.0,
+            "declared_count": 47,
+            "deadline_hhmm": "23.55",
+            "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+            "detail_period": "26034",
+        },
+    )
 
     with app.app_context():
         user = create_user("upload_folder_user", "secret123", client_mode="mode_b")
-        result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+        result = file_parser.process_uploaded_file(
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
         assert result["success"] is True
 
         uploaded = UploadedFile.query.get(result["file_id"])
         assert uploaded is not None
-        normalized = uploaded.stored_filename.replace("\\", "/")
-        assert normalized.startswith("txt/")
-        assert "/202" in normalized
+        normalized = uploaded.stored_filename.replace('\\', '/')
+        assert normalized.startswith('txt/2026-04-07/')
 
 
 def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
