@@ -862,6 +862,42 @@ def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
         assert "倍数与文件名倍数不一致" in result["message"]
 
 
+def test_process_uploaded_file_rejects_malformed_field_segment(app, monkeypatch):
+    from services import file_parser
+
+    with app.app_context():
+        user = create_user("upload_bad_field_user", "secret123", client_mode="mode_b")
+        monkeypatch.setattr(
+            file_parser,
+            "build_uploaded_txt_relative_path",
+            lambda filename, upload_dt=None: "txt/2026-04-07/mock-bad-field.txt",
+        )
+        monkeypatch.setattr(
+            file_parser,
+            "parse_filename",
+            lambda filename, upload_dt=None: {
+                "identifier": "AA",
+                "internal_code": "P7",
+                "lottery_type": "胜平负",
+                "multiplier": 2,
+                "declared_amount": 4.0,
+                "declared_count": 1,
+                "deadline_hhmm": "23.55",
+                "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+                "detail_period": "26034",
+            },
+        )
+
+        result = file_parser.process_uploaded_file(
+            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|garbage|1*1|2\n"),
+            uploader_id=user.id,
+        )
+
+        assert result["success"] is False
+        assert result["file_id"] is None
+        assert "内容格式无效" in result["message"]
+
+
 def test_admin_file_upload_returns_http_400_when_all_files_fail(app, client, monkeypatch):
     import routes.admin as admin_routes
     from services import notify_service

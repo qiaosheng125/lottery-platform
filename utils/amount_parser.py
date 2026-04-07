@@ -50,10 +50,18 @@ def parse_ticket_line(raw_content: str) -> Optional[dict]:
     for field_part in fields_str.split(','):
         field_part = field_part.strip()
         if '=' not in field_part:
-            continue
+            return None
         field_no, options_str = field_part.split('=', 1)
+        if not field_no.strip():
+            return None
         options = options_str.split('/')
-        fields[field_no.strip()] = [o.strip() for o in options if o.strip()]
+        cleaned_options = [o.strip() for o in options if o.strip()]
+        if not cleaned_options:
+            return None
+        fields[field_no.strip()] = cleaned_options
+
+    if not fields:
+        return None
 
     # 解析基础倍数*基数: "6*1"
     mult_str = parts[2].strip()
