@@ -336,6 +336,49 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
         assert refreshed_user.can_receive is True
 
 
+def test_admin_update_settings_parses_boolean_flags(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_bool_flags", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_bool_flags", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={
+        "pool_enabled": "false",
+        "mode_a_enabled": "0",
+        "mode_b_enabled": "true",
+        "announcement_enabled": "1",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    settings = data["settings"]
+    assert settings["pool_enabled"] is False
+    assert settings["mode_a_enabled"] is False
+    assert settings["mode_b_enabled"] is True
+    assert settings["announcement_enabled"] is True
+
+
+def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_invalid_bool", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_invalid_bool", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"pool_enabled": "not-bool"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "pool_enabled 必须是布尔值" in data["error"]
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)

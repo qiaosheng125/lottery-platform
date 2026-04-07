@@ -1287,6 +1287,13 @@ def api_update_settings():
     data = request.get_json(silent=True) or {}
     settings = SystemSettings.get()
 
+    for bool_field in ['registration_enabled', 'pool_enabled', 'mode_a_enabled', 'mode_b_enabled', 'announcement_enabled']:
+        if bool_field in data:
+            parsed_bool = _parse_bool_flag(data.get(bool_field))
+            if parsed_bool is None:
+                return jsonify({'success': False, 'error': f'{bool_field} 必须是布尔值'}), 400
+            data[bool_field] = parsed_bool
+
     if 'session_lifetime_hours' in data:
         parsed_hours = _parse_int_arg(data.get('session_lifetime_hours'), minimum=1)
         if parsed_hours is None or parsed_hours > 24:
