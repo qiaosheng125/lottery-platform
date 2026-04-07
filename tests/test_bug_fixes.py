@@ -854,6 +854,25 @@ def test_mode_b_preview_returns_zero_when_pool_disabled(app):
     assert result == {"available": 0, "requested": 5, "sufficient": False}
 
 
+def test_mode_b_preview_returns_zero_when_user_cannot_receive(app, client):
+    with app.app_context():
+        user = create_user("mode_b_preview_paused_user", "secret123", client_mode="mode_b")
+        user.can_receive = False
+        create_pending_ticket("PREVIEW-PAUSED-001", 1)
+        db.session.commit()
+
+    resp = login(client, "mode_b_preview_paused_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=1")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["available"] == 0
+    assert data["requested"] == 1
+    assert data["sufficient"] is False
+
+
 def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(app):
     from services.mode_b_service import download_batch
 

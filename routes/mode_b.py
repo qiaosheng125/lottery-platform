@@ -83,6 +83,12 @@ def preview():
     if count is None:
         return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
     result = preview_batch(count)
+    if not current_user.can_receive:
+        result = {
+            'available': 0,
+            'requested': count,
+            'sufficient': False,
+        }
     return jsonify({'success': True, **result})
 
 
