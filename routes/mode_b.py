@@ -9,7 +9,7 @@ from services.mode_b_service import (
     preview_batch,
 )
 from services.ticket_pool import get_pool_status
-from utils.decorators import can_receive_required, login_required_json
+from utils.decorators import can_receive_required, login_required_json, mode_b_required
 
 mode_b_bp = Blueprint('mode_b', __name__)
 
@@ -27,6 +27,7 @@ def _parse_batch_count(value, default: int = 100):
 @mode_b_bp.route('/pool-status')
 @login_required
 @login_required_json
+@mode_b_required
 def pool_status():
     """Return grouped pool status for mode B users."""
     settings = SystemSettings.get()
@@ -43,6 +44,7 @@ def pool_status():
 @mode_b_bp.route('/preview')
 @login_required
 @login_required_json
+@mode_b_required
 def preview():
     count = _parse_batch_count(request.args.get('count', 100))
     if count is None:
@@ -54,6 +56,7 @@ def preview():
 @mode_b_bp.route('/download', methods=['POST'])
 @login_required
 @login_required_json
+@mode_b_required
 @can_receive_required
 def download():
     data = request.get_json()
@@ -80,6 +83,7 @@ def download():
 @mode_b_bp.route('/processing')
 @login_required
 @login_required_json
+@mode_b_required
 def processing():
     """Return assigned batches for the current user."""
     device_id = (request.args.get('device_id') or '').strip()
@@ -93,6 +97,7 @@ def processing():
 @mode_b_bp.route('/confirm', methods=['POST'])
 @login_required
 @login_required_json
+@mode_b_required
 def confirm():
     data = request.get_json()
     ticket_ids = data.get('ticket_ids', [])

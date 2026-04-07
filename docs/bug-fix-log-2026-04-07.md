@@ -87,10 +87,36 @@
 
 - `pytest -q tests\test_bug_fixes.py -k "daily_stats_uses_current_business_window_before_noon or file_display_id_uses_business_date_before_noon"`
 
+### 4. 桌面端客户端仅允许 B 模式账号使用
+
+### 问题
+
+桌面端文件 `C:\Users\徐逸飞\Desktop\外部使用\客户端自动导入机器人-北京.py` 是 B 模式批量处理客户端，但原先没有明确阻止 A 模式账号登录和调用 B 模式接口。
+
+### 影响
+
+- A 模式账号可能误登录桌面端。
+- 如果只靠前端界面区分模式，仍存在被桌面端误用 B 模式接口的风险。
+
+### 修复方式
+
+- 更新 [auth.py](/C:/Users/徐逸飞/Desktop/file-hub/routes/auth.py)，登录 JSON 响应补充 `client_mode`。
+- 新增 [decorators.py](/C:/Users/徐逸飞/Desktop/file-hub/utils/decorators.py) 中的 `mode_b_required`。
+- 更新 [mode_b.py](/C:/Users/徐逸飞/Desktop/file-hub/routes/mode_b.py)，对 `/api/mode-b/*` 全部加上 `mode_b_required`，后端统一拒绝非 B 模式用户。
+- 更新桌面端文件 `C:\Users\徐逸飞\Desktop\外部使用\客户端自动导入机器人-北京.py`：
+  - 登录成功后检查 `client_mode`
+  - 若不是 `mode_b`，立即提示失败并退出当前会话
+
+### 验证
+
+- `pytest -q tests\test_bug_fixes.py -k "login_json_returns_client_mode or mode_b_endpoints_reject_mode_a_user"`
+
 ## 本次新增回归测试
 
 - [test_bug_fixes.py](/C:/Users/徐逸飞/Desktop/file-hub/tests/test_bug_fixes.py)
+  - `test_login_json_returns_client_mode`
   - `test_mode_a_next_can_expire_overdue_current_ticket`
+  - `test_mode_b_endpoints_reject_mode_a_user`
   - `test_mode_b_confirm_can_complete_prefix_and_expire_rest`
   - `test_heartbeat_can_backfill_session_device_id`
   - `test_user_daily_stats_uses_current_business_window_before_noon`

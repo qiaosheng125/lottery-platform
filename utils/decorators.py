@@ -34,6 +34,15 @@ def can_receive_required(f):
     return decorated
 
 
+def mode_b_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if getattr(current_user, 'client_mode', None) != 'mode_b':
+            return jsonify({'success': False, 'error': '仅 B 模式用户可使用此功能'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def get_client_ip():
     if request.headers.get('X-Forwarded-For'):
         return request.headers.get('X-Forwarded-For').split(',')[0].strip()

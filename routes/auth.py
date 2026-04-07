@@ -27,6 +27,7 @@ def login():
                 'success': True,
                 'redirect': redirect_target,
                 'is_admin': current_user.is_admin,
+                'client_mode': current_user.client_mode,
             })
         return redirect(url_for('index'))
 
@@ -81,6 +82,7 @@ def login():
                 'success': True,
                 'redirect': url_for('admin.dashboard') if user.is_admin else url_for('user.dashboard'),
                 'is_admin': user.is_admin,
+                'client_mode': user.client_mode,
             })
 
         if user.is_admin:

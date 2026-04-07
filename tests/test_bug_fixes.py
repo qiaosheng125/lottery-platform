@@ -74,6 +74,18 @@ def test_login_json_post_stays_json_for_authenticated_user(app, client):
     data = second.get_json()
     assert data["success"] is True
     assert data["redirect"] == "/api/user/dashboard"
+    assert data["client_mode"] == "mode_a"
+
+
+def test_login_json_returns_client_mode(app, client):
+    with app.app_context():
+        create_user("login_modeb_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "login_modeb_user", "secret123")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["client_mode"] == "mode_b"
 
 
 def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
@@ -176,6 +188,20 @@ def test_mode_b_processing_with_device_id_filters_batches(app, client):
     assert data["success"] is True
     assert len(data["batches"]) == 1
     assert data["batches"][0]["count"] == 1
+
+
+def test_mode_b_endpoints_reject_mode_a_user(app, client):
+    with app.app_context():
+        create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")
+
+    resp = login(client, "mode_a_blocked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/pool-status")
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "仅 B 模式用户" in data["error"]
 
 
 def test_mode_a_next_does_not_complete_current_ticket_without_explicit_ticket_id(app, client):
