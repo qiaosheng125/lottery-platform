@@ -919,6 +919,9 @@ def api_winning_export():
 @admin_required
 def admin_winning_presign(ticket_id):
     ticket = LotteryTicket.query.get_or_404(ticket_id)
+    record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+    if record and record.is_checked:
+        return jsonify({'success': False, 'error': '该中奖记录已被标记为已检查，无法更换图片'}), 403
     from services.oss_service import generate_presign_url, build_oss_key
     oss_key = build_oss_key(ticket.id)
     url, key = generate_presign_url(oss_key)

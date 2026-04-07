@@ -654,6 +654,26 @@ def test_upload_winning_image_works_without_pillow(app, client, monkeypatch):
     assert data["image_url"].startswith("/uploads/images/winning_")
 
 
+def test_upload_winning_image_rejects_empty_filename(app, client):
+    with app.app_context():
+        user = create_user("winning_empty_filename_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-empty-image", "WIN-EMPTY-NAME", 1)
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_empty_filename_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        f"/api/winning/upload-image/{ticket_id}",
+        data={"image": (io.BytesIO(b"fake-image"), "")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "文件名不能为空" in data["error"]
+
+
 def test_upload_winning_image_replaces_old_local_file(app, client):
     from PIL import Image
 
@@ -1497,6 +1517,77 @@ def test_record_winning_does_not_delete_reuploaded_same_oss_key(app, client, mon
     assert deleted == []
 
 
+def test_record_winning_rejects_checked_record_replacement(app, client):
+    with app.app_context():
+        user = create_user("winning_checked_guard_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-CHECKED-GUARD",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="https://oss.example.com/winning/original.jpg",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            image_oss_key="winning/original.jpg",
+            uploaded_by=user.id,
+            is_checked=True,
+        ))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_checked_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/replaced.jpg", "winning_amount": 100},
+    )
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "已检查" in data["error"]
+
+
+def test_winning_presign_rejects_checked_record(app, client):
+    with app.app_context():
+        user = create_user("winning_presign_checked_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-PRESIGN-CHECKED",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(ticket_id=ticket.id, uploaded_by=user.id, is_checked=True))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_presign_checked_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get(f"/api/winning/presign?ticket_id={ticket_id}")
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "已检查" in data["error"]
+
+
 def test_record_winning_handles_empty_json_body(app, client):
     with app.app_context():
         user = create_user("winning_record_empty_body_user", "secret123", client_mode="mode_a")
@@ -1641,6 +1732,34 @@ def test_admin_winning_record_checked_error_uses_readable_chinese(app, client):
     assert data["success"] is False
     assert "已检查" in data["error"]
     assert "璇" not in data["error"]
+
+
+def test_admin_winning_presign_rejects_checked_record(app, client):
+    with app.app_context():
+        admin = User(username="admin_presign_checked_record", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-PRESIGN-CHECKED",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+        db.session.add(WinningRecord(ticket_id=ticket.id, uploaded_by=admin.id, is_checked=True))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_presign_checked_record", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/winning/{ticket_id}/presign")
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "已检查" in data["error"]
 
 
 def test_admin_upload_winning_image_creates_winning_record(app, client):

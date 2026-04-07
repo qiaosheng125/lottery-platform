@@ -22,6 +22,10 @@ def presign():
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
+    record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+    if record and record.is_checked:
+        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+
     try:
         from services.oss_service import build_oss_key, generate_presign_url
 
@@ -54,6 +58,10 @@ def upload_local():
     ticket = LotteryTicket.query.get_or_404(int(ticket_id))
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
+
+    record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+    if record and record.is_checked:
+        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
 
     from services.oss_service import build_oss_key
 
@@ -108,6 +116,8 @@ def record_winning():
 
     record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
     if record:
+        if record.is_checked:
+            return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
         old_key = record.image_oss_key
         old_url = record.winning_image_url
         if old_key != oss_key or old_url != image_url:
@@ -261,6 +271,8 @@ def upload_winning_image(ticket_id):
         return jsonify({'success': False, 'error': '请选择图片'}), 400
 
     file = request.files['image']
+    if not file.filename:
+        return jsonify({'success': False, 'error': '文件名不能为空'}), 400
 
     try:
         from utils.image_upload import prepare_uploaded_image
