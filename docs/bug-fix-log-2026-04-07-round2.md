@@ -437,6 +437,12 @@
 - 这会导致 A 模式在真实 Postgres 环境下标记单张完成时直接抛 `NameError`，属于核心分票链路里的确定性故障。
 - 现已修复：统一改为使用 `updated_rows` 控制文件计数更新和最终返回值，并补了回归测试覆盖这条单张完成路径。
 
+### 61. SQLite 下文件完成计数之前会被 `assigned_count` 漂移持续带偏
+
+- SQLite 路径里 `complete_ticket()`、`complete_tickets_batch()` 和 `finalize_tickets_batch()` 之前都把“文件 `assigned_count` 递减”和“`completed_count` 递增”绑在同一个条件 `assigned_count > 0` 上。
+- 这意味着只要文件计数曾因为历史脏数据或边界故障出现过一次 `assigned_count=0` 漂移，后续真实完成的票也不会再增加 `completed_count`，文件状态和后台统计会被持续带偏。
+- 现已修复：SQLite 路径改为自修复式更新，`assigned_count` 统一按 `max(current-1, 0)` 收敛到非负数，而 `completed_count` 只要票真实完成就继续累加，并补了 A/B 两条回归测试。
+
 ## 本轮验证
 
 已通过的定向回归包括：
@@ -527,7 +533,8 @@
 - 合法命名但扩展名为 `.TXT` 的上传文件现在也能正常解析
 - 后台上传页文件选择框和拖拽过滤现在也同步支持 `.TXT`
 - Postgres 下 A 模式单张完成现在会正确按更新行数返回，不再因变量名写错异常
-- `108 passed`
+- SQLite 路径下文件完成计数现在会在计数漂移后自修复，不再继续漏加完成数
+- `110 passed`
 
 备注：
 

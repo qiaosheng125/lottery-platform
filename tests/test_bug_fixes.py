@@ -1342,6 +1342,98 @@ def test_mode_a_postgres_complete_ticket_uses_updated_rowcount(app, monkeypatch)
     assert any("UPDATE uploaded_files" in sql for sql, _ in calls)
 
 
+def test_mode_a_complete_ticket_repairs_file_completed_count_when_assigned_counter_drifted(app):
+    from services.ticket_pool import complete_ticket
+
+    with app.app_context():
+        user = create_user("mode_a_counter_repair_user", "secret123", client_mode="mode_a")
+        uploaded_file = UploadedFile(
+            display_id="2026/04/07-01",
+            original_filename="repair_a.txt",
+            stored_filename="txt/2026-04-07/repair_a.txt",
+            status="active",
+            uploaded_by=user.id,
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=0,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+        ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="A-REPAIR-001",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=beijing_now(),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+        file_id = uploaded_file.id
+
+        assert complete_ticket(ticket_id, user.id) is True
+
+        refreshed_ticket = LotteryTicket.query.get(ticket_id)
+        refreshed_file = UploadedFile.query.get(file_id)
+        assert refreshed_ticket.status == "completed"
+        assert refreshed_file.assigned_count == 0
+        assert refreshed_file.completed_count == 1
+
+
+def test_mode_b_finalize_repairs_file_counters_when_assigned_counter_drifted(app):
+    from services.ticket_pool import finalize_tickets_batch
+
+    with app.app_context():
+        user = create_user("mode_b_counter_repair_user", "secret123", client_mode="mode_b")
+        uploaded_file = UploadedFile(
+            display_id="2026/04/07-02",
+            original_filename="repair_b.txt",
+            stored_filename="txt/2026-04-07/repair_b.txt",
+            status="active",
+            uploaded_by=user.id,
+            total_tickets=2,
+            pending_count=0,
+            assigned_count=0,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+        ticket1 = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="B-REPAIR-001",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=beijing_now(),
+        )
+        ticket2 = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=2,
+            raw_content="B-REPAIR-002",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=beijing_now(),
+        )
+        db.session.add_all([ticket1, ticket2])
+        db.session.commit()
+
+        result = finalize_tickets_batch([ticket1.id, ticket2.id], user.id, completed_count=1)
+
+        refreshed_file = UploadedFile.query.get(uploaded_file.id)
+        refreshed_ticket1 = LotteryTicket.query.get(ticket1.id)
+        refreshed_ticket2 = LotteryTicket.query.get(ticket2.id)
+        assert result == {"completed_count": 1, "expired_count": 1}
+        assert refreshed_ticket1.status == "completed"
+        assert refreshed_ticket2.status == "expired"
+        assert refreshed_file.assigned_count == 0
+        assert refreshed_file.completed_count == 1
+
+
 def test_mode_b_postgres_finalize_updates_counts_only_for_returned_ids(app, monkeypatch):
     from services.ticket_pool import finalize_tickets_batch
 
