@@ -675,9 +675,9 @@ def assign_tickets_batch(
         db.session.rollback()
         return [], None
 
-        db.session.execute(
-            text("""
-                UPDATE uploaded_files f
+    db.session.execute(
+        text("""
+            UPDATE uploaded_files f
             SET pending_count = GREATEST(pending_count - sub.cnt, 0),
                 assigned_count = assigned_count + sub.cnt
             FROM (

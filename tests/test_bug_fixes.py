@@ -2076,6 +2076,8 @@ def test_mode_b_postgres_batch_assignment_clamps_file_pending_count(app, monkeyp
         query = FakeLotteryQuery()
         id = SimpleNamespace(in_=lambda ids: ids)
 
+    update_called = {"value": False}
+
     def fake_execute(statement, params=None):
         sql = str(statement)
         if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
@@ -2085,6 +2087,7 @@ def test_mode_b_postgres_batch_assignment_clamps_file_pending_count(app, monkeyp
         if "UPDATE lottery_tickets" in sql and "RETURNING id" in sql:
             return FakeResult(fetchall_data=[(123,), (124,)], rowcount=2)
         if "UPDATE uploaded_files f" in sql and "assigned_count = assigned_count + sub.cnt" in sql:
+            update_called["value"] = True
             assert "GREATEST(pending_count - sub.cnt, 0)" in sql
             return FakeResult(rowcount=1)
         raise AssertionError(f"Unexpected SQL: {sql}")
@@ -2107,6 +2110,7 @@ def test_mode_b_postgres_batch_assignment_clamps_file_pending_count(app, monkeyp
 
     assert adjustment_message is None
     assert [ticket.id for ticket in tickets] == [123, 124]
+    assert update_called["value"] is True
 
 
 def test_mode_b_postgres_complete_updates_file_counts_only_for_completed_ids(app, monkeypatch):
