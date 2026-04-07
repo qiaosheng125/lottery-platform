@@ -5004,6 +5004,15 @@ def test_client_dashboard_resets_matching_state_on_load_failures():
     assert "} catch(e) {\n        this.bPendingBatches = [];\n      }\n    },\n    async loadPoolStatus()" in content
 
 
+def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %}," in content
+    assert "if (this.isModeB) {\n      this.loadPoolStatus();\n      this.loadProcessingBatches();\n    }" in content
+    assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    }" in content
+    assert "if (this.isModeB) {\n        this.loadPoolStatus();\n      }\n      this.loadStats();" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
