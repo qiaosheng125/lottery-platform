@@ -4,20 +4,26 @@ from flask_login import login_required, current_user
 from extensions import db
 from models.device import DeviceRegistry
 from utils.time_utils import beijing_now
+from utils.decorators import login_required_json
 
 device_bp = Blueprint('device', __name__)
 
 
 @device_bp.route('/register', methods=['POST'])
+@login_required_json
 @login_required
 def register_device():
     data = request.get_json(silent=True) or {}
-    device_id = data.get('device_id', '')
-    device_name = data.get('device_name', '')
+    device_id = (data.get('device_id') or '').strip()
+    device_name = (data.get('device_name') or '').strip()
     client_info = data.get('client_info', {})
 
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
+    if len(device_id) > 50 or not all(c.isalnum() or c in '-_' for c in device_id):
+        return jsonify({'success': False, 'error': '设备ID只能包含字母、数字、连字符和下划线，且长度不能超过 50'}), 400
+    if device_name and len(device_name) > 20:
+        return jsonify({'success': False, 'error': '设备名长度不能超过 20 个字符'}), 400
 
     device = DeviceRegistry.query.filter_by(device_id=device_id).first()
     if device and device.user_id != current_user.id:
@@ -60,8 +66,12 @@ def register_device():
 
 
 @device_bp.route('/<device_id>/name', methods=['PUT'])
+@login_required_json
 @login_required
 def update_device_name(device_id):
+    if len(device_id) > 50 or not all(c.isalnum() or c in '-_' for c in device_id):
+        return jsonify({'success': False, 'error': '无效的设备ID'}), 400
+
     device = DeviceRegistry.query.filter_by(
         device_id=device_id, user_id=current_user.id
     ).first_or_404()
@@ -70,6 +80,8 @@ def update_device_name(device_id):
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'error': '设备名不能为空'}), 400
+    if len(name) > 20:
+        return jsonify({'success': False, 'error': '设备名长度不能超过 20 个字符'}), 400
 
     # 检查设备名重复（同一用户下）
     duplicate = DeviceRegistry.query.filter(

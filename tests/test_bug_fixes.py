@@ -896,6 +896,47 @@ def test_device_register_rejects_claiming_other_users_device_id(app, client):
     assert "其他用户" in data["error"]
 
 
+def test_device_register_requires_login_json_response(app, client):
+    resp = client.post("/api/device/register", json={"device_id": "device-a"})
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请先登录" in data["error"]
+
+
+def test_device_register_rejects_invalid_device_id_format(app, client):
+    with app.app_context():
+        create_user("device_invalid_format_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "device_invalid_format_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/device/register", json={"device_id": "bad id"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "设备ID只能包含字母、数字、连字符和下划线" in data["error"]
+
+
+def test_device_update_name_rejects_too_long_name(app, client):
+    with app.app_context():
+        user = create_user("device_long_name_user", "secret123", client_mode="mode_b")
+        from models.device import DeviceRegistry
+
+        db.session.add(DeviceRegistry(device_id="device-a", user_id=user.id, device_name="旧设备名"))
+        db.session.commit()
+
+    resp = login(client, "device_long_name_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.put("/api/device/device-a/name", json={"name": "x" * 21})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "长度不能超过 20" in data["error"]
+
+
 def test_change_password_handles_empty_json_body(app, client):
     with app.app_context():
         create_user("change_password_empty_body_user", "secret123", client_mode="mode_a")
