@@ -69,6 +69,10 @@ def parse_ticket_line(raw_content: str) -> Optional[dict]:
         base_mult, base = map(int, mult_str.split('*'))
     except Exception:
         return None
+    if base != 1:
+        return None
+    if base_mult != len(fields):
+        return None
 
     # 最终倍数
     try:
