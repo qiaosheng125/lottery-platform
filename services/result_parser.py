@@ -152,6 +152,11 @@ def parse_result_file(file_path: str, detail_period: str, uploader_id: int, resu
     if existing:
         existing.result_data = result_data
         existing.calc_status = 'pending'
+        existing.calc_started_at = None
+        existing.calc_finished_at = None
+        existing.tickets_total = 0
+        existing.tickets_winning = 0
+        existing.total_winning_amount = 0
         existing.uploaded_at = beijing_now()
         existing.uploaded_by = uploader_id
         if result_file_id:

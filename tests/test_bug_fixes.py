@@ -197,6 +197,20 @@ def test_mode_b_processing_with_device_id_filters_batches(app, client):
     assert data["batches"][0]["count"] == 1
 
 
+def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
+    with app.app_context():
+        create_user("modeb_confirm_guard_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "modeb_confirm_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": ["abc"]})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "整数" in data["error"]
+
+
 def test_mode_b_endpoints_reject_mode_a_user(app, client):
     with app.app_context():
         create_user("mode_a_blocked_user", "secret123", client_mode="mode_a")
@@ -311,6 +325,20 @@ def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
         assigned_next = LotteryTicket.query.get(next_ticket_id)
         assert expired_ticket.status == "expired"
         assert assigned_next.status == "assigned"
+
+
+def test_mode_a_previous_rejects_invalid_offset(app, client):
+    with app.app_context():
+        create_user("modea_previous_guard_user", "secret123", client_mode="mode_a")
+
+    resp = login(client, "modea_previous_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-a/previous?device_id=device-a&offset=bad")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "offset" in data["error"]
 
 
 def test_pool_status_returns_empty_when_pool_disabled(app, client):
@@ -540,6 +568,55 @@ def test_upload_winning_image_works_without_pillow(app, client, monkeypatch):
     assert data["image_url"].startswith("/uploads/images/winning_")
 
 
+def test_upload_winning_image_replaces_old_local_file(app, client):
+    from PIL import Image
+
+    with app.app_context():
+        user = create_user("winning_replace_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-c", "WIN003", 3)
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_replace_user", "secret123")
+    assert resp.status_code == 200
+
+    first_image = io.BytesIO()
+    Image.new("RGB", (20, 20), color="red").save(first_image, format="PNG")
+    first_image.seek(0)
+    first_resp = client.post(
+        f"/api/winning/upload-image/{ticket_id}",
+        data={"image": (first_image, "winning1.png")},
+        content_type="multipart/form-data",
+    )
+    assert first_resp.status_code == 200
+    first_url = first_resp.get_json()["image_url"]
+
+    with app.app_context():
+        first_record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+        first_path = Path(app.config["UPLOAD_FOLDER"]) / "images" / first_url.rsplit("/", 1)[-1]
+        assert first_record is not None
+        assert first_path.exists()
+
+    second_image = io.BytesIO()
+    Image.new("RGB", (20, 20), color="blue").save(second_image, format="PNG")
+    second_image.seek(0)
+    second_resp = client.post(
+        f"/api/winning/upload-image/{ticket_id}",
+        data={"image": (second_image, "winning2.png")},
+        content_type="multipart/form-data",
+    )
+    assert second_resp.status_code == 200
+    second_url = second_resp.get_json()["image_url"]
+
+    with app.app_context():
+        refreshed_record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+        second_path = Path(app.config["UPLOAD_FOLDER"]) / "images" / second_url.rsplit("/", 1)[-1]
+
+    assert first_url != second_url
+    assert not first_path.exists()
+    assert second_path.exists()
+    assert refreshed_record.winning_image_url == second_url
+
+
 def test_expire_overdue_tickets_updates_file_counters(app):
     from tasks.expire_tickets import expire_overdue_tickets
 
@@ -587,7 +664,7 @@ def test_expire_overdue_tickets_updates_file_counters(app):
         assert refreshed.assigned_count == 0
 
 
-def test_archive_old_tickets_moves_completed_ticket_to_archive_table(app):
+def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
     from tasks.archive import archive_old_tickets
 
     with app.app_context():
@@ -620,15 +697,12 @@ def test_archive_old_tickets_moves_completed_ticket_to_archive_table(app):
         db.session.commit()
         ticket_id = ticket.id
 
-        archived_count = archive_old_tickets(days_ago=30)
-
+        deleted_count = archive_old_tickets(days_ago=30)
         archived = ArchivedLotteryTicket.query.filter_by(original_ticket_id=ticket_id).first()
         remaining = LotteryTicket.query.get(ticket_id)
 
-    assert archived_count == 1
-    assert archived is not None
-    assert archived.raw_content == "ARCHIVE-COMPLETED"
-    assert archived.status == "completed"
+    assert deleted_count == 1
+    assert archived is None
     assert remaining is None
 
 
@@ -667,17 +741,14 @@ def test_archive_old_tickets_uses_fallback_terminal_time_for_expired_and_revoked
         expired_id = expired_ticket.id
         revoked_id = revoked_ticket.id
 
-        archived_count = archive_old_tickets(days_ago=30)
-
-        archived_ids = {
-            row.original_ticket_id
-            for row in ArchivedLotteryTicket.query.filter(
-                ArchivedLotteryTicket.original_ticket_id.in_([expired_id, revoked_id])
-            ).all()
+        deleted_count = archive_old_tickets(days_ago=30)
+        remaining_ids = {
+            row.id
+            for row in LotteryTicket.query.filter(LotteryTicket.id.in_([expired_id, revoked_id])).all()
         }
 
-    assert archived_count == 2
-    assert archived_ids == {expired_id, revoked_id}
+    assert deleted_count == 2
+    assert remaining_ids == set()
 
 
 def test_process_uploaded_file_stores_txt_under_business_date_folder(app):
@@ -700,7 +771,7 @@ def test_process_uploaded_file_stores_txt_under_business_date_folder(app):
 
 def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
     from services.file_parser import process_uploaded_file, resolve_uploaded_txt_path
-    from tasks.archive import archive_old_uploaded_txt_files
+    from tasks.archive import archive_old_tickets, archive_old_uploaded_txt_files
 
     with app.app_context():
         user = create_user("archive_txt_user", "secret123", client_mode="mode_b")
@@ -716,14 +787,93 @@ def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
         uploaded.pending_count = 0
         uploaded.assigned_count = 0
         uploaded.completed_count = uploaded.total_tickets
+
+        for ticket in LotteryTicket.query.filter_by(source_file_id=uploaded.id).all():
+            ticket.status = "completed"
+            ticket.completed_at = beijing_now() - timedelta(days=31)
         db.session.commit()
 
+        archive_old_tickets(days_ago=30)
         moved = archive_old_uploaded_txt_files(days_ago=30)
         remaining = UploadedFile.query.get(result["file_id"])
 
     assert moved == 1
     assert not os.path.exists(old_path)
     assert remaining is None
+
+
+def test_archive_old_uploaded_txt_files_keeps_file_with_recent_ticket_history(app):
+    from services.file_parser import process_uploaded_file, resolve_uploaded_txt_path
+    from tasks.archive import archive_old_uploaded_txt_files
+
+    with app.app_context():
+        user = create_user("archive_txt_recent_ticket_user", "secret123", client_mode="mode_b")
+        result = process_uploaded_file(
+            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            uploader_id=user.id,
+        )
+        uploaded = UploadedFile.query.get(result["file_id"])
+        old_path = resolve_uploaded_txt_path(uploaded.stored_filename, app.config["UPLOAD_FOLDER"])
+        assert os.path.exists(old_path)
+
+        uploaded.uploaded_at = beijing_now() - timedelta(days=31)
+        uploaded.pending_count = 0
+        uploaded.assigned_count = 0
+        uploaded.completed_count = uploaded.total_tickets
+
+        ticket = LotteryTicket.query.filter_by(source_file_id=uploaded.id).first()
+        ticket.status = "completed"
+        ticket.completed_at = beijing_now() - timedelta(days=5)
+        db.session.commit()
+
+        moved = archive_old_uploaded_txt_files(days_ago=30)
+        remaining = UploadedFile.query.get(result["file_id"])
+
+    assert moved == 0
+    assert os.path.exists(old_path)
+    assert remaining is not None
+
+
+def test_purge_old_auxiliary_records_deletes_old_match_results_before_result_files(app):
+    from tasks.archive import purge_old_auxiliary_records
+    from models.result import MatchResult, ResultFile
+
+    with app.app_context():
+        user = create_user("purge_aux_user", "secret123", client_mode="mode_b")
+        result_file = ResultFile(
+            original_filename="results.txt",
+            stored_filename="results_old.txt",
+            uploaded_by=user.id,
+            uploaded_at=beijing_now() - timedelta(days=31),
+            periods_count=1,
+        )
+        db.session.add(result_file)
+        db.session.commit()
+
+        stored_path = Path(app.config["UPLOAD_FOLDER"]) / result_file.stored_filename
+        stored_path.write_text("old result payload", encoding="utf-8")
+
+        match_result = MatchResult(
+            detail_period="26034",
+            lottery_type="P7",
+            result_data={"61": {"SPF": {"result": "3", "sp": 1.85}}},
+            result_file_id=result_file.id,
+            uploaded_by=user.id,
+            uploaded_at=beijing_now() - timedelta(days=31),
+        )
+        db.session.add(match_result)
+        db.session.commit()
+        result_file_id = result_file.id
+        match_result_id = match_result.id
+
+        purge_old_auxiliary_records(days_ago=30)
+
+        remaining_result_file = ResultFile.query.get(result_file_id)
+        remaining_match_result = MatchResult.query.get(match_result_id)
+
+    assert remaining_match_result is None
+    assert remaining_result_file is None
+    assert not stored_path.exists()
 
 
 def test_public_register_page_redirects_to_login(client):
@@ -804,6 +954,157 @@ def test_admin_users_template_handles_update_failures():
     assert "const original = {" in content
     assert "Object.assign(u, original);" in content
     assert "showToast(data.error || '更新失败', 'danger');" in content
+
+
+def test_winning_presign_uses_local_upload_api_when_oss_disabled(app):
+    with app.app_context():
+        from services.oss_service import generate_presign_url
+
+        url, oss_key = generate_presign_url("winning/2026/04/07/123.jpg")
+
+    assert url == "/api/winning/upload-local?key=winning_2026_04_07_123.jpg"
+    assert oss_key == "winning_2026_04_07_123.jpg"
+
+
+def test_winning_upload_local_saves_image_under_uploads_images(app, client):
+    from PIL import Image
+
+    with app.app_context():
+        user = create_user("winning_local_upload_user", "secret123", client_mode="mode_a")
+        upload_folder = Path(app.config["UPLOAD_FOLDER"])
+        ticket = create_assigned_ticket(user, "device-local", "WIN-LOCAL-001", 1)
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_local_upload_user", "secret123")
+    assert resp.status_code == 200
+
+    presign_resp = client.get(f"/api/winning/presign?ticket_id={ticket_id}")
+    assert presign_resp.status_code == 200
+    presign_data = presign_resp.get_json()
+    assert presign_data["success"] is True
+    assert presign_data["url"].startswith("/api/winning/upload-local?key=")
+
+    image_bytes = io.BytesIO()
+    Image.new("RGB", (20, 20), color="blue").save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+
+    upload_resp = client.post(
+        presign_data["url"],
+        data={"file": (image_bytes, "winning.png")},
+        content_type="multipart/form-data",
+    )
+    assert upload_resp.status_code == 200
+    upload_data = upload_resp.get_json()
+    assert upload_data["success"] is True
+    assert upload_data["image_url"].startswith("/uploads/images/winning_")
+    assert upload_data["oss_key"].startswith("winning_")
+
+    saved_path = upload_folder / "images" / upload_data["oss_key"]
+    assert saved_path.exists()
+
+
+def test_winning_upload_local_requires_matching_ticket_key(app, client):
+    from PIL import Image
+
+    with app.app_context():
+        user = create_user("winning_local_guard_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-local", "WIN-LOCAL-GUARD", 1)
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_local_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    image_bytes = io.BytesIO()
+    Image.new("RGB", (20, 20), color="green").save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+
+    upload_resp = client.post(
+        f"/api/winning/upload-local?ticket_id={ticket_id}&key=winning_2026_04_07_999.jpg",
+        data={"file": (image_bytes, "winning.png")},
+        content_type="multipart/form-data",
+    )
+    assert upload_resp.status_code == 400
+    data = upload_resp.get_json()
+    assert data["success"] is False
+    assert "不匹配" in data["error"]
+
+
+def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, client, monkeypatch):
+    business_start = datetime(2026, 4, 6, 12, 0, 0)
+
+    with app.app_context():
+        admin = User(username="admin_csv_export_user", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        in_window = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="CSV-IN-WINDOW",
+            status="completed",
+            assigned_username="user-a",
+            completed_at=business_start + timedelta(hours=1),
+        )
+        out_of_window = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="CSV-OUT-OF-WINDOW",
+            status="completed",
+            assigned_username="user-a",
+            completed_at=business_start - timedelta(hours=1),
+        )
+        db.session.add_all([in_window, out_of_window])
+        db.session.commit()
+
+    monkeypatch.setattr("routes.admin.get_today_noon", lambda: business_start)
+    monkeypatch.setattr("routes.admin.get_business_date", lambda dt=None: business_start.date())
+
+    resp = client.post("/auth/login", json={"username": "admin_csv_export_user", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/tickets/export")
+    assert export_resp.status_code == 200
+    csv_text = export_resp.data.decode("utf-8-sig")
+    assert "CSV-IN-WINDOW" in csv_text
+    assert "CSV-OUT-OF-WINDOW" not in csv_text
+
+
+def test_admin_files_list_rejects_invalid_page_params(app, client):
+    with app.app_context():
+        admin = User(username="admin_invalid_page_user", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_invalid_page_user", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files?page=bad")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "分页参数" in data["error"]
+
+
+def test_admin_create_user_rejects_invalid_max_devices(app, client):
+    with app.app_context():
+        admin = User(username="admin_create_user_guard", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_create_user_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/users",
+        json={"username": "bad_max_devices_user", "password": "secret123", "max_devices": "bad"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "最大设备数" in data["error"]
 
 
 def test_admin_winning_template_uses_readable_chinese_labels():
@@ -974,6 +1275,215 @@ def test_admin_checked_winning_record_cannot_replace_image(app, client):
     assert "已检查" in data["error"]
 
 
+def test_admin_winning_record_creates_winning_record(app, client):
+    with app.app_context():
+        admin = User(username="admin_record_creator", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("admin_record_target", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-OSS-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_record_creator", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/test/admin-001.jpg"},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["record"]["ticket_id"] == ticket_id
+
+    with app.app_context():
+        ticket = LotteryTicket.query.get(ticket_id)
+        record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+        assert ticket.is_winning is True
+        assert ticket.winning_image_url
+        assert record is not None
+        assert record.image_oss_key == "winning/test/admin-001.jpg"
+
+
+def test_record_winning_does_not_delete_reuploaded_same_oss_key(app, client, monkeypatch):
+    deleted = []
+    monkeypatch.setattr("services.oss_service.delete_stored_image", lambda key=None, url=None: deleted.append((key, url)))
+    monkeypatch.setattr("services.oss_service.get_public_url", lambda oss_key: f"https://oss.example.com/{oss_key}")
+
+    with app.app_context():
+        user = create_user("winning_same_key_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-SAME-KEY",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="https://oss.example.com/winning/2026/04/07/1.jpg",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            image_oss_key="winning/2026/04/07/1.jpg",
+            uploaded_by=user.id,
+        ))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_same_key_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/2026/04/07/1.jpg"},
+    )
+    assert resp.status_code == 200
+    assert deleted == []
+
+
+def test_admin_winning_record_does_not_delete_reuploaded_same_oss_key(app, client, monkeypatch):
+    deleted = []
+    monkeypatch.setattr("services.oss_service.delete_stored_image", lambda key=None, url=None: deleted.append((key, url)))
+    monkeypatch.setattr("services.oss_service.get_public_url", lambda oss_key: f"https://oss.example.com/{oss_key}")
+
+    with app.app_context():
+        admin = User(username="admin_same_key", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("admin_same_key_target", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-SAME-KEY",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="https://oss.example.com/winning/2026/04/07/2.jpg",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            image_oss_key="winning/2026/04/07/2.jpg",
+            uploaded_by=admin.id,
+        ))
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_same_key", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/2026/04/07/2.jpg"},
+    )
+    assert resp.status_code == 200
+    assert deleted == []
+
+
+def test_admin_winning_record_rejects_empty_oss_key(app, client):
+    with app.app_context():
+        admin = User(username="admin_empty_oss_key", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-EMPTY-KEY",
+            status="completed",
+            completed_at=beijing_now(),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_empty_oss_key", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/winning/record", json={"ticket_id": ticket_id, "oss_key": ""})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "oss_key" in data["error"]
+
+
+def test_admin_upload_winning_image_creates_winning_record(app, client):
+    from io import BytesIO
+    from PIL import Image
+
+    with app.app_context():
+        admin = User(username="admin_upload_creator", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("admin_upload_target", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-UPLOAD-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_creator", "password": "secret123"})
+    assert resp.status_code == 200
+
+    image_bytes = BytesIO()
+    Image.new("RGB", (20, 20), color="blue").save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+
+    resp = client.post(
+        f"/admin/api/winning/{ticket_id}/upload-image",
+        data={"image": (image_bytes, "winning.png")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["record"]["ticket_id"] == ticket_id
+
+    with app.app_context():
+        ticket = LotteryTicket.query.get(ticket_id)
+        record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+        assert ticket.is_winning is True
+        assert ticket.winning_image_url
+        assert record is not None
+        assert record.winning_image_url == ticket.winning_image_url
+
+
 def test_my_winning_returns_business_date(app, client):
     with app.app_context():
         user = create_user("winning_business_date", "secret123", client_mode="mode_a")
@@ -1042,6 +1552,313 @@ def test_my_winning_keeps_recent_four_business_days(app, client, monkeypatch):
     records = [item["raw_content"] for items in data["grouped"].values() for item in items]
     assert "WIN-KEEP-4D" in records
     assert "WIN-DROP-5D" not in records
+
+
+def test_winning_calc_includes_expired_but_excludes_revoked(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier):
+        if raw_content in {"WIN-COMPLETED", "WIN-EXPIRED"}:
+            return True, 100, 100, 0
+        return False, 0, 0, 0
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+
+    with app.app_context():
+        user = create_user("winning_calc_status_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26066",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=user.id,
+        )
+        db.session.add(match_result)
+        db.session.commit()
+
+        completed_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-COMPLETED",
+            status="completed",
+            detail_period="26066",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        expired_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-EXPIRED",
+            status="expired",
+            detail_period="26066",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            deadline_time=beijing_now(),
+        )
+        revoked_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=3,
+            raw_content="WIN-REVOKED",
+            status="revoked",
+            detail_period="26066",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            admin_upload_time=beijing_now(),
+        )
+        db.session.add_all([completed_ticket, expired_ticket, revoked_ticket])
+        db.session.commit()
+
+        process_match_result(match_result.id, app=app)
+        db.session.expire_all()
+
+        refreshed_completed = LotteryTicket.query.get(completed_ticket.id)
+        refreshed_expired = LotteryTicket.query.get(expired_ticket.id)
+        refreshed_revoked = LotteryTicket.query.get(revoked_ticket.id)
+        refreshed_result = MatchResult.query.get(match_result.id)
+
+    assert refreshed_completed.is_winning is True
+    assert refreshed_expired.is_winning is True
+    assert refreshed_revoked.is_winning is None
+    assert refreshed_result.tickets_total == 2
+    assert refreshed_result.tickets_winning == 2
+
+
+def test_winning_calc_clears_stale_amounts_when_ticket_calc_errors(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+
+    with app.app_context():
+        user = create_user("winning_calc_error_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26067",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=user.id,
+        )
+        db.session.add(match_result)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-ERROR",
+            status="completed",
+            detail_period="26067",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_gross=123,
+            winning_amount=100,
+            winning_tax=23,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+        process_match_result(match_result.id, app=app)
+        db.session.expire_all()
+
+        refreshed_ticket = LotteryTicket.query.get(ticket.id)
+        refreshed_result = MatchResult.query.get(match_result.id)
+
+    assert refreshed_ticket.is_winning is False
+    assert refreshed_ticket.winning_gross is None
+    assert refreshed_ticket.winning_amount is None
+    assert refreshed_ticket.winning_tax is None
+    assert refreshed_result.tickets_winning == 0
+    assert float(refreshed_result.total_winning_amount or 0) == 0.0
+
+
+def test_winning_calc_removes_stale_winning_record_when_ticket_is_no_longer_winning(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier):
+        return False, 0, 0, 0
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+
+    with app.app_context():
+        user = create_user("winning_calc_stale_record_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26068",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=user.id,
+        )
+        db.session.add(match_result)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-STALE-RECORD",
+            status="completed",
+            detail_period="26068",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="/uploads/images/stale.png",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            uploaded_by=user.id,
+        ))
+        db.session.commit()
+
+        process_match_result(match_result.id, app=app)
+        db.session.expire_all()
+
+        refreshed_ticket = LotteryTicket.query.get(ticket.id)
+        refreshed_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+
+    assert refreshed_ticket.is_winning is False
+    assert refreshed_ticket.winning_image_url is None
+    assert refreshed_record is None
+
+
+def test_winning_calc_removes_stale_local_image_when_ticket_is_no_longer_winning(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier):
+        return False, 0, 0, 0
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+
+    with app.app_context():
+        user = create_user("winning_calc_stale_image_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26069",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=user.id,
+        )
+        db.session.add(match_result)
+        db.session.commit()
+
+        images_dir = Path(app.config["UPLOAD_FOLDER"]) / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        stale_path = images_dir / "stale-winning.png"
+        stale_path.write_bytes(b"stale-image")
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-STALE-IMAGE",
+            status="completed",
+            detail_period="26069",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="/uploads/images/stale-winning.png",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            uploaded_by=user.id,
+        ))
+        db.session.commit()
+
+        process_match_result(match_result.id, app=app)
+
+    assert not stale_path.exists()
+
+
+def test_admin_winning_lists_expired_ticket_with_special_status(app, client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    with app.app_context():
+        admin = User(username="admin_winning_expired", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("expired_winning_user", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.commit()
+
+        expired_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-EXPIRED-LIST",
+            status="expired",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            deadline_time=datetime(2026, 4, 7, 11, 0, 0),
+            is_winning=True,
+            winning_amount=88,
+        )
+        db.session.add(expired_ticket)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_winning_expired", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/winning?date=2026-04-06")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [r["raw_content"] for r in data["records"]] == ["WIN-EXPIRED-LIST"]
+    assert data["records"][0]["status"] == "expired"
+    assert data["records"][0]["status_label"] == "已过期未出票"
+    assert data["records"][0]["terminal_at"].startswith("2026-04-07T11:00:00")
+
+    export_resp = client.get("/admin/api/winning/export?date=2026-04-06")
+    assert export_resp.status_code == 200
+    wb = load_workbook(BytesIO(export_resp.data))
+    ws = wb.active
+    header = [cell for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    row = [cell for cell in next(ws.iter_rows(min_row=2, max_row=2, values_only=True))]
+    assert "状态" in header
+    assert "终态时间" in header
+    assert "已过期未出票" in row
+    assert "2026-04-07 11:00:00" in row
+
+
+def test_my_winning_still_hides_expired_tickets(app, client):
+    with app.app_context():
+        user = create_user("winning_hide_expired", "secret123", client_mode="mode_a")
+        completed_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-COMPLETED-VIEW",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        expired_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-EXPIRED-HIDDEN",
+            status="expired",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            deadline_time=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add_all([completed_ticket, expired_ticket])
+        db.session.commit()
+
+    resp = login(client, "winning_hide_expired", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    records = [item["raw_content"] for items in data["grouped"].values() for item in items]
+    assert "WIN-COMPLETED-VIEW" in records
+    assert "WIN-EXPIRED-HIDDEN" not in records
 
 
 def test_admin_file_list_uses_business_date_for_date_filter(app, client):
@@ -1167,6 +1984,89 @@ def test_admin_match_results_use_business_date_for_date_filter(app, client):
     assert "2026-04-07" in data["dates"]
 
 
+def test_upload_match_result_falls_back_to_sync_calc_when_scheduler_missing(app, client, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+
+    with app.app_context():
+        admin = User(username="admin_result_sync", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("result_sync_user", "secret123", client_mode="mode_b")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26080",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_sync", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\t1.85\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "26080",
+            "file": (io.BytesIO(payload), "result.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        match_result = MatchResult.query.filter_by(detail_period="26080").first()
+        ticket = LotteryTicket.query.filter_by(detail_period="26080").first()
+
+    assert match_result is not None
+    assert match_result.calc_status == "done"
+    assert ticket.is_winning is True
+
+
+def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+    monkeypatch.setattr("services.winning_calc_service.process_match_result", lambda result_id, app=None: None)
+
+    with app.app_context():
+        admin = User(username="admin_recalc_reset", is_admin=True)
+        admin.set_password("secret123")
+        match_result = MatchResult(
+            detail_period="26081",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=1,
+            calc_status="done",
+            calc_started_at=beijing_now(),
+            calc_finished_at=beijing_now(),
+            tickets_total=12,
+            tickets_winning=5,
+            total_winning_amount=666,
+        )
+        db.session.add_all([admin, match_result])
+        db.session.commit()
+        result_id = match_result.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recalc_reset", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/match-results/{result_id}/recalc")
+    assert resp.status_code == 200
+
+    with app.app_context():
+        refreshed = MatchResult.query.get(result_id)
+
+    assert refreshed.calc_status == "pending"
+    assert refreshed.calc_started_at is None
+    assert refreshed.calc_finished_at is None
+    assert refreshed.tickets_total == 0
+    assert refreshed.tickets_winning == 0
+    assert float(refreshed.total_winning_amount or 0) == 0.0
+
+
 def test_admin_user_management_endpoints_reject_admin_targets(app, client):
     with app.app_context():
         super_admin = User(username="admin_guard_actor", is_admin=True)
@@ -1281,6 +2181,12 @@ def test_client_dashboard_handles_export_daily_network_failure():
 
 def test_client_dashboard_merges_returned_winning_record_after_upload():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "Object.assign(record, data.record || {}, { winning_image_url: data.image_url });" in content
+
+
+def test_admin_winning_template_merges_returned_winning_record_after_upload():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "Object.assign(record, data.record || {}, { winning_image_url: data.image_url });" in content
 

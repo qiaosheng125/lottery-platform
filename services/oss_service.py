@@ -57,7 +57,7 @@ def generate_presign_url(oss_key: str, expires: int = 300) -> Tuple[str, str]:
 
     # 本地模式：返回本地上传接口，oss_key 作为文件名标识
     local_key = oss_key.replace('/', '_')
-    upload_url = f"/admin/api/winning/upload-local?key={local_key}"
+    upload_url = f"/api/winning/upload-local?key={local_key}"
     return upload_url, local_key
 
 
@@ -93,3 +93,21 @@ def delete_object(oss_key: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def delete_stored_image(image_oss_key: str = None, image_url: str = None) -> bool:
+    if image_oss_key:
+        return delete_object(image_oss_key)
+
+    if image_url and image_url.startswith('/uploads/images/'):
+        try:
+            upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+            filename = image_url.rsplit('/', 1)[-1]
+            path = os.path.join(upload_folder, 'images', filename)
+            if os.path.exists(path):
+                os.remove(path)
+            return True
+        except Exception:
+            return False
+
+    return False

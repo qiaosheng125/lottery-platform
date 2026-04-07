@@ -27,9 +27,63 @@ def presign():
 
         oss_key = build_oss_key(ticket.id)
         url, key = generate_presign_url(oss_key)
+        if url.startswith('/api/winning/upload-local?'):
+            url = f"{url}&ticket_id={ticket.id}"
         return jsonify({'success': True, 'url': url, 'oss_key': key})
     except Exception as e:
         return jsonify({'success': False, 'error': f'OSS错误: {e}'}), 500
+
+
+@winning_bp.route('/upload-local', methods=['POST'])
+@login_required
+@login_required_json
+def upload_local():
+    import os
+
+    from flask import current_app
+
+    key = (request.args.get('key') or '').strip()
+    ticket_id = (request.args.get('ticket_id') or '').strip()
+    if not key:
+        return jsonify({'success': False, 'error': '缺少 key'}), 400
+    if not ticket_id:
+        return jsonify({'success': False, 'error': '缺少票ID'}), 400
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '请选择图片'}), 400
+
+    ticket = LotteryTicket.query.get_or_404(int(ticket_id))
+    if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
+        return jsonify({'success': False, 'error': '权限不足'}), 403
+
+    from services.oss_service import build_oss_key
+
+    expected_key = build_oss_key(ticket.id).replace('/', '_')
+    if key != expected_key:
+        return jsonify({'success': False, 'error': '上传 key 与票据不匹配'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'success': False, 'error': '文件名不能为空'}), 400
+
+    try:
+        from utils.image_upload import prepare_uploaded_image
+
+        image_stream, save_ext = prepare_uploaded_image(file)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    images_dir = os.path.join(upload_folder, 'images')
+    os.makedirs(images_dir, exist_ok=True)
+
+    normalized_key = key.replace('/', '_')
+    root, _ = os.path.splitext(normalized_key)
+    filename = f"{root}.{save_ext}"
+    path = os.path.join(images_dir, filename)
+    with open(path, 'wb') as f:
+        f.write(image_stream.read())
+
+    return jsonify({'success': True, 'oss_key': filename, 'image_url': f"/uploads/images/{filename}"})
 
 
 @winning_bp.route('/record', methods=['POST'])
@@ -48,20 +102,16 @@ def record_winning():
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
         return jsonify({'success': False, 'error': '权限不足'}), 403
 
-    from services.oss_service import delete_object, get_public_url
-
-    if ticket.winning_image_url and hasattr(ticket, '_oss_key'):
-        existing = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
-        if existing and existing.image_oss_key:
-            delete_object(existing.image_oss_key)
+    from services.oss_service import delete_stored_image, get_public_url
 
     image_url = get_public_url(oss_key)
 
     record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
     if record:
         old_key = record.image_oss_key
-        if old_key and old_key != oss_key:
-            delete_object(old_key)
+        old_url = record.winning_image_url
+        if old_key != oss_key or old_url != image_url:
+            delete_stored_image(old_key, old_url)
         record.winning_image_url = image_url
         record.image_oss_key = oss_key
         record.winning_amount = winning_amount
@@ -219,7 +269,7 @@ def upload_winning_image(ticket_id):
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
-    from services.oss_service import _oss_configured, build_oss_key, get_public_url
+    from services.oss_service import _oss_configured, build_oss_key, delete_stored_image, get_public_url
 
     image_oss_key = None
     if _oss_configured():
@@ -241,6 +291,8 @@ def upload_winning_image(ticket_id):
         image_url = f"/uploads/images/{filename}"
 
     if record:
+        if record.image_oss_key != image_oss_key or record.winning_image_url != image_url:
+            delete_stored_image(record.image_oss_key, record.winning_image_url)
         record.winning_image_url = image_url
         record.image_oss_key = image_oss_key
         record.uploaded_by = current_user.id

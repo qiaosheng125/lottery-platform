@@ -11,6 +11,8 @@ from flask import current_app
 from extensions import db
 from models.result import MatchResult
 from models.ticket import LotteryTicket
+from models.winning import WinningRecord
+from services.oss_service import delete_stored_image
 from utils.time_utils import beijing_now
 from utils.winning_calculator import calculate_winning
 
@@ -33,16 +35,16 @@ def process_match_result(match_result_id: int, app=None):
         db.session.commit()
 
         try:
-            # Query all completed tickets for this period
-            tickets = LotteryTicket.query.filter_by(
-                detail_period=match_result.detail_period,
-                status='completed',
+            tickets = LotteryTicket.query.filter(
+                LotteryTicket.detail_period == match_result.detail_period,
+                LotteryTicket.status.in_(['completed', 'expired']),
             ).all()
 
             winning_count = 0
             total_amount = Decimal('0')
 
             for ticket in tickets:
+                winning_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
                 try:
                     is_win, gross, net, tax = calculate_winning(
                         raw_content=ticket.raw_content,
@@ -60,9 +62,20 @@ def process_match_result(match_result_id: int, app=None):
                         ticket.winning_gross = None
                         ticket.winning_amount = None
                         ticket.winning_tax = None
+                        if winning_record:
+                            delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
+                            db.session.delete(winning_record)
+                        ticket.winning_image_url = None
                 except Exception as e:
                     current_app.logger.warning(f"Winning calc error for ticket {ticket.id}: {e}")
                     ticket.is_winning = False
+                    ticket.winning_gross = None
+                    ticket.winning_amount = None
+                    ticket.winning_tax = None
+                    if winning_record:
+                        delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
+                        db.session.delete(winning_record)
+                    ticket.winning_image_url = None
 
             match_result.calc_status = 'done'
             match_result.calc_finished_at = beijing_now()

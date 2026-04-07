@@ -85,7 +85,10 @@ def archive_old_uploaded_txt_files(days_ago=30):
 
     deleted_count = 0
     for uploaded_file in candidates:
-        LotteryTicket.query.filter_by(source_file_id=uploaded_file.id).delete(synchronize_session=False)
+        remaining_ticket_count = LotteryTicket.query.filter_by(source_file_id=uploaded_file.id).count()
+        if remaining_ticket_count > 0:
+            continue
+
         WinningRecord.query.filter_by(source_file_id=uploaded_file.id).delete(synchronize_session=False)
         delete_uploaded_txt_file(uploaded_file, upload_folder)
         db.session.delete(uploaded_file)
@@ -112,14 +115,19 @@ def purge_old_auxiliary_records(days_ago=30):
     cutoff_date = beijing_now() - timedelta(days=days_ago)
     upload_folder = current_app.config['UPLOAD_FOLDER']
 
+    MatchResult.query.filter(MatchResult.uploaded_at < cutoff_date).delete(synchronize_session=False)
+
     result_files = ResultFile.query.filter(ResultFile.uploaded_at < cutoff_date).all()
     for result_file in result_files:
+        has_remaining_match_results = MatchResult.query.filter_by(result_file_id=result_file.id).first()
+        if has_remaining_match_results:
+            continue
+
         stored_path = os.path.join(upload_folder, result_file.stored_filename)
         if os.path.exists(stored_path):
             os.remove(stored_path)
         db.session.delete(result_file)
 
-    MatchResult.query.filter(MatchResult.uploaded_at < cutoff_date).delete(synchronize_session=False)
     AuditLog.query.filter(AuditLog.timestamp < cutoff_date).delete(synchronize_session=False)
     ArchivedLotteryTicket.query.filter(
         ArchivedLotteryTicket.terminal_at.isnot(None),

@@ -21,6 +21,16 @@ def _get_device_info():
     return device_id, device_name, complete_current_ticket_id, complete_current_ticket_action
 
 
+def _parse_non_negative_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
 @mode_a_bp.route('/next', methods=['POST'])
 @login_required
 @login_required_json
@@ -73,9 +83,11 @@ def stop():
 @login_required_json
 def previous_ticket():
     device_id = request.args.get('device_id', '')
-    offset = int(request.args.get('offset', 0))
+    offset = _parse_non_negative_int(request.args.get('offset', 0))
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
+    if offset is None:
+        return jsonify({'success': False, 'error': 'offset 必须是大于等于 0 的整数'}), 400
 
     result = get_previous_ticket(current_user.id, device_id, offset)
     return jsonify(result)

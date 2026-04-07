@@ -84,6 +84,9 @@
               <td class="fw-bold text-nowrap">#{{ r.ticket_id }}</td>
               <td>
                 <div class="small font-monospace" style="white-space:nowrap">{{ r.raw_content }}</div>
+                <div v-if="r.status === 'expired'" class="mt-1">
+                  <span class="badge bg-danger">已过期未出票</span>
+                </div>
               </td>
               <td class="text-nowrap">¥{{ r.ticket_amount }}</td>
               <td>{{ r.username }}</td>
@@ -112,7 +115,9 @@
                 </button>
                 <span v-else class="text-muted small">-</span>
               </td>
-              <td class="small text-nowrap">{{ r.completed_at ? r.completed_at.substring(0,16) : '-' }}</td>
+              <td class="small text-nowrap" :class="r.status === 'expired' ? 'text-danger' : ''">
+                {{ r.terminal_at ? r.terminal_at.substring(0,16) : (r.completed_at ? r.completed_at.substring(0,16) : '-') }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -461,7 +466,7 @@ createApp({
         });
         const data = await res.json();
         if (data.success) {
-          record.winning_image_url = data.image_url;
+          Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
           showToast('图片上传成功', 'success');
         } else {
           showToast(data.error || '上传失败', 'danger');
