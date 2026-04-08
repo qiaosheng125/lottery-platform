@@ -6041,6 +6041,13 @@ def test_client_dashboard_cancel_stop_restores_mode_a_active_state():
     assert "document.body.classList.add('mode-a-active');" in content
 
 
+def test_client_dashboard_stop_without_current_ticket_resets_mode_a_state():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "if (this.currentTicket) {" in content
+    assert "} else {\n        this.resetModeAState();" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
