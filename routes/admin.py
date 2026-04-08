@@ -427,21 +427,22 @@ def api_revoke_file(file_id):
 @login_required
 @admin_required
 def export_tickets():
-    """导出当日所有数据 CSV"""
+    """导出当日终态数据 CSV（completed + expired）"""
     import csv
     import io
 
-    from sqlalchemy import text
-    # Use ORM for cross-db compatibility
     from models.ticket import LotteryTicket
     from models.file import UploadedFile as UF
     cutoff_start = get_today_noon()
     cutoff_end = cutoff_start + timedelta(days=1)
 
-    tickets_q = LotteryTicket.query.filter(
-        LotteryTicket.completed_at >= cutoff_start,
-        LotteryTicket.completed_at < cutoff_end,
+    all_tickets = LotteryTicket.query.filter(
+        LotteryTicket.status.in_(['completed', 'expired']),
     ).order_by(LotteryTicket.id).all()
+    tickets_q = [
+        ticket for ticket in all_tickets
+        if (terminal_at := _winning_terminal_at(ticket)) and cutoff_start <= terminal_at < cutoff_end
+    ]
 
     output = io.StringIO()
     writer = csv.writer(output)

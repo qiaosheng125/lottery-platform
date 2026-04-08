@@ -4285,6 +4285,14 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
             assigned_username="user-a",
             completed_at=business_start + timedelta(hours=1),
         )
+        expired_in_window = LotteryTicket(
+            source_file_id=1,
+            line_number=3,
+            raw_content="CSV-EXPIRED-IN-WINDOW",
+            status="expired",
+            assigned_username="user-a",
+            deadline_time=business_start + timedelta(hours=2),
+        )
         out_of_window = LotteryTicket(
             source_file_id=1,
             line_number=2,
@@ -4293,7 +4301,7 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
             assigned_username="user-a",
             completed_at=business_start - timedelta(hours=1),
         )
-        db.session.add_all([in_window, out_of_window])
+        db.session.add_all([in_window, expired_in_window, out_of_window])
         db.session.commit()
 
     monkeypatch.setattr("routes.admin.get_today_noon", lambda: business_start)
@@ -4307,6 +4315,7 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
     csv_text = export_resp.data.decode("utf-8-sig")
     assert "设备ID" in csv_text
     assert "CSV-IN-WINDOW" in csv_text
+    assert "CSV-EXPIRED-IN-WINDOW" in csv_text
     assert "CSV-OUT-OF-WINDOW" not in csv_text
 
 
