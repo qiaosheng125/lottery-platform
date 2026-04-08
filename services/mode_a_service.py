@@ -100,7 +100,9 @@ def get_next_ticket(
 
     from models.user import User
 
-    user = User.query.get(user_id)
+    from extensions import db
+
+    user = db.session.get(User, user_id)
     daily_limit = user.daily_ticket_limit if user else None
     blocked_lottery_types = user.get_blocked_lottery_types() if user else []
 
@@ -175,7 +177,9 @@ def get_previous_ticket(user_id: int, device_id: str, offset: int = 0) -> dict:
         return {'success': False, 'error': '无历史记录'}
 
     ticket_id = history_ids[offset]
-    ticket = LotteryTicket.query.get(ticket_id)
+    from extensions import db
+
+    ticket = db.session.get(LotteryTicket, ticket_id)
     if not ticket:
         return {'success': False, 'error': '历史票不存在'}
 

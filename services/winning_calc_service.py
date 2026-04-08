@@ -26,7 +26,7 @@ def process_match_result(match_result_id: int, app=None):
         app = create_app()
 
     with app.app_context():
-        match_result = MatchResult.query.get(match_result_id)
+        match_result = db.session.get(MatchResult, match_result_id)
         if not match_result:
             return
 

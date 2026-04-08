@@ -4376,6 +4376,22 @@ def test_admin_routes_avoid_legacy_query_get_for_file_reads():
     assert "db.session.get(UF, t.source_file_id)" in content
 
 
+def test_core_services_avoid_legacy_query_get_usage():
+    root = Path(__file__).resolve().parents[1]
+    targets = [
+        root / "models" / "user.py",
+        root / "routes" / "winning.py",
+        root / "services" / "mode_a_service.py",
+        root / "services" / "mode_b_service.py",
+        root / "services" / "ticket_pool.py",
+        root / "services" / "winning_calc_service.py",
+    ]
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        assert ".query.get(" not in content
+        assert "Query.get(" not in content
+
+
 def test_admin_files_list_rejects_invalid_page_params(app, client):
     with app.app_context():
         admin = User(username="admin_invalid_page_user", is_admin=True)

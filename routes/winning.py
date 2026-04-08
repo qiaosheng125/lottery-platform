@@ -259,12 +259,12 @@ def mark_checked(record_id):
     db.session.commit()
 
     if rows_updated == 0:
-        record = WinningRecord.query.get(record_id)
+        record = db.session.get(WinningRecord, record_id)
         if not record:
             return jsonify({'success': False, 'error': '记录不存在'}), 404
         return jsonify({'success': False, 'error': '该记录已经标记为已检查'}), 400
 
-    record = WinningRecord.query.get(record_id)
+    record = db.session.get(WinningRecord, record_id)
     return jsonify({'success': True, 'record': record.to_dict()})
 
 

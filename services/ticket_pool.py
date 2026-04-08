@@ -165,7 +165,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     {'id': ticket_id}
                 )
                 db.session.commit()
-                return LotteryTicket.query.get(ticket_id)
+                return db.session.get(LotteryTicket, ticket_id)
             return None
 
     # ── PostgreSQL production path ────────────────────────────────
@@ -294,7 +294,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 )
 
                 db.session.commit()
-                return LotteryTicket.query.get(ticket_id)
+                return db.session.get(LotteryTicket, ticket_id)
 
             except Exception as e:
                 db.session.rollback()
@@ -317,7 +317,7 @@ def complete_ticket(ticket_id: int, user_id: int) -> bool:
         ticket.status = 'completed'
         ticket.completed_at = now
         ticket.version += 1
-        file = UploadedFile.query.get(ticket.source_file_id)
+        file = db.session.get(UploadedFile, ticket.source_file_id)
         if file:
             file.assigned_count = max((file.assigned_count or 0) - 1, 0)
             file.completed_count += 1
@@ -709,7 +709,7 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
             t.status = 'completed'
             t.completed_at = now
             t.version += 1
-            file = UploadedFile.query.get(t.source_file_id)
+            file = db.session.get(UploadedFile, t.source_file_id)
             if file:
                 file.assigned_count = max((file.assigned_count or 0) - 1, 0)
                 file.completed_count += 1
