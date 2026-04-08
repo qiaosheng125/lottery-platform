@@ -6032,6 +6032,15 @@ def test_client_dashboard_resets_full_mode_a_state_after_stop_success():
     assert "this.loadStats();" in content
 
 
+def test_client_dashboard_cancel_stop_restores_mode_a_active_state():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "@click=\"cancelStopConfirm\"" in content
+    assert "cancelStopConfirm()" in content
+    assert "this.modeAActive = true;" in content
+    assert "document.body.classList.add('mode-a-active');" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

@@ -157,7 +157,7 @@
         </div>
         <div class="modal-body">确认停止接单？当前票将标记为已完成。</div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showStopConfirm=false">取消</button>
+          <button class="btn btn-secondary" @click="cancelStopConfirm">取消</button>
           <button class="btn btn-danger" @click="doStop">确认停止</button>
         </div>
       </div>
@@ -661,6 +661,14 @@ createApp({
         this.showStopConfirm = true;
       } else {
         this.modeAActive = false;
+      }
+    },
+    cancelStopConfirm() {
+      this.showStopConfirm = false;
+      if (this.currentTicket) {
+        this.modeAActive = true;
+        document.body.classList.add('mode-a-active');
+        this.startCountdown(this.currentTicket.deadline_time);
       }
     },
     isDeadlinePassed(deadlineStr) {
