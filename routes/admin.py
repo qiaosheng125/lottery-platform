@@ -361,6 +361,10 @@ def api_files_list():
 
     total = len(all_files)
     pages = (total + per_page - 1) // per_page if total else 0
+    if pages > 0:
+        page = min(page, pages)
+    else:
+        page = 1
     start = (page - 1) * per_page
     items = all_files[start:start + per_page]
 

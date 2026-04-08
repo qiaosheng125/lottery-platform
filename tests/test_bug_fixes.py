@@ -6266,6 +6266,37 @@ def test_admin_upload_template_retries_non_done_items():
     assert "i.message = '';" in content
 
 
+def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
+    with app.app_context():
+        admin = User(username="admin_file_page_clamp", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        for i in range(3):
+            db.session.add(
+                UploadedFile(
+                    original_filename=f"page-clamp-{i}.txt",
+                    stored_filename=f"page-clamp-{i}.txt",
+                    uploaded_by=admin.id,
+                    total_tickets=1,
+                    pending_count=1,
+                    assigned_count=0,
+                    completed_count=0,
+                    uploaded_at=beijing_now(),
+                )
+            )
+        db.session.commit()
+
+    resp = login(client, "admin_file_page_clamp", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files?page=3&per_page=2")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["page"] == 2
+    assert len(data["files"]) == 1
+
+
 def test_admin_winning_template_handles_list_and_detail_load_failures():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")
