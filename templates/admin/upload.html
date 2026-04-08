@@ -59,12 +59,12 @@
           <thead class="table-dark">
             <tr>
               <th>文件名</th><th>类型</th><th>倍数</th><th>截止</th><th>编号</th>
-              <th>总张</th><th>待出</th><th>已完成</th><th>状态</th><th>上传时间</th><th>操作</th>
+              <th>总张</th><th>待出</th><th>处理中</th><th>已完成</th><th>状态</th><th>上传时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="11" class="text-center py-3">加载中...</td></tr>
-            <tr v-else-if="files.length === 0"><td colspan="11" class="text-center py-3 text-muted">暂无文件</td></tr>
+            <tr v-if="loading"><td colspan="12" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="files.length === 0"><td colspan="12" class="text-center py-3 text-muted">暂无文件</td></tr>
             <tr v-for="f in files" :key="f.id">
               <td class="text-truncate" style="max-width:200px" :title="f.original_filename">
                 <a href="#" @click.prevent="viewDetail(f.id)">{{ f.original_filename }}</a>
@@ -75,6 +75,7 @@
               <td>{{ f.detail_period }}</td>
               <td>{{ f.total_tickets }}</td>
               <td><span class="badge bg-primary">{{ f.pending_count }}</span></td>
+              <td><span class="badge bg-warning text-dark">{{ f.assigned_count }}</span></td>
               <td><span class="badge bg-success">{{ f.completed_count }}</span></td>
               <td>
                 <span class="badge" :class="fileStatusClass(f)">{{ fileStatusLabel(f) }}</span>

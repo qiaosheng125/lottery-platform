@@ -6102,6 +6102,13 @@ def test_admin_upload_template_loads_all_detail_pages():
     assert "showToast(e.message || '撤回失败，请稍后重试', 'danger');" in content
 
 
+def test_admin_upload_template_shows_assigned_count_column():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "<th>处理中</th>" in content
+    assert "{{ f.assigned_count }}" in content
+
+
 def test_admin_upload_template_accepts_uppercase_txt_files():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
