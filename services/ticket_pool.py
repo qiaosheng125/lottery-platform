@@ -230,7 +230,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 if not ticket:
                     continue
 
-                if ticket.deadline_time and ticket.deadline_time < now:
+                if ticket.deadline_time and ticket.deadline_time <= now:
                     db.session.execute(
                         text("UPDATE lottery_tickets SET status='expired' WHERE id=:id"),
                         {'id': ticket_id}
