@@ -187,12 +187,14 @@ createApp({
       return { active: '活跃', revoked: '已撤回', expired: '已过期', exhausted: '已出完' }[s] || s;
     },
     fileStatusClass(f) {
+      if (f.status === 'active' && (f.assigned_count || 0) === 0 && (f.pending_count || 0) > 0) return 'bg-primary';
       if (f.status === 'revoked') return 'bg-danger';
       if (f.status === 'exhausted') return 'bg-success';
       if (f.status === 'expired') return 'bg-secondary';
-      return 'bg-primary';
+      return 'bg-warning text-dark';
     },
     fileStatusLabel(f) {
+      if (f.status === 'active' && (f.assigned_count || 0) === 0 && (f.pending_count || 0) > 0) return '待处理';
       if (f.status === 'revoked') return '已撤回';
       if (f.status === 'exhausted') return '已完成';
       if (f.status === 'expired') return '已过期';

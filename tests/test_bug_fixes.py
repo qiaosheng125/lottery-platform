@@ -6208,6 +6208,14 @@ def test_admin_upload_template_shows_assigned_count_column():
     assert "{{ f.assigned_count }}" in content
 
 
+def test_admin_upload_template_distinguishes_pending_files_from_in_progress_files():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "if (f.status === 'active' && (f.assigned_count || 0) === 0 && (f.pending_count || 0) > 0) return 'bg-primary';" in content
+    assert "if (f.status === 'active' && (f.assigned_count || 0) === 0 && (f.pending_count || 0) > 0) return '待处理';" in content
+    assert "return '处理中';" in content
+
+
 def test_admin_upload_template_shows_assigned_device_id_in_detail():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
