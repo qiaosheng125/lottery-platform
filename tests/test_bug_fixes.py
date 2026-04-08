@@ -6295,6 +6295,13 @@ def test_admin_upload_template_syncs_page_with_server_response():
     assert "this.totalPages = data.pages || 1;" in content
 
 
+def test_admin_upload_template_resets_to_first_page_after_successful_mutations():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert content.count("this.page = 1;") >= 2
+    assert "if (data.success) {\n          this.page = 1;\n          this.loadFiles();\n        }" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)

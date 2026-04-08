@@ -235,6 +235,7 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '上传失败');
         }
+        this.page = 1;
         this.loadFiles();
         // 上传完成后自动清空队列（只清掉已成功的，失败的保留方便重试）
         const hasError = this.uploadQueue.some(i => i.status === 'error');
@@ -263,7 +264,10 @@ createApp({
           throw new Error(data.error || data.message || '撤回失败');
         }
         showToast(data.message || (data.success ? '撤回成功' : '撤回失败'), data.success ? 'success' : 'danger');
-        if (data.success) this.loadFiles();
+        if (data.success) {
+          this.page = 1;
+          this.loadFiles();
+        }
       } catch (e) {
         showToast(e.message || '撤回失败，请稍后重试', 'danger');
       }
