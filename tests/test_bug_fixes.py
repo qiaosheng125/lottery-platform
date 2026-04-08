@@ -4564,6 +4564,18 @@ def test_admin_users_template_handles_update_failures():
     assert "await this.loadUsers();" in content
 
 
+def test_admin_users_template_checks_http_status_for_mutations():
+    users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
+    content = users_template.read_text(encoding="utf-8")
+    assert content.count("if (!res.ok || data.success === false) {") >= 5
+    assert "throw new Error(data.error || '创建失败');" in content
+    assert "throw new Error(data.error || '更新失败');" in content
+    assert "throw new Error(data.error || '操作失败');" in content
+    assert "throw new Error(data.error || '删除失败');" in content
+    assert "showToast('已强制下线', 'success');" in content
+    assert "showToast('密码已更新', 'success');" in content
+
+
 def test_winning_presign_uses_local_upload_api_when_oss_disabled(app):
     with app.app_context():
         from services.oss_service import generate_presign_url
@@ -6861,10 +6873,10 @@ def test_admin_users_template_handles_initial_load_failures():
 def test_admin_users_template_handles_action_network_failures():
     users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
     content = users_template.read_text(encoding="utf-8")
-    assert "this.createError = '网络异常，请稍后重试';" in content
-    assert "showToast('更新失败，请稍后重试', 'danger');" in content
-    assert "showToast('操作失败，请稍后重试', 'danger');" in content
-    assert "showToast('删除失败，请稍后重试', 'danger');" in content
+    assert "this.createError = e.message || '网络异常，请稍后重试';" in content
+    assert "showToast(e.message || '更新失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '操作失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '删除失败，请稍后重试', 'danger');" in content
 
 
 def test_admin_upload_template_handles_file_list_failures():

@@ -266,24 +266,23 @@ createApp({
           body: JSON.stringify(this.newUser),
         });
         const data = await res.json();
-        if (data.success) {
-          this.showCreate = false;
-          this.newUser = {
-            username: '',
-            password: '',
-            client_mode: 'mode_a',
-            max_devices: 1,
-            max_processing_b_mode: null,
-            daily_ticket_limit: null,
-            blocked_lottery_types: [],
-          };
-          this.loadUsers();
-          showToast('用户创建成功', 'success');
-        } else {
-          this.createError = data.error;
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '创建失败');
         }
+        this.showCreate = false;
+        this.newUser = {
+          username: '',
+          password: '',
+          client_mode: 'mode_a',
+          max_devices: 1,
+          max_processing_b_mode: null,
+          daily_ticket_limit: null,
+          blocked_lottery_types: [],
+        };
+        this.loadUsers();
+        showToast('用户创建成功', 'success');
       } catch (e) {
-        this.createError = '网络异常，请稍后重试';
+        this.createError = e.message || '网络异常，请稍后重试';
       }
     },
     openBlockedTypesModal(u) {
@@ -300,15 +299,14 @@ createApp({
           body: JSON.stringify({ blocked_lottery_types: this.editingBlockedTypes }),
         });
         const data = await res.json();
-        if (data.success) {
-          this.editingUser.blocked_lottery_types = this.editingBlockedTypes;
-          this.showBlockedTypes = false;
-          showToast('禁止彩种已更新', 'success');
-        } else {
-          showToast(data.error || '更新失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '更新失败');
         }
+        this.editingUser.blocked_lottery_types = this.editingBlockedTypes;
+        this.showBlockedTypes = false;
+        showToast('禁止彩种已更新', 'success');
       } catch (e) {
-        showToast('更新失败，请稍后重试', 'danger');
+        showToast(e.message || '更新失败，请稍后重试', 'danger');
       }
     },
     async forceLogout(u) {
@@ -316,9 +314,12 @@ createApp({
       try {
         const res = await fetch(`/admin/api/users/${u.id}/force-logout`, { method: 'POST' });
         const data = await res.json();
-        showToast(data.success ? '已强制下线' : (data.error || '操作失败'), data.success ? 'success' : 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '操作失败');
+        }
+        showToast('已强制下线', 'success');
       } catch (e) {
-        showToast('操作失败，请稍后重试', 'danger');
+        showToast(e.message || '操作失败，请稍后重试', 'danger');
       }
     },
     async resetPassword(u) {
@@ -334,9 +335,12 @@ createApp({
           body: JSON.stringify({ password: pwd }),
         });
         const data = await res.json();
-        showToast(data.success ? '密码已更新' : (data.error || '更新失败'), data.success ? 'success' : 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '更新失败');
+        }
+        showToast('密码已更新', 'success');
       } catch (e) {
-        showToast('更新失败，请稍后重试', 'danger');
+        showToast(e.message || '更新失败，请稍后重试', 'danger');
       }
     },
     async deleteUser(u) {
@@ -344,14 +348,13 @@ createApp({
       try {
         const res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
         const data = await res.json();
-        if (data.success) {
-          this.loadUsers();
-          showToast('用户已删除', 'success');
-        } else {
-          showToast(data.error || '删除失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '删除失败');
         }
+        this.loadUsers();
+        showToast('用户已删除', 'success');
       } catch (e) {
-        showToast('删除失败，请稍后重试', 'danger');
+        showToast(e.message || '删除失败，请稍后重试', 'danger');
       }
     },
   }
