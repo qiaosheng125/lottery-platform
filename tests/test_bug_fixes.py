@@ -582,6 +582,7 @@ def test_process_uploaded_file_rejects_unknown_text_encoding_cleanly(app, monkey
 
 def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app, monkeypatch):
     from services import file_parser
+    from services.file_parser import resolve_uploaded_txt_path
     first_now = datetime(2026, 4, 7, 13, 0, 0)
     second_now = datetime(2026, 4, 7, 13, 5, 0)
     calls = {"count": 0}
@@ -603,7 +604,7 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
             "identifier": "AA",
             "internal_code": "P7",
             "lottery_type": "胜平负",
-            "multiplier": 3,
+            "multiplier": 2,
             "declared_amount": 4.0,
             "declared_count": 1,
             "deadline_hhmm": "23.55",
@@ -627,7 +628,13 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
         assert second_result["success"] is False
         assert second_result["message"].startswith("当前业务日内已上传同名文件")
 
+        uploaded = db.session.get(UploadedFile, first_result["file_id"])
+        stored_path = resolve_uploaded_txt_path(uploaded.stored_filename, app.config["UPLOAD_FOLDER"])
+
         assert UploadedFile.query.count() == 1
+        assert os.path.exists(stored_path)
+        with open(stored_path, "r", encoding="utf-8") as f:
+            assert f.read() == "SPF|1=3|1*1|2\n"
 
 
 def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_business_day(app, monkeypatch):
@@ -653,7 +660,7 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
             "identifier": "AA",
             "internal_code": "P7",
             "lottery_type": "胜平负",
-            "multiplier": 3,
+            "multiplier": 2,
             "declared_amount": 4.0,
             "declared_count": 1,
             "deadline_hhmm": "23.55",
@@ -843,8 +850,8 @@ def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
                 "identifier": "AA",
                 "internal_code": "P7",
                 "lottery_type": "胜平负",
-                "multiplier": 3,
-                "declared_amount": 4.0,
+                "multiplier": 2,
+                "declared_amount": 2.0,
                 "declared_count": 1,
                 "deadline_hhmm": "23.55",
                 "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
@@ -3877,17 +3884,17 @@ def test_process_uploaded_file_stores_txt_under_business_date_folder(app, monkey
     monkeypatch.setattr(
         file_parser,
         "parse_filename",
-        lambda filename, upload_dt=None: {
-            "identifier": "AA",
-            "internal_code": "P7",
-            "lottery_type": "胜平负",
-            "multiplier": 3,
-            "declared_amount": 4.0,
-            "declared_count": 1,
-            "deadline_hhmm": "23.55",
-            "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
-            "detail_period": "26034",
-        },
+            lambda filename, upload_dt=None: {
+                "identifier": "AA",
+                "internal_code": "P7",
+                "lottery_type": "胜平负",
+                "multiplier": 2,
+                "declared_amount": 2.0,
+                "declared_count": 1,
+                "deadline_hhmm": "23.55",
+                "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
+                "detail_period": "26034",
+            },
     )
 
     with app.app_context():
@@ -4345,7 +4352,7 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
 
         assert result["success"] is True
 
-        refreshed_file = UploadedFile.query.get(uploaded.id)
+        refreshed_file = db.session.get(UploadedFile, uploaded.id)
         statuses = {
             ticket.status
             for ticket in LotteryTicket.query.filter_by(source_file_id=uploaded.id).all()

@@ -103,13 +103,10 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     upload_dt = beijing_now()
     stored_filename = build_uploaded_txt_relative_path(filename, upload_dt)
     file_path = os.path.join(upload_folder, stored_filename)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    file_storage.save(file_path)
 
     # Parse filename
     parsed_meta = parse_filename(filename, upload_dt)
     if not parsed_meta:
-        os.remove(file_path)
         return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
 
     business_start, business_end = get_business_window(get_business_date(upload_dt))
@@ -119,13 +116,15 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         UploadedFile.uploaded_at < business_end,
     ).first()
     if existing_same_name:
-        os.remove(file_path)
         return {
             'success': False,
             'message': f'当前业务日内已上传同名文件: {filename}',
             'file_id': None,
             'filename': filename,
         }
+
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    file_storage.save(file_path)
 
     # Create UploadedFile record
     uploaded_file = UploadedFile(
@@ -340,7 +339,7 @@ def revoke_file(file_id: int, admin_id: int) -> dict:
     from extensions import redis_client
     from services.notify_service import notify_all
 
-    uploaded_file = UploadedFile.query.get(file_id)
+    uploaded_file = db.session.get(UploadedFile, file_id)
     if not uploaded_file:
         return {'success': False, 'message': '文件不存在'}
     if uploaded_file.status == 'revoked':
