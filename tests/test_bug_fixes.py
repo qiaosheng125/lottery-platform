@@ -6410,6 +6410,9 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     assert "this._onPoolUpdated = () => {" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
+    assert "this._onPoolUpdated = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolDisabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolEnabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
 
 
 def test_client_dashboard_handles_mode_b_preview_failure():

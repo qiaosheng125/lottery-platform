@@ -466,18 +466,24 @@ createApp({
     this._onPoolUpdated = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+      } else {
+        this.loadCurrentModeATicket();
       }
       this.loadStats();
     };
     this._onPoolDisabled = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+      } else {
+        this.loadCurrentModeATicket();
       }
       this.loadStats();
     };
     this._onPoolEnabled = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+      } else {
+        this.loadCurrentModeATicket();
       }
       this.loadStats();
     };
