@@ -4350,6 +4350,7 @@ def test_admin_files_list_rejects_invalid_page_params(app, client):
 
 def test_uploaded_file_to_dict_uses_derived_status(app):
     with app.app_context():
+        now = beijing_now()
         completed_file = UploadedFile(
             display_id="2026/04/07-01",
             original_filename="done.txt",
@@ -4359,7 +4360,7 @@ def test_uploaded_file_to_dict_uses_derived_status(app):
             completed_count=5,
             pending_count=0,
             assigned_count=0,
-            deadline_time=beijing_now() + timedelta(hours=1),
+            deadline_time=now + timedelta(hours=1),
         )
         expired_file = UploadedFile(
             display_id="2026/04/07-02",
@@ -4370,13 +4371,25 @@ def test_uploaded_file_to_dict_uses_derived_status(app):
             completed_count=2,
             pending_count=0,
             assigned_count=0,
-            deadline_time=beijing_now() - timedelta(hours=1),
+            deadline_time=now - timedelta(hours=1),
         )
-        db.session.add_all([completed_file, expired_file])
+        exact_deadline_file = UploadedFile(
+            display_id="2026/04/07-03",
+            original_filename="expired-exact.txt",
+            stored_filename="txt/2026-04-07/expired-exact.txt",
+            uploaded_by=1,
+            total_tickets=5,
+            completed_count=2,
+            pending_count=0,
+            assigned_count=0,
+            deadline_time=now,
+        )
+        db.session.add_all([completed_file, expired_file, exact_deadline_file])
         db.session.commit()
 
         assert completed_file.to_dict()["status"] == "exhausted"
         assert expired_file.to_dict()["status"] == "expired"
+        assert exact_deadline_file.to_dict()["status"] == "expired"
 
 
 def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):

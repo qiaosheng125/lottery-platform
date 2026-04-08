@@ -51,7 +51,7 @@ class UploadedFile(db.Model):
             return 'revoked'
         if self.total_tickets > 0 and self.completed_count >= self.total_tickets:
             return 'exhausted'
-        if self.pending_count == 0 and self.assigned_count == 0 and self.deadline_time and self.deadline_time < now:
+        if self.pending_count == 0 and self.assigned_count == 0 and self.deadline_time and self.deadline_time <= now:
             return 'expired'
         return 'active'
 
