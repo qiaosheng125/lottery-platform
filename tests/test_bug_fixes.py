@@ -6325,7 +6325,8 @@ def test_admin_upload_template_clears_stale_date_filter_and_reloads():
     content = upload_template.read_text(encoding="utf-8")
     assert "if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {" in content
     assert "this.filterDate = '';" in content
-    assert "return this.loadFiles();" in content
+    assert "await this.loadFiles();" in content
+    assert "return;" in content
 
 
 def test_admin_upload_template_resets_to_first_page_after_successful_mutations():

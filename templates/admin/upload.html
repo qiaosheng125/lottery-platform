@@ -175,7 +175,8 @@ createApp({
           if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {
             this.filterDate = '';
             this.page = 1;
-            return this.loadFiles();
+            await this.loadFiles();
+            return;
           }
         }
       } catch (e) {
