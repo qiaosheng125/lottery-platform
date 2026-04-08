@@ -109,6 +109,7 @@ def dashboard():
 
 
 @admin_bp.route('/api/dashboard-data')
+@login_required_json
 @login_required
 @admin_required
 def dashboard_data():
@@ -559,6 +560,7 @@ def users_page():
 
 
 @admin_bp.route('/api/users')
+@login_required_json
 @login_required
 @admin_required
 def api_users_list():
@@ -567,6 +569,7 @@ def api_users_list():
 
 
 @admin_bp.route('/api/lottery-types')
+@login_required_json
 @login_required
 @admin_required
 def api_lottery_types():
@@ -575,6 +578,7 @@ def api_lottery_types():
 
 
 @admin_bp.route('/api/users', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def api_create_user():
@@ -801,6 +805,7 @@ def winning_page():
 
 
 @admin_bp.route('/api/winning/filter-options')
+@login_required_json
 @login_required
 @admin_required
 def api_winning_filter_options():
@@ -821,6 +826,7 @@ def api_winning_filter_options():
 
 
 @admin_bp.route('/api/winning')
+@login_required_json
 @login_required
 @admin_required
 def api_winning_list():
@@ -1068,6 +1074,7 @@ def api_winning_export():
 
 
 @admin_bp.route('/api/winning/<int:ticket_id>/presign', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def admin_winning_presign(ticket_id):
@@ -1086,6 +1093,7 @@ def admin_winning_presign(ticket_id):
 
 
 @admin_bp.route('/api/winning/record', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def admin_winning_record():
@@ -1130,6 +1138,7 @@ def admin_winning_record():
 
 
 @admin_bp.route('/api/winning/<int:ticket_id>/upload-image', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def admin_winning_upload_image(ticket_id):
@@ -1262,6 +1271,7 @@ def upload_match_result():
 
 
 @admin_bp.route('/api/match-results')
+@login_required_json
 @login_required
 @admin_required
 def api_match_results():
@@ -1293,6 +1303,7 @@ def api_match_results():
 
 
 @admin_bp.route('/api/match-results/<int:result_id>/detail')
+@login_required_json
 @login_required
 @admin_required
 def api_match_result_detail(result_id):
@@ -1302,6 +1313,7 @@ def api_match_result_detail(result_id):
 
 
 @admin_bp.route('/api/match-results/<int:result_id>/recalc', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def api_recalc(result_id):
@@ -1339,6 +1351,7 @@ def settings_page():
 
 
 @admin_bp.route('/api/settings', methods=['GET'])
+@login_required_json
 @login_required
 @admin_required
 def api_get_settings():
@@ -1349,6 +1362,7 @@ def api_get_settings():
 
 
 @admin_bp.route('/api/settings', methods=['PUT'])
+@login_required_json
 @login_required
 @admin_required
 def api_update_settings():

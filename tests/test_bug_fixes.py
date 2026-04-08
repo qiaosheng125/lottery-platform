@@ -382,6 +382,33 @@ def test_admin_user_management_routes_return_json_404_for_missing_user(app, clie
         assert "用户不存在" in data["error"]
 
 
+def test_admin_core_json_routes_require_login_json_response(app, client):
+    routes = [
+        ("get", "/admin/api/dashboard-data"),
+        ("get", "/admin/api/users"),
+        ("get", "/admin/api/lottery-types"),
+        ("post", "/admin/api/users"),
+        ("get", "/admin/api/winning/filter-options"),
+        ("get", "/admin/api/winning"),
+        ("post", "/admin/api/winning/1/presign"),
+        ("post", "/admin/api/winning/record"),
+        ("post", "/admin/api/winning/1/upload-image"),
+        ("get", "/admin/api/match-results"),
+        ("get", "/admin/api/match-results/1/detail"),
+        ("post", "/admin/api/match-results/1/recalc"),
+        ("get", "/admin/api/settings"),
+        ("put", "/admin/api/settings"),
+    ]
+
+    for method, path in routes:
+        resp = getattr(client, method)(path)
+        assert resp.status_code == 401, path
+        assert resp.is_json is True, path
+        data = resp.get_json()
+        assert data["success"] is False, path
+        assert "请先登录" in data["error"], path
+
+
 def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
     pushed = []
 
