@@ -382,7 +382,7 @@ def api_files_list():
 @login_required
 @admin_required
 def file_detail(file_id):
-    uploaded_file = UploadedFile.query.get(file_id)
+    uploaded_file = db.session.get(UploadedFile, file_id)
     if not uploaded_file:
         return jsonify({'success': False, 'error': '文件不存在'}), 404
     page = _parse_int_arg(request.args.get('page', 1), minimum=1)
@@ -448,7 +448,7 @@ def export_tickets():
     writer.writerow(['票ID', '行号', '原始内容', '彩种', '倍投', '截止时间', '期号',
                      '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件'])
     for t in tickets_q:
-        f = UF.query.get(t.source_file_id)
+        f = db.session.get(UF, t.source_file_id)
         writer.writerow([
             t.id, t.line_number, t.raw_content, t.lottery_type, t.multiplier,
             t.deadline_time, t.detail_period, t.ticket_amount, t.status,
@@ -499,9 +499,11 @@ def export_tickets_by_date():
             wb.save(buf)
             buf.seek(0)
             from flask import Response
+            empty_filename = f"{date_str}_无数据投注内容详情.xlsx"
+            empty_filename_encoded = quote(empty_filename, encoding='utf-8')
             return Response(buf.read(),
                             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            headers={'Content-Disposition': 'attachment; filename="empty.xlsx"'})
+                            headers={'Content-Disposition': f"attachment; filename*=UTF-8''{empty_filename_encoded}"})
         q = q.filter(LotteryTicket.source_file_id.in_(file_ids))
 
     tickets = q.order_by(LotteryTicket.source_file_id, LotteryTicket.line_number).all()

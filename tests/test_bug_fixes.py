@@ -4217,6 +4217,20 @@ def test_admin_export_tickets_by_date_includes_device_id_column():
     assert "t.assigned_device_id or ''" in content
 
 
+def test_admin_export_tickets_by_date_empty_uses_selected_business_date_filename():
+    admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
+    content = admin_route.read_text(encoding="utf-8")
+    assert 'empty_filename = f"{date_str}_无数据投注内容详情.xlsx"' in content
+    assert "filename*=UTF-8''{empty_filename_encoded}" in content
+
+
+def test_admin_routes_avoid_legacy_query_get_for_file_reads():
+    admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
+    content = admin_route.read_text(encoding="utf-8")
+    assert "db.session.get(UploadedFile, file_id)" in content
+    assert "db.session.get(UF, t.source_file_id)" in content
+
+
 def test_admin_files_list_rejects_invalid_page_params(app, client):
     with app.app_context():
         admin = User(username="admin_invalid_page_user", is_admin=True)
