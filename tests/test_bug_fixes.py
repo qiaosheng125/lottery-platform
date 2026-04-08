@@ -6252,6 +6252,12 @@ def test_admin_upload_template_handles_http_upload_failures():
     assert "throw new Error(data.error || data.message || '撤回失败');" in content
 
 
+def test_admin_upload_template_maps_per_file_results_before_batch_failure_throw():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert content.index("if (data.results) {") < content.index("throw new Error(data.error || '上传失败');")
+
+
 def test_admin_winning_template_handles_list_and_detail_load_failures():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")

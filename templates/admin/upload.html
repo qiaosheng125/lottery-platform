@@ -218,9 +218,6 @@ createApp({
       try {
         const res = await fetch('/admin/files/upload', { method: 'POST', body: fd });
         const data = await res.json();
-        if (!res.ok || data.success === false) {
-          throw new Error(data.error || '上传失败');
-        }
         if (data.results) {
           data.results.forEach((r, i) => {
             const item = this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));
@@ -229,6 +226,9 @@ createApp({
               item.message = r.message || r.error || '';
             }
           });
+        }
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '上传失败');
         }
         this.loadFiles();
         // 上传完成后自动清空队列（只清掉已成功的，失败的保留方便重试）
