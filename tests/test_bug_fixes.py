@@ -6006,6 +6006,14 @@ def test_client_dashboard_fully_resets_mode_a_state_when_current_ticket_missing(
     assert "if (!res.ok || data.success === false || !data.ticket) {\n          this.resetModeAState();" in content
 
 
+def test_client_dashboard_stop_reanchors_from_history_to_latest_ticket():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "if (this.historyOffset > 0 && this.ticketHistory.length > 0) {" in content
+    assert "this.currentTicket = this.ticketHistory[0];" in content
+    assert "this.startCountdown(this.currentTicket.deadline_time);" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

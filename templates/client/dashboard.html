@@ -645,6 +645,11 @@ createApp({
       this.startCountdown(this.currentTicket.deadline_time);
     },
     confirmStop() {
+      if (this.historyOffset > 0 && this.ticketHistory.length > 0) {
+        this.historyOffset = 0;
+        this.currentTicket = this.ticketHistory[0];
+        this.startCountdown(this.currentTicket.deadline_time);
+      }
       if (this.currentTicket) {
         this.showStopConfirm = true;
       } else {
