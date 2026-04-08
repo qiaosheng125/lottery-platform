@@ -484,11 +484,7 @@ createApp({
     this._onFileRevoked = (event) => {
       const fileId = event.detail && event.detail.file_id;
       if (fileId && this.currentTicket && this.currentTicket.source_file_id === fileId) {
-        this.currentTicket = null;
-        this.modeAActive = false;
-        this.historyOffset = 0;
-        clearInterval(this.countdownTimer);
-        document.body.classList.remove('mode-a-active');
+        this.resetModeAState();
       }
       if (this.isModeB) {
         this.loadProcessingBatches();
@@ -512,16 +508,25 @@ createApp({
     }, 30000);
   },
   methods: {
+    resetModeAState() {
+      this.currentTicket = null;
+      this.modeAActive = false;
+      this.ticketHistory = [];
+      this.historyOffset = 0;
+      this.showStopConfirm = false;
+      clearInterval(this.countdownTimer);
+      clearInterval(this.cooldownTimer);
+      this.cooldownTimer = null;
+      this.nextCooldownUntil = 0;
+      this.nextCooldownSec = 0;
+      document.body.classList.remove('mode-a-active');
+    },
     async loadCurrentModeATicket() {
       try {
         const res = await fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
         if (!res.ok || data.success === false || !data.ticket) {
-          this.currentTicket = null;
-          this.modeAActive = false;
-          this.ticketHistory = [];
-          this.historyOffset = 0;
-          clearInterval(this.countdownTimer);
+          this.resetModeAState();
           return;
         }
         this.modeAActive = true;
@@ -530,10 +535,7 @@ createApp({
         this.historyOffset = 0;
         this.startCountdown(data.ticket.deadline_time);
       } catch (e) {
-        this.currentTicket = null;
-        this.modeAActive = false;
-        this.ticketHistory = [];
-        this.historyOffset = 0;
+        this.resetModeAState();
       }
     },
     async loadStats() {

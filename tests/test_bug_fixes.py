@@ -5996,6 +5996,16 @@ def test_client_dashboard_restores_mode_a_current_ticket_on_mount():
     assert "this.modeAActive = true;" in content
 
 
+def test_client_dashboard_fully_resets_mode_a_state_when_current_ticket_missing():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "resetModeAState()" in content
+    assert "this.showStopConfirm = false;" in content
+    assert "this.nextCooldownUntil = 0;" in content
+    assert "document.body.classList.remove('mode-a-active');" in content
+    assert "if (!res.ok || data.success === false || !data.ticket) {\n          this.resetModeAState();" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
