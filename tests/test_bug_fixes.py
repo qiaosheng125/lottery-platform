@@ -336,6 +336,42 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
         assert refreshed_user.can_receive is True
 
 
+def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
+    pushed = []
+
+    def fake_notify_pool_update(payload):
+        pushed.append(payload)
+
+    monkeypatch.setattr("services.notify_service.notify_pool_update", fake_notify_pool_update)
+
+    with app.app_context():
+        admin = User(username="admin_toggle_receive_pool_refresh", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("toggle_receive_target", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="TOGGLE-RECEIVE-TICKET-1",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_toggle_receive_pool_refresh", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}/can-receive", json={"can_receive": False})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["can_receive"] is False
+    assert len(pushed) == 1
+    assert "total_pending" in pushed[0]
+
+
 def test_admin_update_settings_parses_boolean_flags(app, client):
     with app.app_context():
         admin = User(username="admin_settings_bool_flags", is_admin=True)
@@ -419,6 +455,44 @@ def test_admin_update_settings_pushes_pool_refresh_when_mode_switches(app, clien
     assert resp.status_code == 200
 
     assert len(pushed) == 2
+    assert all("total_pending" in payload for payload in pushed)
+
+
+def test_admin_update_user_pushes_pool_refresh_for_receive_and_filter_changes(app, client, monkeypatch):
+    pushed = []
+
+    def fake_notify_pool_update(payload):
+        pushed.append(payload)
+
+    monkeypatch.setattr("services.notify_service.notify_pool_update", fake_notify_pool_update)
+
+    with app.app_context():
+        admin = User(username="admin_update_user_pool_refresh", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("pool_refresh_target", "secret123", client_mode="mode_a")
+        db.session.add(admin)
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="POOL-REFRESH-TICKET-1",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_update_user_pool_refresh", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}", json={"can_receive": False})
+    assert resp.status_code == 200
+    resp = client.put(f"/admin/api/users/{user_id}", json={"blocked_lottery_types": ["胜平负"]})
+    assert resp.status_code == 200
+    resp = client.put(f"/admin/api/users/{user_id}", json={"client_mode": "mode_b"})
+    assert resp.status_code == 200
+
+    assert len(pushed) == 3
     assert all("total_pending" in payload for payload in pushed)
 
 

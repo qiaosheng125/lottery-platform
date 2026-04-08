@@ -788,7 +788,8 @@
 - B 模式处理中批次如果被后台定时过期任务改成 `expired`，前端现在也会在收到 `pool_updated / pool_disabled / pool_enabled` 时同步重拉处理中批次，不再让已过期批次长期残留在列表里
 - 全局关闭 A 模式后，A 用户首页和通用票池状态现在也会同步归零，不再继续展示“还有票可接”、等到真正点“下一张”才报“模式A已关闭”
 - 管理员切换 `mode_a_enabled / mode_b_enabled` 时，现在也会像切票池一样主动推送一次 `pool_updated`，客户端不再要等下一轮轮询才刷新模式可用状态
-- `213 passed`
+- 管理员修改用户 `can_receive / client_mode / blocked_lottery_types`，以及单独切换“可接单”时，现在也会主动推送一次 `pool_updated`，客户端不再继续停留在旧的可接状态或旧彩种过滤口径
+- `215 passed`
 
 备注：
 

@@ -642,12 +642,14 @@ def api_update_user(user_id):
         return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
     data = request.get_json(silent=True) or {}
     was_active = user.is_active
+    should_refresh_pool_views = False
 
     if 'client_mode' in data:
         parsed_client_mode = _parse_client_mode(data['client_mode'])
         if parsed_client_mode is None:
             return jsonify({'success': False, 'error': '客户端模式必须是 mode_a 或 mode_b'}), 400
         user.client_mode = parsed_client_mode
+        should_refresh_pool_views = True
     if 'max_devices' in data:
         parsed_max_devices = _parse_int_arg(data['max_devices'], minimum=1)
         if parsed_max_devices is None:
@@ -679,6 +681,7 @@ def api_update_user(user_id):
         if parsed_can_receive is None:
             return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
         user.can_receive = parsed_can_receive
+        should_refresh_pool_views = True
     if 'password' in data and data['password']:
         if len(data['password']) < 6:
             return jsonify({'success': False, 'error': '密码至少需要 6 位'}), 400
@@ -690,6 +693,7 @@ def api_update_user(user_id):
         if isinstance(blocked_types, list) and not all(isinstance(t, str) for t in blocked_types):
             return jsonify({'success': False, 'error': '禁止彩种列表中的每项必须是字符串'}), 400
         user.set_blocked_lottery_types(blocked_types)
+        should_refresh_pool_views = True
 
     db.session.commit()
 
@@ -699,6 +703,13 @@ def api_update_user(user_id):
                      resource_type='user', resource_id=user_id,
                      details={'reason': '账号已被管理员禁用'})
         db.session.commit()
+    elif should_refresh_pool_views:
+        try:
+            from services.notify_service import notify_pool_update
+
+            notify_pool_update(get_pool_status())
+        except Exception:
+            current_app.logger.warning('推送用户配置更新后的票池刷新事件失败', exc_info=True)
 
     return jsonify({'success': True, 'user': user.to_dict()})
 
@@ -759,6 +770,12 @@ def api_toggle_can_receive(user_id):
         return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
     user.can_receive = parsed_can_receive
     db.session.commit()
+    try:
+        from services.notify_service import notify_pool_update
+
+        notify_pool_update(get_pool_status())
+    except Exception:
+        current_app.logger.warning('推送接单开关更新后的票池刷新事件失败', exc_info=True)
     return jsonify({'success': True, 'can_receive': user.can_receive})
 
 
