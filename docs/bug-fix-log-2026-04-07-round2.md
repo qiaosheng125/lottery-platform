@@ -794,7 +794,8 @@
 - 后台其余一批纯 JSON 管理接口（dashboard-data / users / lottery-types / winning / match-results / settings 等）现在未登录时也统一返回 JSON `401`，不再掉成 302/HTML
 - 后台赛果详情 / 重算这两条 JSON API 在赛果不存在时，现在也统一返回 JSON `404`，不再由 `get_or_404()` 掉成 HTML 404
 - 后台赛果上传接口 `/admin/match-results/upload` 现在未登录时也统一返回 JSON `401`，不再让中奖管理页上传文件时在登录失效后掉成 HTML
-- `226 passed`
+- 管理员专用“切换可接单”接口现在也会拦截管理员账号，和编辑/删除/强制下线接口保持一致，不再能误改管理员的接单状态
+- `228 passed`
 
 备注：
 

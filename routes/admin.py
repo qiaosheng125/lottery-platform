@@ -780,6 +780,8 @@ def api_toggle_can_receive(user_id):
     user = db.session.get(User, user_id)
     if not user:
         return jsonify({'success': False, 'error': '用户不存在'}), 404
+    if user.is_admin:
+        return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
     data = request.get_json(silent=True) or {}
     parsed_can_receive = _parse_bool_flag(data.get('can_receive', True))
     if parsed_can_receive is None:

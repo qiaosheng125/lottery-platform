@@ -336,6 +336,26 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
         assert refreshed_user.can_receive is True
 
 
+def test_admin_toggle_can_receive_rejects_admin_account(app, client):
+    with app.app_context():
+        admin = User(username="admin_toggle_target_admin", is_admin=True)
+        admin.set_password("secret123")
+        operator = User(username="admin_toggle_operator", is_admin=True)
+        operator.set_password("secret123")
+        db.session.add_all([admin, operator])
+        db.session.commit()
+        admin_id = admin.id
+
+    resp = client.post("/auth/login", json={"username": "admin_toggle_operator", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{admin_id}/can-receive", json={"can_receive": False})
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "不允许在此接口修改管理员账号" in data["error"]
+
+
 def test_admin_user_management_routes_require_login_json_response(app, client):
     resp = client.put("/admin/api/users/1", json={"can_receive": False})
     assert resp.status_code == 401
