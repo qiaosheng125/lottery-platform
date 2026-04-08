@@ -3685,7 +3685,7 @@ def test_expire_overdue_tickets_updates_file_counters(app):
 
         expire_overdue_tickets()
 
-        refreshed = UploadedFile.query.get(uploaded_file.id)
+        refreshed = db.session.get(UploadedFile, uploaded_file.id)
         statuses = {t.status for t in LotteryTicket.query.filter_by(source_file_id=uploaded_file.id).all()}
         assert statuses == {"expired"}
         assert refreshed.pending_count == 0
@@ -3789,6 +3789,46 @@ def test_expire_overdue_tickets_pushes_pool_update(app, monkeypatch):
         expire_overdue_tickets()
 
     assert pushed == [{"total_pending": 0, "by_type": [], "assigned": 0, "completed_today": 0}]
+
+
+def test_expire_overdue_tickets_expires_exact_deadline(app, monkeypatch):
+    from tasks.expire_tickets import expire_overdue_tickets
+
+    fixed_now = datetime(2026, 4, 7, 12, 0, 0)
+    monkeypatch.setattr("tasks.expire_tickets.beijing_now", lambda: fixed_now)
+
+    with app.app_context():
+        user = create_user("expire_exact_deadline_user", "secret123", client_mode="mode_a")
+        uploaded_file = UploadedFile(
+            display_id="2026/04/07-90",
+            original_filename="expired-exact-deadline.txt",
+            stored_filename="expired-exact-deadline.txt",
+            uploaded_by=user.id,
+            total_tickets=1,
+            pending_count=1,
+            assigned_count=0,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+        ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="PENDING-EXACT-DEADLINE",
+            status="pending",
+            deadline_time=fixed_now,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+        file_id = uploaded_file.id
+
+        expire_overdue_tickets()
+
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+        refreshed_file = db.session.get(UploadedFile, file_id)
+        assert refreshed_ticket.status == "expired"
+        assert refreshed_file.pending_count == 0
 
 
 def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):

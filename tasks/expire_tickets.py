@@ -41,7 +41,7 @@ def _sync_uploaded_file_counters(source_file_ids):
     }
 
     for file_id in source_file_ids:
-        uploaded_file = UploadedFile.query.get(file_id)
+        uploaded_file = db.session.get(UploadedFile, file_id)
         if not uploaded_file:
             continue
         counts = aggregated.get(file_id, {})
@@ -70,7 +70,7 @@ def expire_overdue_tickets():
                         SELECT DISTINCT source_file_id
                         FROM lottery_tickets
                         WHERE status IN ('pending', 'assigned')
-                          AND deadline_time < :now
+                          AND deadline_time <= :now
                           AND source_file_id IS NOT NULL
                     """),
                     {'now': now},
@@ -83,7 +83,7 @@ def expire_overdue_tickets():
                         SELECT id
                         FROM lottery_tickets
                         WHERE status = 'pending'
-                          AND deadline_time < :now
+                          AND deadline_time <= :now
                     """),
                     {'now': now},
                 ).fetchall()
@@ -93,7 +93,7 @@ def expire_overdue_tickets():
                     UPDATE lottery_tickets
                     SET status = 'expired'
                     WHERE status IN ('pending', 'assigned')
-                      AND deadline_time < :now
+                      AND deadline_time <= :now
                 """),
                 {'now': now},
             ).rowcount
@@ -102,7 +102,7 @@ def expire_overdue_tickets():
 
             tickets = LotteryTicket.query.filter(
                 LotteryTicket.status.in_(['pending', 'assigned']),
-                LotteryTicket.deadline_time < now,
+                LotteryTicket.deadline_time <= now,
             ).all()
             rows = len(tickets)
             for ticket in tickets:
