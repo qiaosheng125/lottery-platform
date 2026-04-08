@@ -6266,6 +6266,14 @@ def test_admin_upload_template_retries_non_done_items():
     assert "i.message = '';" in content
 
 
+def test_admin_upload_template_clears_stale_detail_rows_before_and_after_failed_load():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "async viewDetail(fileId) {" in content
+    assert content.count("this.detailTickets = [];") >= 2
+    assert "this.detailTickets = detailTickets;" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)

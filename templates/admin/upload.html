@@ -268,6 +268,7 @@ createApp({
       }
     },
     async viewDetail(fileId) {
+      this.detailTickets = [];
       try {
         const detailTickets = [];
         let page = 1;
@@ -287,6 +288,7 @@ createApp({
         this.detailTickets = detailTickets;
         new bootstrap.Modal(document.getElementById('detailModal')).show();
       } catch (e) {
+        this.detailTickets = [];
         showToast(e.message || '加载详情失败，请稍后重试', 'danger');
       }
     },
