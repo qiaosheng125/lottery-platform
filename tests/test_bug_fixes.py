@@ -6139,6 +6139,13 @@ def test_client_dashboard_reloads_processing_batches_after_confirm():
     assert "this.bPendingBatches.splice(index, 1);" not in content
 
 
+def test_client_dashboard_reloads_processing_batches_after_download():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert content.count("await this.loadProcessingBatches();") >= 2
+    assert "this.bPendingBatches.push({" not in content
+
+
 def test_client_dashboard_resets_matching_state_on_load_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

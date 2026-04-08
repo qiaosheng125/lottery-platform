@@ -827,7 +827,6 @@ createApp({
           showToast('暂无可下载文件', 'warning');
           return;
         }
-        const downloadTime = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         for (const file of data.files) {
           const blob = new Blob([file.content], { type: 'text/plain' });
           const url = URL.createObjectURL(blob);
@@ -838,15 +837,8 @@ createApp({
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
-          this.bPendingBatches.push({
-            filename: file.filename,
-            ticket_ids: file.ticket_ids,
-            count: file.count,
-            amount: file.amount,
-            downloaded_at: downloadTime,
-            deadline_time: file.deadline_time,
-          });
         }
+        await this.loadProcessingBatches();
         if (data.adjustment_message) {
           showToast(data.adjustment_message, 'info');
         }
