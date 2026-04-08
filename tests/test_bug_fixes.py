@@ -5992,6 +5992,7 @@ def test_client_dashboard_restores_mode_a_current_ticket_on_mount():
     content = dashboard_template.read_text(encoding="utf-8")
     assert "async loadCurrentModeATicket()" in content
     assert "fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`)" in content
+    assert "document.body.classList.add('mode-a-active');" in content
     assert "this.ticketHistory = [data.ticket];" in content
     assert "this.modeAActive = true;" in content
 

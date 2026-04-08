@@ -530,6 +530,7 @@ createApp({
           return;
         }
         this.modeAActive = true;
+        document.body.classList.add('mode-a-active');
         this.currentTicket = data.ticket;
         this.ticketHistory = [data.ticket];
         this.historyOffset = 0;
