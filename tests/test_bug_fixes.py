@@ -6320,6 +6320,14 @@ def test_admin_upload_template_syncs_page_with_server_response():
     assert "this.totalPages = data.pages || 1;" in content
 
 
+def test_admin_upload_template_clears_stale_date_filter_and_reloads():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {" in content
+    assert "this.filterDate = '';" in content
+    assert "return this.loadFiles();" in content
+
+
 def test_admin_upload_template_resets_to_first_page_after_successful_mutations():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")

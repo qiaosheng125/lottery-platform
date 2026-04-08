@@ -170,7 +170,14 @@ createApp({
         this.total = data.total || 0;
         this.page = data.page || 1;
         this.totalPages = data.pages || 1;
-        if (data.date_options) this.dateOptions = data.date_options;
+        if (data.date_options) {
+          this.dateOptions = data.date_options;
+          if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {
+            this.filterDate = '';
+            this.page = 1;
+            return this.loadFiles();
+          }
+        }
       } catch (e) {
         this.files = [];
         this.total = 0;
