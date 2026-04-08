@@ -336,6 +336,27 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
         assert refreshed_user.can_receive is True
 
 
+def test_admin_user_management_routes_require_login_json_response(app, client):
+    resp = client.put("/admin/api/users/1", json={"can_receive": False})
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请先登录" in data["error"]
+
+    resp = client.delete("/admin/api/users/1")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+
+    resp = client.post("/admin/api/users/1/force-logout")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+
+    resp = client.put("/admin/api/users/1/can-receive", json={"can_receive": False})
+    assert resp.status_code == 401
+    assert resp.is_json is True
+
+
 def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
     pushed = []
 

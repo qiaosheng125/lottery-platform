@@ -634,6 +634,7 @@ def api_create_user():
 
 
 @admin_bp.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required_json
 @login_required
 @admin_required
 def api_update_user(user_id):
@@ -715,6 +716,7 @@ def api_update_user(user_id):
 
 
 @admin_bp.route('/api/users/<int:user_id>', methods=['DELETE'])
+@login_required_json
 @login_required
 @admin_required
 def api_delete_user(user_id):
@@ -746,6 +748,7 @@ def api_delete_user(user_id):
 
 
 @admin_bp.route('/api/users/<int:user_id>/force-logout', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def api_force_logout(user_id):
@@ -760,6 +763,7 @@ def api_force_logout(user_id):
 
 
 @admin_bp.route('/api/users/<int:user_id>/can-receive', methods=['PUT'])
+@login_required_json
 @login_required
 @admin_required
 def api_toggle_can_receive(user_id):
