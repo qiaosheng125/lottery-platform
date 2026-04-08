@@ -3082,6 +3082,33 @@ def test_pool_status_requires_login_json_response(app, client):
     assert "请先登录" in data["error"]
 
 
+def test_pool_status_returns_zero_for_mode_a_users_when_mode_a_disabled(app, client):
+    with app.app_context():
+        user = create_user("pool_status_mode_a_disabled", "secret123", client_mode="mode_a")
+        deadline = beijing_now() + timedelta(hours=1)
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="POOL-MODEA-DISABLED",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=deadline,
+        ))
+        settings = SystemSettings.get()
+        settings.mode_a_enabled = False
+        db.session.commit()
+
+    resp = login(client, "pool_status_mode_a_disabled", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pool_enabled"] is True
+    assert data["total_pending"] == 0
+    assert data["by_type"] == []
+
+
 def test_heartbeat_requires_login_json_response(app, client):
     resp = client.post("/auth/heartbeat")
     assert resp.status_code == 401
@@ -3564,6 +3591,30 @@ def test_user_daily_stats_pool_total_pending_is_zero_when_mode_b_disabled(app, c
         db.session.commit()
 
     resp = login(client, "daily_stats_mode_b_disabled", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pool_total_pending"] == 0
+
+
+def test_user_daily_stats_pool_total_pending_is_zero_when_mode_a_disabled(app, client):
+    with app.app_context():
+        create_user("daily_stats_mode_a_disabled", "secret123", client_mode="mode_a")
+        settings = SystemSettings.get()
+        settings.mode_a_enabled = False
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="MODE-A-DISABLED-1",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+
+    resp = login(client, "daily_stats_mode_a_disabled", "secret123")
     assert resp.status_code == 200
 
     resp = client.get("/api/user/daily-stats")

@@ -67,7 +67,7 @@ def daily_stats():
         if current_user.client_mode == 'mode_b':
             pool_total_pending = 0 if not settings.mode_b_enabled else get_pool_total_pending(blocked_lottery_types)
         else:
-            pool_total_pending = pool['total_pending']
+            pool_total_pending = 0 if not settings.mode_a_enabled else pool['total_pending']
     else:
         pool_total_pending = 0
 

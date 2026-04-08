@@ -786,7 +786,8 @@
 - 全局关闭 B 模式后，`preview / pool-status / 用户首页待处理数量` 现在也会同步归零，不再继续展示可下载票数、等到真正下载时才报“模式B已关闭”
 - A 模式当前票如果被定时过期任务在后台改成 `expired`，前端现在会在收到 `pool_updated / pool_disabled / pool_enabled` 时主动重拉 `/api/mode-a/current`，不再继续把一张已失效的票显示成当前票
 - B 模式处理中批次如果被后台定时过期任务改成 `expired`，前端现在也会在收到 `pool_updated / pool_disabled / pool_enabled` 时同步重拉处理中批次，不再让已过期批次长期残留在列表里
-- `207 passed`
+- 全局关闭 A 模式后，A 用户首页和通用票池状态现在也会同步归零，不再继续展示“还有票可接”、等到真正点“下一张”才报“模式A已关闭”
+- `211 passed`
 
 备注：
 
