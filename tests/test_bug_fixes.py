@@ -4319,6 +4319,42 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
     assert "CSV-OUT-OF-WINDOW" not in csv_text
 
 
+def test_user_export_daily_uses_business_date_filename(app, client, monkeypatch):
+    from decimal import Decimal
+
+    business_start = datetime(2026, 4, 6, 12, 0, 0)
+
+    with app.app_context():
+        user = create_user("user_export_daily_name", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="USER-EXPORT-DAILY",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_name="设备A",
+            deadline_time=business_start + timedelta(hours=1),
+            completed_at=business_start + timedelta(hours=2),
+            detail_period="26034",
+            ticket_amount=Decimal("4"),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    monkeypatch.setattr("routes.user.get_today_noon", lambda: business_start)
+    monkeypatch.setattr("routes.user.get_business_date", lambda dt=None: business_start.date())
+    monkeypatch.setattr("routes.user.beijing_now", lambda: business_start + timedelta(hours=3))
+
+    resp = login(client, "user_export_daily_name", "secret123")
+    assert resp.status_code == 200
+
+    export_resp = client.get("/api/user/export-daily")
+    assert export_resp.status_code == 200
+    assert "attachment;" in export_resp.headers["Content-Disposition"]
+    assert "2026-04-06" in export_resp.headers["Content-Disposition"]
+
+
 def test_admin_export_tickets_by_date_includes_device_id_column():
     admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
     content = admin_route.read_text(encoding="utf-8")

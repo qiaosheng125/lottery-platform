@@ -88,6 +88,7 @@ def daily_stats():
 def export_daily():
     """下载当日出票清单 XLSX（仅含已过截止时间的票）"""
     now = beijing_now()
+    today = get_business_date()
     today_start = get_today_noon()
     today_end = today_start + timedelta(days=1)
 
