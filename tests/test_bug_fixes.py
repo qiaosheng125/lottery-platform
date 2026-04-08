@@ -6036,12 +6036,26 @@ def test_mode_b_confirm_can_complete_prefix_and_expire_rest(app):
 
         result = confirm_batch([first.id, second.id, third.id], user_id=user.id, completed_count=2)
         db.session.expire_all()
-        refreshed = [LotteryTicket.query.get(ticket_id) for ticket_id in (first.id, second.id, third.id)]
+        refreshed = [db.session.get(LotteryTicket, ticket_id) for ticket_id in (first.id, second.id, third.id)]
 
     assert result["success"] is True
     assert result["completed_count"] == 2
     assert result["expired_count"] == 1
     assert [ticket.status for ticket in refreshed] == ["completed", "completed", "expired"]
+
+
+def test_mode_b_confirm_validates_completed_count_after_deduping_ticket_ids(app):
+    from services.mode_b_service import confirm_batch
+
+    with app.app_context():
+        user = create_user("modeb_confirm_dedup_user", "secret123", client_mode="mode_b")
+        first = create_assigned_ticket(user, "device-b", "BATCH-DEDUP-001", 1)
+        second = create_assigned_ticket(user, "device-b", "BATCH-DEDUP-002", 2)
+
+        result = confirm_batch([first.id, first.id, second.id], user_id=user.id, completed_count=3)
+
+    assert result["success"] is False
+    assert "范围" in result["error"]
 
 
 def test_mode_b_finalize_ignores_duplicate_ticket_ids(app):
@@ -6079,8 +6093,8 @@ def test_mode_b_finalize_ignores_duplicate_ticket_ids(app):
 
         result = finalize_tickets_batch([ticket.id, ticket.id], user.id, completed_count=2)
         db.session.expire_all()
-        refreshed_ticket = LotteryTicket.query.get(ticket.id)
-        refreshed_file = UploadedFile.query.get(uploaded.id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket.id)
+        refreshed_file = db.session.get(UploadedFile, uploaded.id)
 
     assert result == {"completed_count": 1, "expired_count": 0}
     assert refreshed_ticket.status == "completed"

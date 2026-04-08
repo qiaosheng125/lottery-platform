@@ -208,6 +208,7 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
 
 def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = None) -> dict:
     """确认收到，批量改为 completed"""
+    ticket_ids = list(dict.fromkeys(ticket_ids))
     if completed_count is not None:
         try:
             completed_count = int(completed_count)

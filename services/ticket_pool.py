@@ -793,7 +793,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
             ticket.status = 'completed'
             ticket.completed_at = now
             ticket.version += 1
-            file = UploadedFile.query.get(ticket.source_file_id)
+            file = db.session.get(UploadedFile, ticket.source_file_id)
             if file:
                 file.assigned_count = max((file.assigned_count or 0) - 1, 0)
                 file.completed_count += 1
@@ -805,7 +805,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
                 continue
             ticket.status = 'expired'
             ticket.version += 1
-            file = UploadedFile.query.get(ticket.source_file_id)
+            file = db.session.get(UploadedFile, ticket.source_file_id)
             if file:
                 file.assigned_count = max((file.assigned_count or 0) - 1, 0)
             expired_total += 1
