@@ -409,6 +409,15 @@ def test_admin_core_json_routes_require_login_json_response(app, client):
         assert "请先登录" in data["error"], path
 
 
+def test_admin_match_result_upload_requires_login_json_response(app, client):
+    resp = client.post("/admin/match-results/upload")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "请先登录" in data["error"]
+
+
 def test_admin_match_result_routes_return_json_404_for_missing_result(app, client):
     with app.app_context():
         admin = User(username="admin_match_result_missing", is_admin=True)

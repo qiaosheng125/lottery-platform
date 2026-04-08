@@ -1212,6 +1212,7 @@ def admin_winning_upload_image(ticket_id):
 # ── Match results ─────────────────────────────────────────────────────
 
 @admin_bp.route('/match-results/upload', methods=['POST'])
+@login_required_json
 @login_required
 @admin_required
 def upload_match_result():
