@@ -6252,6 +6252,7 @@ def test_admin_upload_template_handles_file_list_failures():
     assert "throw new Error(data.error || '加载文件列表失败');" in content
     assert "this.listError = e.message || '加载文件列表失败';" in content
     assert "this.page = 1;" in content
+    assert "this.dateOptions = [];" in content
     assert "showToast(this.listError, 'danger');" in content
     assert "finally {" in content
     assert "this.loading = false;" in content

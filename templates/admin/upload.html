@@ -176,6 +176,7 @@ createApp({
         this.total = 0;
         this.page = 1;
         this.totalPages = 1;
+        this.dateOptions = [];
         this.listError = e.message || '加载文件列表失败';
         showToast(this.listError, 'danger');
       } finally {
