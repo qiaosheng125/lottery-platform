@@ -212,8 +212,12 @@ createApp({
     },
     clearQueue() { this.uploadQueue = []; },
     async doUpload() {
-      this.uploading = true;
       const pendingItems = this.uploadQueue.filter(i => i.status !== 'done');
+      if (pendingItems.length === 0) {
+        showToast('没有可上传的文件', 'warning');
+        return;
+      }
+      this.uploading = true;
       const fd = new FormData();
       pendingItems.forEach(i => {
         i.status = 'pending';

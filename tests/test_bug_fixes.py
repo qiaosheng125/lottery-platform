@@ -6286,6 +6286,14 @@ def test_admin_upload_template_maps_results_by_queue_position_before_fallback_na
     assert "const item = pendingItems[i] || this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));" in content
 
 
+def test_admin_upload_template_skips_empty_mutation_batches_before_network_call():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "if (pendingItems.length === 0) {" in content
+    assert "showToast('没有可上传的文件', 'warning');" in content
+    assert content.index("if (pendingItems.length === 0) {") < content.index("this.uploading = true;")
+
+
 def test_admin_upload_template_clears_stale_detail_rows_before_and_after_failed_load():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
