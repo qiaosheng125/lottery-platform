@@ -448,6 +448,9 @@ createApp({
   },
   mounted() {
     this.loadStats();
+    if (!this.isModeB) {
+      this.loadCurrentModeATicket();
+    }
     if (this.isModeB) {
       this.loadPoolStatus();
       this.loadProcessingBatches();
@@ -509,6 +512,30 @@ createApp({
     }, 30000);
   },
   methods: {
+    async loadCurrentModeATicket() {
+      try {
+        const res = await fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`);
+        const data = await res.json();
+        if (!res.ok || data.success === false || !data.ticket) {
+          this.currentTicket = null;
+          this.modeAActive = false;
+          this.ticketHistory = [];
+          this.historyOffset = 0;
+          clearInterval(this.countdownTimer);
+          return;
+        }
+        this.modeAActive = true;
+        this.currentTicket = data.ticket;
+        this.ticketHistory = [data.ticket];
+        this.historyOffset = 0;
+        this.startCountdown(data.ticket.deadline_time);
+      } catch (e) {
+        this.currentTicket = null;
+        this.modeAActive = false;
+        this.ticketHistory = [];
+        this.historyOffset = 0;
+      }
+    },
     async loadStats() {
       try {
         const res = await fetch('/api/user/daily-stats');

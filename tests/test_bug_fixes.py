@@ -5981,9 +5981,19 @@ def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %}," in content
+    assert "if (!this.isModeB) {\n      this.loadCurrentModeATicket();\n    }" in content
     assert "if (this.isModeB) {\n      this.loadPoolStatus();\n      this.loadProcessingBatches();\n    }" in content
     assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    }" in content
     assert "if (this.isModeB) {\n        this.loadPoolStatus();\n      }\n      this.loadStats();" in content
+
+
+def test_client_dashboard_restores_mode_a_current_ticket_on_mount():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "async loadCurrentModeATicket()" in content
+    assert "fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`)" in content
+    assert "this.ticketHistory = [data.ticket];" in content
+    assert "this.modeAActive = true;" in content
 
 
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
