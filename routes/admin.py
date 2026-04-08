@@ -1308,7 +1308,9 @@ def api_match_results():
 @admin_required
 def api_match_result_detail(result_id):
     """查看某条赛果的详细内容（result_data）"""
-    mr = MatchResult.query.get_or_404(result_id)
+    mr = db.session.get(MatchResult, result_id)
+    if not mr:
+        return jsonify({'success': False, 'error': '赛果不存在'}), 404
     return jsonify({'success': True, 'result_data': mr.result_data, 'detail_period': mr.detail_period})
 
 
@@ -1319,7 +1321,9 @@ def api_match_result_detail(result_id):
 def api_recalc(result_id):
     from tasks.scheduler import get_scheduler
     from services.winning_calc_service import process_match_result
-    match_result = MatchResult.query.get_or_404(result_id)
+    match_result = db.session.get(MatchResult, result_id)
+    if not match_result:
+        return jsonify({'success': False, 'error': '赛果不存在'}), 404
     match_result.calc_status = 'pending'
     match_result.calc_started_at = None
     match_result.calc_finished_at = None

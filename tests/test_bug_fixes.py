@@ -409,6 +409,31 @@ def test_admin_core_json_routes_require_login_json_response(app, client):
         assert "请先登录" in data["error"], path
 
 
+def test_admin_match_result_routes_return_json_404_for_missing_result(app, client):
+    with app.app_context():
+        admin = User(username="admin_match_result_missing", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_match_result_missing", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/match-results/999999/detail")
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "赛果不存在" in data["error"]
+
+    resp = client.post("/admin/api/match-results/999999/recalc")
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "赛果不存在" in data["error"]
+
+
 def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
     pushed = []
 

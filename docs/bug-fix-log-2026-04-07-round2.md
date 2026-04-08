@@ -792,7 +792,8 @@
 - 管理员用户管理这几条 JSON API（编辑用户 / 删除用户 / 强制下线 / 切换可接单）现在未登录时也统一返回 JSON `401`，不再掉成 302/HTML 让后台前端 `fetch` 走错分支
 - 管理员用户管理这几条 JSON API 在目标用户不存在时，现在也统一返回 JSON `404`，不再由 `get_or_404()` 掉成 HTML 404
 - 后台其余一批纯 JSON 管理接口（dashboard-data / users / lottery-types / winning / match-results / settings 等）现在未登录时也统一返回 JSON `401`，不再掉成 302/HTML
-- `222 passed`
+- 后台赛果详情 / 重算这两条 JSON API 在赛果不存在时，现在也统一返回 JSON `404`，不再由 `get_or_404()` 掉成 HTML 404
+- `224 passed`
 
 备注：
 
