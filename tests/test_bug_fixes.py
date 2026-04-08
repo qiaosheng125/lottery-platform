@@ -6048,6 +6048,13 @@ def test_client_dashboard_stop_without_current_ticket_resets_mode_a_state():
     assert "} else {\n        this.resetModeAState();" in content
 
 
+def test_client_dashboard_deduplicates_mode_a_history_when_server_returns_same_ticket():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "this.ticketHistory = this.ticketHistory.filter(t => t && t.id !== data.ticket.id);" in content
+    assert "this.ticketHistory.unshift(data.ticket);" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

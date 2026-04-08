@@ -605,6 +605,7 @@ createApp({
         } else if (data.success) {
           console.log('Received ticket data:', data.ticket);
           this.modeAActive = true;
+          this.ticketHistory = this.ticketHistory.filter(t => t && t.id !== data.ticket.id);
           this.ticketHistory.unshift(data.ticket);
           if (this.ticketHistory.length > 3) this.ticketHistory.pop();
           this.historyOffset = 0;
