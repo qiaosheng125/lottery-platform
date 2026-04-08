@@ -55,9 +55,13 @@ def parse_ticket_line(raw_content: str) -> Optional[dict]:
         cleaned_field_no = field_no.strip()
         if not cleaned_field_no or not cleaned_field_no.isdigit():
             return None
+        if cleaned_field_no in fields:
+            return None
         options = options_str.split('/')
         cleaned_options = [o.strip() for o in options if o.strip()]
         if not cleaned_options:
+            return None
+        if len(set(cleaned_options)) != len(cleaned_options):
             return None
         fields[cleaned_field_no] = cleaned_options
 
