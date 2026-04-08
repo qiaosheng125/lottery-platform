@@ -1177,6 +1177,29 @@ def test_admin_file_upload_keeps_batch_running_when_one_file_raises(app, client,
     assert notified["count"] == 1
 
 
+def test_admin_file_upload_reports_empty_filename_as_failure(app, client):
+    with app.app_context():
+        admin = User(username="admin_upload_empty_name", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_empty_name", "password": "secret123"})
+    assert resp.status_code == 200
+
+    upload = client.post(
+        "/admin/files/upload",
+        data={"files": [(io.BytesIO(b"abc"), "")]},
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 400
+    data = upload.get_json()
+    assert data["success"] is False
+    assert data["error"] == "本次上传全部失败"
+    assert data["results"][0]["success"] is False
+    assert data["results"][0]["message"] == "文件名为空"
+
+
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     with app.app_context():
         admin = User(username="admin_delete_guard", is_admin=True)

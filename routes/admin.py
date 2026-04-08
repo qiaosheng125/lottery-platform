@@ -281,6 +281,12 @@ def upload_files():
     results = []
     for f in files:
         if not f.filename:
+            results.append({
+                'success': False,
+                'filename': '',
+                'file_id': None,
+                'message': '文件名为空',
+            })
             continue
         try:
             result = process_uploaded_file(f, current_user.id)
