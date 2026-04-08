@@ -6015,6 +6015,15 @@ def test_client_dashboard_stop_reanchors_from_history_to_latest_ticket():
     assert "this.startCountdown(this.currentTicket.deadline_time);" in content
 
 
+def test_client_dashboard_keeps_latest_ticket_visible_when_next_returns_empty():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "if (this.ticketHistory.length > 0) {" in content
+    assert "this.historyOffset = 0;" in content
+    assert "this.currentTicket = this.ticketHistory[0];" in content
+    assert "showToast(data.error || '暂无可用票', 'warning');" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
