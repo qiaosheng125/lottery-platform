@@ -1387,4 +1387,12 @@ def api_update_settings():
         else:
             notify_all('pool_disabled', {'message': '票池已关闭'})
 
+    if 'mode_a_enabled' in data or 'mode_b_enabled' in data:
+        try:
+            from services.notify_service import notify_pool_update
+
+            notify_pool_update(get_pool_status())
+        except Exception:
+            current_app.logger.warning('推送模式开关后的票池刷新事件失败', exc_info=True)
+
     return jsonify({'success': True, 'settings': settings.to_dict()})

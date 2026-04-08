@@ -787,7 +787,8 @@
 - A 模式当前票如果被定时过期任务在后台改成 `expired`，前端现在会在收到 `pool_updated / pool_disabled / pool_enabled` 时主动重拉 `/api/mode-a/current`，不再继续把一张已失效的票显示成当前票
 - B 模式处理中批次如果被后台定时过期任务改成 `expired`，前端现在也会在收到 `pool_updated / pool_disabled / pool_enabled` 时同步重拉处理中批次，不再让已过期批次长期残留在列表里
 - 全局关闭 A 模式后，A 用户首页和通用票池状态现在也会同步归零，不再继续展示“还有票可接”、等到真正点“下一张”才报“模式A已关闭”
-- `211 passed`
+- 管理员切换 `mode_a_enabled / mode_b_enabled` 时，现在也会像切票池一样主动推送一次 `pool_updated`，客户端不再要等下一轮轮询才刷新模式可用状态
+- `213 passed`
 
 备注：
 

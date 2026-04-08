@@ -388,6 +388,40 @@ def test_admin_update_settings_emits_pool_toggle_events(app, client, monkeypatch
     assert ("pool_enabled", {"message": "票池已开启"}) in emitted
 
 
+def test_admin_update_settings_pushes_pool_refresh_when_mode_switches(app, client, monkeypatch):
+    pushed = []
+
+    def fake_notify_pool_update(payload):
+        pushed.append(payload)
+
+    monkeypatch.setattr("services.notify_service.notify_pool_update", fake_notify_pool_update)
+
+    with app.app_context():
+        admin = User(username="admin_settings_mode_refresh", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SETTINGS-MODE-REFRESH-1",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_mode_refresh", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"mode_b_enabled": False})
+    assert resp.status_code == 200
+    resp = client.put("/admin/api/settings", json={"mode_a_enabled": False})
+    assert resp.status_code == 200
+
+    assert len(pushed) == 2
+    assert all("total_pending" in payload for payload in pushed)
+
+
 def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
     with app.app_context():
         admin = User(username="admin_settings_invalid_bool", is_admin=True)
