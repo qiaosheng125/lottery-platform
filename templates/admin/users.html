@@ -237,15 +237,19 @@ createApp({
         is_active: u.is_active,
         can_receive: u.can_receive,
       };
-      const res = await fetch(`/admin/api/users/${u.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(u),
-      });
-      const data = await res.json();
-      if (!data.success) {
+      try {
+        const res = await fetch(`/admin/api/users/${u.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(u),
+        });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '更新失败');
+        }
+      } catch (e) {
         Object.assign(u, original);
-        showToast(data.error || '更新失败', 'danger');
+        showToast(e.message || '更新失败', 'danger');
         await this.loadUsers();
       }
     },

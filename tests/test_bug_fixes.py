@@ -4556,8 +4556,12 @@ def test_admin_users_template_handles_update_failures():
     users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
     content = users_template.read_text(encoding="utf-8")
     assert "const original = {" in content
+    assert "try {" in content
+    assert "if (!res.ok || data.success === false) {" in content
+    assert "throw new Error(data.error || '更新失败');" in content
     assert "Object.assign(u, original);" in content
-    assert "showToast(data.error || '更新失败', 'danger');" in content
+    assert "showToast(e.message || '更新失败', 'danger');" in content
+    assert "await this.loadUsers();" in content
 
 
 def test_winning_presign_uses_local_upload_api_when_oss_disabled(app):
