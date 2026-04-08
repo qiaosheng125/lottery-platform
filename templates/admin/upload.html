@@ -209,7 +209,9 @@ createApp({
       files.forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
     },
     handleFiles(e) {
-      Array.from(e.target.files).forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
+      Array.from(e.target.files)
+        .filter(f => f.name.toLowerCase().endsWith('.txt'))
+        .forEach(f => this.uploadQueue.push({ file: f, name: f.name, status: 'pending', message: '' }));
       e.target.value = '';
     },
     clearQueue() { this.uploadQueue = []; },

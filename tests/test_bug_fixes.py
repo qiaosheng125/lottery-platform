@@ -6220,6 +6220,7 @@ def test_admin_upload_template_accepts_uppercase_txt_files():
     content = upload_template.read_text(encoding="utf-8")
     assert 'accept=".txt,.TXT"' in content
     assert "f.name.toLowerCase().endsWith('.txt')" in content
+    assert "Array.from(e.target.files)\n        .filter(f => f.name.toLowerCase().endsWith('.txt'))" in content
 
 
 def test_admin_users_template_handles_initial_load_failures():
