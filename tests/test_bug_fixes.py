@@ -6280,6 +6280,12 @@ def test_admin_upload_template_retries_non_done_items():
     assert "i.message = '';" in content
 
 
+def test_admin_upload_template_maps_results_by_queue_position_before_fallback_name_match():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "const item = pendingItems[i] || this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));" in content
+
+
 def test_admin_upload_template_clears_stale_detail_rows_before_and_after_failed_load():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")

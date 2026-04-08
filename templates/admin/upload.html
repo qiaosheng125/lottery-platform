@@ -225,7 +225,7 @@ createApp({
         const data = await res.json();
         if (data.results) {
           data.results.forEach((r, i) => {
-            const item = this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));
+            const item = pendingItems[i] || this.uploadQueue.find(q => q.name === (r.filename || pendingItems[i]?.name));
             if (item) {
               item.status = r.success ? 'done' : 'error';
               item.message = r.message || r.error || '';
