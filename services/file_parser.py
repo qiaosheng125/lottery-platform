@@ -344,6 +344,13 @@ def revoke_file(file_id: int, admin_id: int) -> dict:
         return {'success': False, 'message': '文件不存在'}
     if uploaded_file.status == 'revoked':
         return {'success': False, 'message': '文件已撤回'}
+    current_status = uploaded_file.derived_status()
+    if current_status != 'active':
+        if current_status == 'exhausted':
+            return {'success': False, 'message': '文件已完成，不能撤回'}
+        if current_status == 'expired':
+            return {'success': False, 'message': '文件已过期，不能撤回'}
+        return {'success': False, 'message': '文件当前状态不允许撤回'}
 
     now = beijing_now()
     uploaded_file.status = 'revoked'

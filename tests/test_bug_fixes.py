@@ -4363,6 +4363,43 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
         assert statuses == {"revoked"}
 
 
+def test_admin_revoke_rejects_non_active_files(app, client):
+    with app.app_context():
+        admin = User(username="admin_revoke_non_active", is_admin=True)
+        admin.set_password("secret123")
+        exhausted_file = UploadedFile(
+            display_id="2026/04/07-98",
+            original_filename="exhausted-no-revoke.txt",
+            stored_filename="txt/2026-04-07/exhausted-no-revoke.txt",
+            uploaded_by=admin.id,
+            total_tickets=2,
+            pending_count=0,
+            assigned_count=0,
+            completed_count=2,
+            deadline_time=beijing_now() + timedelta(hours=1),
+            status="active",
+        )
+        db.session.add(admin)
+        db.session.flush()
+        exhausted_file.uploaded_by = admin.id
+        db.session.add(exhausted_file)
+        db.session.commit()
+        file_id = exhausted_file.id
+
+    resp = login(client, "admin_revoke_non_active", "secret123")
+    assert resp.status_code == 200
+
+    revoke_resp = client.post(f"/admin/api/files/{file_id}/revoke")
+    assert revoke_resp.status_code == 400
+    data = revoke_resp.get_json()
+    assert data["success"] is False
+    assert "不能撤回" in data["message"]
+
+    with app.app_context():
+        refreshed = db.session.get(UploadedFile, file_id)
+        assert refreshed.status == "active"
+
+
 def test_admin_files_list_filters_by_derived_status(app, client):
     with app.app_context():
         admin = User(username="admin_file_status_filter", is_admin=True)
