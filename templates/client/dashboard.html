@@ -466,6 +466,7 @@ createApp({
     this._onPoolUpdated = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+        this.loadProcessingBatches();
       } else {
         this.loadCurrentModeATicket();
       }
@@ -474,6 +475,7 @@ createApp({
     this._onPoolDisabled = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+        this.loadProcessingBatches();
       } else {
         this.loadCurrentModeATicket();
       }
@@ -482,6 +484,7 @@ createApp({
     this._onPoolEnabled = () => {
       if (this.isModeB) {
         this.loadPoolStatus();
+        this.loadProcessingBatches();
       } else {
         this.loadCurrentModeATicket();
       }

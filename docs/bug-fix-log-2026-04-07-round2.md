@@ -785,7 +785,8 @@
 - 核心登录、中奖、A/B 分票和中奖计算服务里残留的 `Query.get()` 已统一替换为 `db.session.get(...)`，减少 SQLAlchemy 2 兼容 warning，并补了一条回归测试防止这些核心服务回退
 - 全局关闭 B 模式后，`preview / pool-status / 用户首页待处理数量` 现在也会同步归零，不再继续展示可下载票数、等到真正下载时才报“模式B已关闭”
 - A 模式当前票如果被定时过期任务在后台改成 `expired`，前端现在会在收到 `pool_updated / pool_disabled / pool_enabled` 时主动重拉 `/api/mode-a/current`，不再继续把一张已失效的票显示成当前票
-- `204 passed`
+- B 模式处理中批次如果被后台定时过期任务改成 `expired`，前端现在也会在收到 `pool_updated / pool_disabled / pool_enabled` 时同步重拉处理中批次，不再让已过期批次长期残留在列表里
+- `207 passed`
 
 备注：
 
