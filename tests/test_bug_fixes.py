@@ -6109,6 +6109,13 @@ def test_admin_upload_template_shows_assigned_count_column():
     assert "{{ f.assigned_count }}" in content
 
 
+def test_admin_upload_template_shows_assigned_device_id_in_detail():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "<th>设备ID</th>" in content
+    assert "{{ t.assigned_device_id || '-' }}" in content
+
+
 def test_admin_upload_template_accepts_uppercase_txt_files():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")

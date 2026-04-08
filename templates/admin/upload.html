@@ -115,7 +115,7 @@
               <thead class="table-dark sticky-top">
                 <tr>
                   <th>行号</th><th>原始内容</th><th>金额</th><th>状态</th>
-                  <th>用户名</th><th>设备名</th><th>分配时间</th><th>完成时间</th>
+                  <th>用户名</th><th>设备ID</th><th>设备名</th><th>分配时间</th><th>完成时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -125,6 +125,7 @@
                   <td>¥{{ t.ticket_amount }}</td>
                   <td><span class="badge" :class="ticketStatusClass(t.status)">{{ ticketStatusLabel(t.status) }}</span></td>
                   <td>{{ t.assigned_username || '-' }}</td>
+                  <td>{{ t.assigned_device_id || '-' }}</td>
                   <td>{{ t.assigned_device_name || '-' }}</td>
                   <td class="small">{{ t.assigned_at ? t.assigned_at.substring(0,16) : '-' }}</td>
                   <td class="small">{{ t.completed_at ? t.completed_at.substring(0,16) : '-' }}</td>
