@@ -79,6 +79,8 @@ def parse_ticket_line(raw_content: str) -> Optional[dict]:
         final_multiplier = int(parts[3].strip())
     except Exception:
         return None
+    if final_multiplier <= 0:
+        return None
 
     return {
         'bet_code': bet_code,
