@@ -168,6 +168,7 @@ createApp({
         }
         this.files = data.files || [];
         this.total = data.total || 0;
+        this.page = data.page || 1;
         this.totalPages = data.pages || 1;
         if (data.date_options) this.dateOptions = data.date_options;
       } catch (e) {

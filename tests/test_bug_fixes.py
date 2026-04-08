@@ -6274,6 +6274,13 @@ def test_admin_upload_template_clears_stale_detail_rows_before_and_after_failed_
     assert "this.detailTickets = detailTickets;" in content
 
 
+def test_admin_upload_template_syncs_page_with_server_response():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "this.page = data.page || 1;" in content
+    assert "this.totalPages = data.pages || 1;" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)
