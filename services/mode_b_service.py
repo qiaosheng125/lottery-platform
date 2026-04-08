@@ -20,7 +20,7 @@ from utils.time_utils import beijing_now
 def preview_batch(requested_count: int, user_id: int = None) -> dict:
     """预查询当前票池总可用票数"""
     settings = SystemSettings.get()
-    if not settings.pool_enabled:
+    if not settings.mode_b_enabled or not settings.pool_enabled:
         return {
             'available': 0,
             'requested': requested_count,

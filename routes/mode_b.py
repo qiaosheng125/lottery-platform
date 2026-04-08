@@ -64,7 +64,7 @@ def _trim_status_for_mode_b(status: dict) -> dict:
 def pool_status():
     """Return grouped pool status for mode B users."""
     settings = SystemSettings.get()
-    if not settings.pool_enabled:
+    if not settings.mode_b_enabled or not settings.pool_enabled:
         return jsonify({'success': True, 'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0})
 
     status = _trim_status_for_mode_b(get_pool_status(current_user.get_blocked_lottery_types()))

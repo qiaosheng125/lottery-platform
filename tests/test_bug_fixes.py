@@ -1617,6 +1617,19 @@ def test_mode_b_preview_returns_zero_when_pool_disabled(app):
     assert result == {"available": 0, "requested": 5, "sufficient": False}
 
 
+def test_mode_b_preview_returns_zero_when_mode_b_disabled(app):
+    from services.mode_b_service import preview_batch
+
+    with app.app_context():
+        settings = SystemSettings.get()
+        settings.mode_b_enabled = False
+        db.session.commit()
+
+        result = preview_batch(5)
+
+    assert result == {"available": 0, "requested": 5, "sufficient": False}
+
+
 def test_mode_b_preview_returns_zero_when_user_cannot_receive(app, client):
     with app.app_context():
         user = create_user("mode_b_preview_paused_user", "secret123", client_mode="mode_b")
@@ -3033,6 +3046,33 @@ def test_pool_status_uses_mode_b_reserve_rule_for_mode_b_users(app, client):
     assert data["by_type"][0]["count"] == 5
 
 
+def test_pool_status_returns_zero_for_mode_b_users_when_mode_b_disabled(app, client):
+    with app.app_context():
+        user = create_user("pool_status_mode_b_disabled", "secret123", client_mode="mode_b")
+        deadline = beijing_now() + timedelta(hours=1)
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="POOL-MODEB-DISABLED",
+            status="pending",
+            lottery_type="胜平负",
+            deadline_time=deadline,
+        ))
+        settings = SystemSettings.get()
+        settings.mode_b_enabled = False
+        db.session.commit()
+
+    resp = login(client, "pool_status_mode_b_disabled", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pool_enabled"] is True
+    assert data["total_pending"] == 0
+    assert data["by_type"] == []
+
+
 def test_pool_status_requires_login_json_response(app, client):
     resp = client.get("/api/pool/status")
     assert resp.status_code == 401
@@ -3060,6 +3100,25 @@ def test_mode_b_pool_status_returns_empty_when_pool_disabled(app, client):
         db.session.commit()
 
     resp = login(client, "pool_mode_b_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/pool-status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["total_pending"] == 0
+    assert data["by_type"] == []
+
+
+def test_mode_b_pool_status_returns_empty_when_mode_b_disabled(app, client):
+    with app.app_context():
+        user = create_user("pool_mode_b_disabled_user", "secret123", client_mode="mode_b")
+        create_pending_ticket("PENDING-MODEB-DISABLED-1", 1)
+        settings = SystemSettings.get()
+        settings.mode_b_enabled = False
+        db.session.commit()
+
+    resp = login(client, "pool_mode_b_disabled_user", "secret123")
     assert resp.status_code == 200
 
     resp = client.get("/api/mode-b/pool-status")
@@ -3481,6 +3540,30 @@ def test_user_daily_stats_pool_total_pending_is_zero_when_pool_disabled(app, cli
         db.session.commit()
 
     resp = login(client, "daily_stats_pool_disabled", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["pool_total_pending"] == 0
+
+
+def test_user_daily_stats_pool_total_pending_is_zero_when_mode_b_disabled(app, client):
+    with app.app_context():
+        create_user("daily_stats_mode_b_disabled", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.mode_b_enabled = False
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="MODE-B-DISABLED-1",
+            status="pending",
+            lottery_type="让球胜平负",
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        db.session.commit()
+
+    resp = login(client, "daily_stats_mode_b_disabled", "secret123")
     assert resp.status_code == 200
 
     resp = client.get("/api/user/daily-stats")

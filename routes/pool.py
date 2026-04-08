@@ -36,6 +36,8 @@ def pool_status():
     settings = SystemSettings.get()
     if not settings.pool_enabled:
         return jsonify({'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0, 'pool_enabled': False})
+    if getattr(current_user, 'client_mode', None) == 'mode_b' and not settings.mode_b_enabled:
+        return jsonify({'total_pending': 0, 'by_type': [], 'assigned': 0, 'completed_today': 0, 'pool_enabled': settings.pool_enabled})
 
     status = get_pool_status(current_user.get_blocked_lottery_types())
     if getattr(current_user, 'client_mode', None) == 'mode_b':
