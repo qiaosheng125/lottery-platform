@@ -6132,6 +6132,13 @@ def test_client_dashboard_replaces_processing_batches_from_server():
     assert "this.bPendingBatches = data.batches || [];" in content
 
 
+def test_client_dashboard_reloads_processing_batches_after_confirm():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "await this.loadProcessingBatches();" in content
+    assert "this.bPendingBatches.splice(index, 1);" not in content
+
+
 def test_client_dashboard_resets_matching_state_on_load_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

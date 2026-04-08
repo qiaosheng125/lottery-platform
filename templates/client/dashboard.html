@@ -875,7 +875,7 @@ createApp({
         });
         const data = await res.json();
         if (data.success) {
-          this.bPendingBatches.splice(index, 1);
+          await this.loadProcessingBatches();
           this.loadStats();
           this.loadPoolStatus();
           const expiredCount = data.expired_count || 0;
