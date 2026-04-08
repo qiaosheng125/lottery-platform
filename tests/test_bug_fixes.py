@@ -4205,8 +4205,16 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
     export_resp = client.get("/admin/api/tickets/export")
     assert export_resp.status_code == 200
     csv_text = export_resp.data.decode("utf-8-sig")
+    assert "设备ID" in csv_text
     assert "CSV-IN-WINDOW" in csv_text
     assert "CSV-OUT-OF-WINDOW" not in csv_text
+
+
+def test_admin_export_tickets_by_date_includes_device_id_column():
+    admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
+    content = admin_route.read_text(encoding="utf-8")
+    assert "['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名']" in content
+    assert "t.assigned_device_id or ''" in content
 
 
 def test_admin_files_list_rejects_invalid_page_params(app, client):

@@ -442,13 +442,13 @@ def export_tickets():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['票ID', '行号', '原始内容', '彩种', '倍投', '截止时间', '期号',
-                     '金额', '状态', '用户名', '设备名', '分配时间', '完成时间', '来源文件'])
+                     '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件'])
     for t in tickets_q:
         f = UF.query.get(t.source_file_id)
         writer.writerow([
             t.id, t.line_number, t.raw_content, t.lottery_type, t.multiplier,
             t.deadline_time, t.detail_period, t.ticket_amount, t.status,
-            t.assigned_username, t.assigned_device_name,
+            t.assigned_username, t.assigned_device_id, t.assigned_device_name,
             t.assigned_at, t.completed_at, f.original_filename if f else '',
         ])
 
@@ -490,7 +490,7 @@ def export_tickets_by_date():
         if not file_ids:
             wb = Workbook()
             ws = wb.active
-            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间', '来源文件名'])
+            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名'])
             buf = _io.BytesIO()
             wb.save(buf)
             buf.seek(0)
@@ -506,7 +506,7 @@ def export_tickets_by_date():
 
     wb = Workbook()
     ws = wb.active
-    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间', '来源文件名'])
+    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名'])
     status_map = {'pending': '待出票', 'assigned': '出票中', 'completed': '已完成',
                   'revoked': '已撤回', 'expired': '已过期'}
     for t in tickets:
@@ -520,6 +520,7 @@ def export_tickets_by_date():
             float(t.ticket_amount or 0),
             status_map.get(t.status, t.status),
             t.assigned_username or '',
+            t.assigned_device_id or '',
             t.assigned_device_name or '',
             t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
             t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
