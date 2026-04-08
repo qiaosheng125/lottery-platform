@@ -6055,6 +6055,14 @@ def test_client_dashboard_deduplicates_mode_a_history_when_server_returns_same_t
     assert "this.ticketHistory.unshift(data.ticket);" in content
 
 
+def test_client_dashboard_skips_mode_a_cooldown_when_server_returns_same_ticket():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "const previousCurrentTicketId = this.currentTicket ? this.currentTicket.id : null;" in content
+    assert "if (!(data.completed_current === false && previousCurrentTicketId === data.ticket.id)) {" in content
+    assert "this.startNextCooldown();" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

@@ -586,6 +586,7 @@ createApp({
       }
       this.loadingNext = true;
       try {
+        const previousCurrentTicketId = this.currentTicket ? this.currentTicket.id : null;
         const completeCurrentTicketAction = (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time))
           ? this.resolveModeAOverdueAction()
           : 'completed';
@@ -611,8 +612,9 @@ createApp({
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
-          // 成功获取后启动 7 秒冷却
-          this.startNextCooldown();
+          if (!(data.completed_current === false && previousCurrentTicketId === data.ticket.id)) {
+            this.startNextCooldown();
+          }
         } else {
           if (this.ticketHistory.length > 0) {
             this.historyOffset = 0;
