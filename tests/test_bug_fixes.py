@@ -357,6 +357,31 @@ def test_admin_user_management_routes_require_login_json_response(app, client):
     assert resp.is_json is True
 
 
+def test_admin_user_management_routes_return_json_404_for_missing_user(app, client):
+    with app.app_context():
+        admin = User(username="admin_user_api_missing_target", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_user_api_missing_target", "password": "secret123"})
+    assert resp.status_code == 200
+
+    for method, path, payload in [
+        ("put", "/admin/api/users/999999", {"can_receive": False}),
+        ("delete", "/admin/api/users/999999", None),
+        ("post", "/admin/api/users/999999/force-logout", None),
+        ("put", "/admin/api/users/999999/can-receive", {"can_receive": False}),
+    ]:
+        kwargs = {"json": payload} if payload is not None else {}
+        resp = getattr(client, method)(path, **kwargs)
+        assert resp.status_code == 404
+        assert resp.is_json is True
+        data = resp.get_json()
+        assert data["success"] is False
+        assert "用户不存在" in data["error"]
+
+
 def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
     pushed = []
 

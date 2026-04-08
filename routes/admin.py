@@ -638,7 +638,9 @@ def api_create_user():
 @login_required
 @admin_required
 def api_update_user(user_id):
-    user = User.query.get_or_404(user_id)
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'success': False, 'error': '用户不存在'}), 404
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口修改管理员账号'}), 403
     data = request.get_json(silent=True) or {}
@@ -720,7 +722,9 @@ def api_update_user(user_id):
 @login_required
 @admin_required
 def api_delete_user(user_id):
-    user = User.query.get_or_404(user_id)
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'success': False, 'error': '用户不存在'}), 404
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口删除管理员账号'}), 403
 
@@ -752,7 +756,9 @@ def api_delete_user(user_id):
 @login_required
 @admin_required
 def api_force_logout(user_id):
-    user = User.query.get_or_404(user_id)
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'success': False, 'error': '用户不存在'}), 404
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口强制下线管理员账号'}), 403
     count = force_logout_user(user_id, '管理员强制下线')
@@ -767,7 +773,9 @@ def api_force_logout(user_id):
 @login_required
 @admin_required
 def api_toggle_can_receive(user_id):
-    user = User.query.get_or_404(user_id)
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'success': False, 'error': '用户不存在'}), 404
     data = request.get_json(silent=True) or {}
     parsed_can_receive = _parse_bool_flag(data.get('can_receive', True))
     if parsed_can_receive is None:

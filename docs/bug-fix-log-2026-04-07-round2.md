@@ -790,7 +790,8 @@
 - 管理员切换 `mode_a_enabled / mode_b_enabled` 时，现在也会像切票池一样主动推送一次 `pool_updated`，客户端不再要等下一轮轮询才刷新模式可用状态
 - 管理员修改用户 `can_receive / client_mode / blocked_lottery_types`，以及单独切换“可接单”时，现在也会主动推送一次 `pool_updated`，客户端不再继续停留在旧的可接状态或旧彩种过滤口径
 - 管理员用户管理这几条 JSON API（编辑用户 / 删除用户 / 强制下线 / 切换可接单）现在未登录时也统一返回 JSON `401`，不再掉成 302/HTML 让后台前端 `fetch` 走错分支
-- `218 passed`
+- 管理员用户管理这几条 JSON API 在目标用户不存在时，现在也统一返回 JSON `404`，不再由 `get_or_404()` 掉成 HTML 404
+- `220 passed`
 
 备注：
 
