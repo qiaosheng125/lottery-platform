@@ -6258,6 +6258,14 @@ def test_admin_upload_template_maps_per_file_results_before_batch_failure_throw(
     assert content.index("if (data.results) {") < content.index("throw new Error(data.error || '上传失败');")
 
 
+def test_admin_upload_template_retries_non_done_items():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "const pendingItems = this.uploadQueue.filter(i => i.status !== 'done');" in content
+    assert "i.status = 'pending';" in content
+    assert "i.message = '';" in content
+
+
 def test_admin_winning_template_handles_list_and_detail_load_failures():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")

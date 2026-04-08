@@ -212,8 +212,12 @@ createApp({
     clearQueue() { this.uploadQueue = []; },
     async doUpload() {
       this.uploading = true;
-      const pendingItems = this.uploadQueue.filter(i => i.status === 'pending');
+      const pendingItems = this.uploadQueue.filter(i => i.status !== 'done');
       const fd = new FormData();
+      pendingItems.forEach(i => {
+        i.status = 'pending';
+        i.message = '';
+      });
       pendingItems.forEach(i => fd.append('files', i.file));
       try {
         const res = await fetch('/admin/files/upload', { method: 'POST', body: fd });
