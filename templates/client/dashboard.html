@@ -703,15 +703,7 @@ createApp({
           return;
         }
 
-        document.body.classList.remove('mode-a-active');
-        this.modeAActive = false;
-        this.currentTicket = null;
-        this.historyOffset = 0;
-        clearInterval(this.countdownTimer);
-        clearInterval(this.cooldownTimer);
-        this.cooldownTimer = null;
-        this.nextCooldownUntil = 0;
-        this.nextCooldownSec = 0;
+        this.resetModeAState();
         this.loadStats();
         showToast(data.message || '已停止接单', 'success');
       } catch (e) {

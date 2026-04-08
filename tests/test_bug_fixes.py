@@ -6024,6 +6024,14 @@ def test_client_dashboard_keeps_latest_ticket_visible_when_next_returns_empty():
     assert "showToast(data.error || '暂无可用票', 'warning');" in content
 
 
+def test_client_dashboard_resets_full_mode_a_state_after_stop_success():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "async doStop()" in content
+    assert "this.resetModeAState();" in content
+    assert "this.loadStats();" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
