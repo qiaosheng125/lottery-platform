@@ -7387,6 +7387,15 @@ def test_admin_settings_template_checks_http_status_on_load():
     assert "this.saved = true;" in content
 
 
+def test_admin_settings_template_ignores_stale_load_and_save_responses():
+    settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
+    content = settings_template.read_text(encoding="utf-8")
+    assert "let settingsRequestSeq = 0;" in content
+    assert "const requestSeq = ++settingsRequestSeq;" in content
+    assert "if (requestSeq !== settingsRequestSeq) return;" in content
+    assert "setTimeout(() => this.saved = false, 3000);" in content
+
+
 def test_database_info_moves_to_settings_page():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     settings_content = settings_template.read_text(encoding="utf-8")

@@ -82,6 +82,7 @@
 {% block scripts %}
 <script>
 const { createApp } = Vue;
+let settingsRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -94,22 +95,26 @@ createApp({
     };
   },
   async mounted() {
+    const requestSeq = ++settingsRequestSeq;
     try {
       const res = await fetch('/admin/api/settings');
       const data = await res.json();
       if (!res.ok || data.success === false) {
         throw new Error(data.error || '加载设置失败');
       }
+      if (requestSeq !== settingsRequestSeq) return;
       this.databaseInfo = data.database_info || { engine: '', path: '' };
       delete data.database_info;
       this.s = data;
       this.modeBOptionsStr = (this.s.mode_b_options || []).join(',');
     } catch (e) {
+      if (requestSeq !== settingsRequestSeq) return;
       this.error = e.message || '加载设置失败';
     }
   },
   methods: {
     async saveSettings() {
+      const requestSeq = ++settingsRequestSeq;
       this.saving = true;
       this.saved = false;
       this.error = '';
@@ -124,11 +129,14 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '保存失败');
         }
+        if (requestSeq !== settingsRequestSeq) return;
         this.saved = true;
         setTimeout(() => this.saved = false, 3000);
       } catch (e) {
+        if (requestSeq !== settingsRequestSeq) return;
         this.error = e.message || '保存失败';
       } finally {
+        if (requestSeq !== settingsRequestSeq) return;
         this.saving = false;
       }
     },
