@@ -899,21 +899,17 @@ createApp({
       try {
         const res = await fetch('/api/winning/my');
         const data = await res.json();
-        if (data.success) {
-          this._winningAll = Object.values(data.grouped || {}).flat();
-          this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
-          this.applyWinningGrouping();
-        } else {
-          this.winningGrouped = {};
-          this._winningAll = [];
-          this.winningFilterOptions = { dates: [], lottery_types: [] };
-          showToast(data.error || '加载中奖记录失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载中奖记录失败');
         }
+        this._winningAll = Object.values(data.grouped || {}).flat();
+        this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        this.applyWinningGrouping();
       } catch(e) {
         this.winningGrouped = {};
         this._winningAll = [];
         this.winningFilterOptions = { dates: [], lottery_types: [] };
-        showToast('加载中奖记录失败，请稍后重试', 'danger');
+        showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');
       } finally {
         this.winningLoading = false;
       }
@@ -926,15 +922,14 @@ createApp({
         if (this.winningFilterType) params.append('lottery_type', this.winningFilterType);
         const res = await fetch('/api/winning/my?' + params.toString());
         const data = await res.json();
-        if (data.success) {
-          this._winningAll = Object.values(data.grouped || {}).flat();
-          this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
-          this.applyWinningGrouping();
-        } else {
-          showToast(data.error || '筛选失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '筛选失败');
         }
+        this._winningAll = Object.values(data.grouped || {}).flat();
+        this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        this.applyWinningGrouping();
       } catch(e) {
-        showToast('筛选失败', 'danger');
+        showToast(e.message || '筛选失败', 'danger');
       } finally {
         this.winningLoading = false;
       }
@@ -1023,19 +1018,18 @@ createApp({
           body: JSON.stringify({ old_password: this.pwdOld, new_password: this.pwdNew }),
         });
         const data = await res.json();
-        if (data.success) {
-          this.pwdSuccess = data.message || '密码修改成功';
-          this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
-          this.pwdSuccessTimer = setTimeout(() => {
-            this.pwdModalVisible = false;
-            this.pwdSuccess = '';
-            this.pwdSuccessTimer = null;
-          }, 1500);
-        } else {
-          this.pwdError = data.error || '密码修改失败';
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '密码修改失败');
         }
+        this.pwdSuccess = data.message || '密码修改成功';
+        this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
+        this.pwdSuccessTimer = setTimeout(() => {
+          this.pwdModalVisible = false;
+          this.pwdSuccess = '';
+          this.pwdSuccessTimer = null;
+        }, 1500);
       } catch(e) {
-        this.pwdError = '网络异常，请稍后重试';
+        this.pwdError = e.message || '网络异常，请稍后重试';
       } finally {
         this.pwdLoading = false;
       }

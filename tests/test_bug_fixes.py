@@ -7041,8 +7041,11 @@ def test_client_dashboard_handles_download_and_open_winning_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "showToast('下载失败，请稍后重试', 'danger');" in content
-    assert "showToast(data.error || '加载中奖记录失败', 'danger');" in content
-    assert "showToast('加载中奖记录失败，请稍后重试', 'danger');" in content
+    assert "throw new Error(data.error || '加载中奖记录失败');" in content
+    assert "throw new Error(data.error || '筛选失败');" in content
+    assert "showToast(e.message || '加载中奖记录失败请稍后重试', 'danger');" not in content
+    assert "showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '筛选失败', 'danger');" in content
 
 
 def test_admin_dashboard_marks_refresh_failure_in_indicator():
@@ -7076,7 +7079,9 @@ def test_client_dashboard_validates_winning_image_type_and_handles_password_http
     assert "showToast(data.error || '获取下一张失败，请稍后重试', 'danger');" in content
     assert "if (!file.type.startsWith('image/')) {" in content
     assert "showToast('请上传图片文件', 'warning');" in content
-    assert "if (res.ok && data.success) {" in content
+    assert "if (!res.ok || data.success === false) {" in content
+    assert "throw new Error(data.error || '密码修改失败');" in content
+    assert "this.pwdError = e.message || '网络异常，请稍后重试';" in content
 def test_admin_settings_template_checks_http_status_on_load():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     content = settings_template.read_text(encoding="utf-8")
