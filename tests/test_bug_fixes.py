@@ -1809,7 +1809,7 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
 
         assert result["success"] is True
         assigned_ticket_id = result["ticket_ids"][0]
-        assigned_ticket = LotteryTicket.query.get(assigned_ticket_id)
+        assigned_ticket = db.session.get(LotteryTicket, assigned_ticket_id)
         assert assigned_ticket.assigned_at > fixed_now
         assert assigned_ticket.assigned_at == fixed_now + timedelta(microseconds=1)
 
@@ -1846,6 +1846,19 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
 
     assert result["success"] is False
     assert result["error"] == "当前票池无可用票"
+
+
+def test_order_tickets_by_id_sequence_preserves_requested_batch_order():
+    from services.ticket_pool import _order_tickets_by_id_sequence
+
+    class Ticket:
+        def __init__(self, ticket_id):
+            self.id = ticket_id
+
+    unordered = [Ticket(3), Ticket(1), Ticket(2)]
+    ordered = _order_tickets_by_id_sequence(unordered, [1, 2, 3])
+
+    assert [ticket.id for ticket in ordered] == [1, 2, 3]
 
 
 def test_mode_b_download_rejects_when_pool_disabled(app):

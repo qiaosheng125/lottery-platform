@@ -80,6 +80,13 @@ def _ensure_unique_batch_assigned_at(user_id: int, device_id: str, assigned_at: 
     return assigned_at
 
 
+def _order_tickets_by_id_sequence(tickets: List[LotteryTicket], ordered_ids: List[int]) -> List[LotteryTicket]:
+    if not tickets or not ordered_ids:
+        return []
+    ticket_map = {ticket.id: ticket for ticket in tickets}
+    return [ticket_map[ticket_id] for ticket_id in ordered_ids if ticket_id in ticket_map]
+
+
 def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None,
                          daily_limit: int = None, blocked_lottery_types: List[str] = None) -> Optional[LotteryTicket]:
     """
@@ -536,6 +543,7 @@ def assign_tickets_batch(
                 LotteryTicket.status == 'assigned',
                 LotteryTicket.assigned_at == now,
             ).all()
+            assigned_tickets = _order_tickets_by_id_sequence(assigned_tickets, ids)
             assigned_ids = [ticket.id for ticket in assigned_tickets]
             if not assigned_ids:
                 db.session.rollback()
@@ -702,7 +710,8 @@ def assign_tickets_batch(
     )
 
     db.session.commit()
-    return LotteryTicket.query.filter(LotteryTicket.id.in_(assigned_ids)).all(), adjustment_message
+    assigned_tickets = LotteryTicket.query.filter(LotteryTicket.id.in_(assigned_ids)).all()
+    return _order_tickets_by_id_sequence(assigned_tickets, ids), adjustment_message
 
 
 def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
