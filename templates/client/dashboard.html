@@ -552,14 +552,15 @@ createApp({
       try {
         const res = await fetch('/api/user/daily-stats');
         const data = await res.json();
-        if (data.success) {
-          this.stats = data;
-          if (data.mode_b_options && data.mode_b_options.length > 0) {
-            this.bOptions = data.mode_b_options;
-            // 如果当前选择的张数不在新选项里，重置为第一个
-            if (!this.bOptions.includes(this.bCount)) {
-              this.bCount = this.bOptions[0];
-            }
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载统计失败');
+        }
+        this.stats = data;
+        if (data.mode_b_options && data.mode_b_options.length > 0) {
+          this.bOptions = data.mode_b_options;
+          // 如果当前选择的张数不在新选项里，重置为第一个
+          if (!this.bOptions.includes(this.bCount)) {
+            this.bCount = this.bOptions[0];
           }
         }
       } catch(e) {
@@ -718,16 +719,15 @@ createApp({
           body: JSON.stringify({ device_id: deviceId, complete_current_ticket_action: completeCurrentTicketAction }),
         });
         const data = await res.json();
-        if (!data.success) {
-          showToast(data.error || '停止接单失败', 'danger');
-          return;
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '停止接单失败');
         }
 
         this.resetModeAState();
         this.loadStats();
         showToast(data.message || '已停止接单', 'success');
       } catch (e) {
-        showToast('停止接单失败', 'danger');
+        showToast(e.message || '停止接单失败', 'danger');
       }
     },
     startCountdown(deadlineStr) {
@@ -792,15 +792,13 @@ createApp({
       try {
         const res = await fetch(`/api/mode-b/preview?count=${this.bCount}`);
         const data = await res.json();
-        if (data.success) {
-          this.bPreview = data;
-        } else {
-          this.bPreview = null;
-          showToast(data.error || '预览失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '预览失败');
         }
+        this.bPreview = data;
       } catch (e) {
         this.bPreview = null;
-        showToast('预览失败，请稍后重试', 'danger');
+        showToast(e.message || '预览失败，请稍后重试', 'danger');
       }
     },
     async downloadBatch() {
@@ -828,9 +826,8 @@ createApp({
           }),
         });
         const data = await res.json();
-        if (!data.success) {
-          showToast(data.error || '下载失败', 'danger');
-          return;
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '下载失败');
         }
         if (!data.files || data.files.length === 0) {
           showToast('暂无可下载文件', 'warning');
@@ -855,7 +852,7 @@ createApp({
         this.loadPoolStatus();
         this.bPreview = null;
       } catch (e) {
-        showToast('下载失败，请稍后重试', 'danger');
+        showToast(e.message || '下载失败，请稍后重试', 'danger');
       } finally {
         this.downloading = false;
       }
@@ -875,20 +872,19 @@ createApp({
           body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount }),
         });
         const data = await res.json();
-        if (data.success) {
-          await this.loadProcessingBatches();
-          this.loadStats();
-          this.loadPoolStatus();
-          const expiredCount = data.expired_count || 0;
-          const message = expiredCount > 0
-            ? ('已确认完成 ' + data.completed_count + ' 张，标记过期 ' + expiredCount + ' 张')
-            : ('已确认完成 ' + data.completed_count + ' 张票');
-          showToast(message, 'success');
-        } else {
-          showToast(data.error || '确认失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '确认失败');
         }
+        await this.loadProcessingBatches();
+        this.loadStats();
+        this.loadPoolStatus();
+        const expiredCount = data.expired_count || 0;
+        const message = expiredCount > 0
+          ? ('已确认完成 ' + data.completed_count + ' 张，标记过期 ' + expiredCount + ' 张')
+          : ('已确认完成 ' + data.completed_count + ' 张票');
+        showToast(message, 'success');
       } catch (e) {
-        showToast('确认失败，请稍后重试', 'danger');
+        showToast(e.message || '确认失败，请稍后重试', 'danger');
       }
     },
     async openWinning() {

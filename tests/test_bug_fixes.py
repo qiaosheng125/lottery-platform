@@ -7044,12 +7044,15 @@ def test_admin_winning_defaults_date_filter_to_current_business_day():
 def test_client_dashboard_handles_mode_b_network_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "showToast('预览失败，请稍后重试', 'danger');" in content
-    assert "showToast('确认失败，请稍后重试', 'danger');" in content
+    assert "throw new Error(data.error || '预览失败');" in content
+    assert "showToast(e.message || '预览失败，请稍后重试', 'danger');" in content
+    assert "throw new Error(data.error || '确认失败');" in content
+    assert "showToast(e.message || '确认失败，请稍后重试', 'danger');" in content
 def test_client_dashboard_handles_download_and_open_winning_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "showToast('下载失败，请稍后重试', 'danger');" in content
+    assert "throw new Error(data.error || '下载失败');" in content
+    assert "showToast(e.message || '下载失败，请稍后重试', 'danger');" in content
     assert "throw new Error(data.error || '加载中奖记录失败');" in content
     assert "throw new Error(data.error || '筛选失败');" in content
     assert "showToast(e.message || '加载中奖记录失败请稍后重试', 'danger');" not in content
@@ -7091,6 +7094,15 @@ def test_client_dashboard_validates_winning_image_type_and_handles_password_http
     assert "if (!res.ok || data.success === false) {" in content
     assert "throw new Error(data.error || '密码修改失败');" in content
     assert "this.pwdError = e.message || '网络异常，请稍后重试';" in content
+    assert "throw new Error(data.error || '停止接单失败');" in content
+    assert "showToast(e.message || '停止接单失败', 'danger');" in content
+
+
+def test_client_dashboard_resets_stats_when_load_fails():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "throw new Error(data.error || '加载统计失败');" in content
+    assert "this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };" in content
 def test_admin_settings_template_checks_http_status_on_load():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     content = settings_template.read_text(encoding="utf-8")
