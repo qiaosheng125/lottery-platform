@@ -156,6 +156,7 @@
 <script>
 // Dashboard auto-refresh
 let dashboardRequestSeq = 0;
+let announcementRequestSeq = 0;
 async function refreshDashboard() {
   const requestSeq = ++dashboardRequestSeq;
   const onlineIndicator = document.getElementById('online-indicator');
@@ -264,6 +265,7 @@ async function refreshDashboard() {
 }
 
 async function loadAnnouncementSettings() {
+  const requestSeq = ++announcementRequestSeq;
   const status = document.getElementById('announcement-status');
   const input = document.getElementById('announcement-input');
   const enabled = document.getElementById('announcement-enabled');
@@ -273,11 +275,13 @@ async function loadAnnouncementSettings() {
     if (!res.ok || data.success === false) {
       throw new Error(data.error || '公告加载失败');
     }
+    if (requestSeq !== announcementRequestSeq) return;
     input.value = data.announcement || '';
     enabled.checked = !!data.announcement_enabled;
     status.textContent = enabled.checked ? '已启用' : '未启用';
     status.className = `badge ${enabled.checked ? 'bg-success' : 'bg-secondary'}`;
   } catch (e) {
+    if (requestSeq !== announcementRequestSeq) return;
     status.textContent = '加载失败';
     status.className = 'badge bg-danger';
     showToast(e.message || '公告加载失败', 'danger');
@@ -285,6 +289,7 @@ async function loadAnnouncementSettings() {
 }
 
 async function saveAnnouncement() {
+  const requestSeq = ++announcementRequestSeq;
   const status = document.getElementById('announcement-status');
   const input = document.getElementById('announcement-input');
   const enabled = document.getElementById('announcement-enabled');
@@ -303,14 +308,17 @@ async function saveAnnouncement() {
     if (!res.ok || data.success === false) {
       throw new Error(data.error || '公告发送失败');
     }
+    if (requestSeq !== announcementRequestSeq) return;
     status.textContent = enabled.checked ? '已启用' : '未启用';
     status.className = `badge ${enabled.checked ? 'bg-success' : 'bg-secondary'}`;
     showToast(enabled.checked ? '公告已发送' : '公告已保存', 'success');
   } catch (e) {
+    if (requestSeq !== announcementRequestSeq) return;
     status.textContent = '保存失败';
     status.className = 'badge bg-danger';
     showToast(e.message || '公告发送失败', 'danger');
   } finally {
+    if (requestSeq !== announcementRequestSeq) return;
     btn.disabled = false;
   }
 }

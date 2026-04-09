@@ -7337,6 +7337,14 @@ def test_admin_dashboard_ignores_stale_refresh_responses():
     assert content.count("if (requestSeq !== dashboardRequestSeq) return;") >= 2
 
 
+def test_admin_dashboard_ignores_stale_announcement_responses():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "let announcementRequestSeq = 0;" in content
+    assert content.count("const requestSeq = ++announcementRequestSeq;") >= 2
+    assert content.count("if (requestSeq !== announcementRequestSeq) return;") >= 5
+
+
 def test_admin_dashboard_contains_announcement_panel():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
