@@ -406,6 +406,7 @@ let modeACurrentTicketRequestSeq = 0;
 let dailyStatsRequestSeq = 0;
 let modeBProcessingRequestSeq = 0;
 let modeBPoolStatusRequestSeq = 0;
+let winningRecordsRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -905,6 +906,7 @@ createApp({
       }
     },
     async openWinning() {
+      const requestSeq = ++winningRecordsRequestSeq;
       this.winningVisible = true;
       this.winningLoading = true;
       this.winningFilterDate = '';
@@ -915,19 +917,23 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载中奖记录失败');
         }
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this._winningAll = Object.values(data.grouped || {}).flat();
         this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
         this.applyWinningGrouping();
       } catch(e) {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.winningGrouped = {};
         this._winningAll = [];
         this.winningFilterOptions = { dates: [], lottery_types: [] };
         showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');
       } finally {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.winningLoading = false;
       }
     },
     async applyWinningFilter() {
+      const requestSeq = ++winningRecordsRequestSeq;
       this.winningLoading = true;
       try {
         const params = new URLSearchParams();
@@ -938,12 +944,15 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '筛选失败');
         }
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this._winningAll = Object.values(data.grouped || {}).flat();
         this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
         this.applyWinningGrouping();
       } catch(e) {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         showToast(e.message || '筛选失败', 'danger');
       } finally {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.winningLoading = false;
       }
     },

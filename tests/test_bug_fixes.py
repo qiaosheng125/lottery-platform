@@ -7438,6 +7438,15 @@ def test_client_dashboard_ignores_stale_mode_a_and_mode_b_load_responses():
     assert "if (requestSeq !== modeBPoolStatusRequestSeq) return;" in content
 
 
+def test_client_dashboard_ignores_stale_winning_record_responses():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "let winningRecordsRequestSeq = 0;" in content
+    assert "const requestSeq = ++winningRecordsRequestSeq;" in content
+    assert "if (requestSeq !== winningRecordsRequestSeq) return;" in content
+    assert "this.winningVisible = true;" in content
+
+
 def test_database_info_moves_to_settings_page():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     settings_content = settings_template.read_text(encoding="utf-8")
