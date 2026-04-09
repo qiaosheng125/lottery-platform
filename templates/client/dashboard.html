@@ -869,7 +869,7 @@ createApp({
         const res = await fetch('/api/mode-b/confirm', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount }),
+          body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount, device_id: deviceId }),
         });
         const data = await res.json();
         if (!res.ok || data.success === false) {

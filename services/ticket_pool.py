@@ -763,14 +763,14 @@ def complete_tickets_batch(ticket_ids: List[int], user_id: int) -> int:
     return len(updated_ids)
 
 
-def finalize_ticket(ticket_id: int, user_id: int, final_status: str = 'completed') -> bool:
+def finalize_ticket(ticket_id: int, user_id: int, final_status: str = 'completed', device_id: str = None) -> bool:
     """Finalize a single assigned ticket as completed or expired."""
     completed_count = 1 if final_status != 'expired' else 0
-    result = finalize_tickets_batch([ticket_id], user_id, completed_count=completed_count)
+    result = finalize_tickets_batch([ticket_id], user_id, completed_count=completed_count, device_id=device_id)
     return (result['completed_count'] + result['expired_count']) > 0
 
 
-def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count: int = None) -> dict:
+def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count: int = None, device_id: str = None) -> dict:
     """Finalize an assigned batch, completing the first N tickets and expiring the rest."""
     if not ticket_ids:
         return {'completed_count': 0, 'expired_count': 0}
@@ -790,6 +790,7 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
             LotteryTicket.id.in_(ticket_ids),
             LotteryTicket.assigned_user_id == user_id,
             LotteryTicket.status == 'assigned',
+            *([LotteryTicket.assigned_device_id == device_id] if device_id else []),
         ).all()
         ticket_map = {ticket.id: ticket for ticket in tickets}
 
@@ -836,9 +837,10 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
                 WHERE id = ANY(:ids)
                   AND assigned_user_id = :user_id
                   AND status = 'assigned'
+                  AND (:device_id IS NULL OR assigned_device_id = :device_id)
                 RETURNING id
             """),
-            {'ids': completed_ids, 'user_id': user_id, 'now': now}
+            {'ids': completed_ids, 'user_id': user_id, 'now': now, 'device_id': device_id}
         ).fetchall()
         valid_completed_ids = [row[0] for row in completed_rows]
 
@@ -868,9 +870,10 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
                 WHERE id = ANY(:ids)
                   AND assigned_user_id = :user_id
                   AND status = 'assigned'
+                  AND (:device_id IS NULL OR assigned_device_id = :device_id)
                 RETURNING id
             """),
-            {'ids': expired_ids, 'user_id': user_id}
+            {'ids': expired_ids, 'user_id': user_id, 'device_id': device_id}
         ).fetchall()
         valid_expired_ids = [row[0] for row in expired_rows]
 

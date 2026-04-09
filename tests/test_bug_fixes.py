@@ -1680,6 +1680,22 @@ def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     assert "整数" in data["error"]
 
 
+def test_mode_b_confirm_rejects_other_device_tickets(app):
+    from services.mode_b_service import confirm_batch
+
+    with app.app_context():
+        user = create_user("modeb_confirm_device_scope_user", "secret123", client_mode="mode_b")
+        ticket = create_assigned_ticket(user, "device-b", "BATCH-DEVICE-SCOPE-001", 1)
+
+        result = confirm_batch([ticket.id], user_id=user.id, device_id="device-a")
+        db.session.expire_all()
+        refreshed = db.session.get(LotteryTicket, ticket.id)
+
+    assert result["success"] is False
+    assert "设备" in result["error"]
+    assert refreshed.status == "assigned"
+
+
 def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
     with app.app_context():
         user = create_user("modeb_processing_separate_user", "secret123", client_mode="mode_b")
@@ -6589,8 +6605,9 @@ def test_mode_b_download_rejects_invalid_count(app, client):
 def test_client_dashboard_handles_mode_b_confirm_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "showToast(data.error || '确认失败', 'danger');" in content
-    assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount })," in content
+    assert "throw new Error(data.error || '确认失败');" in content
+    assert "showToast(e.message || '确认失败，请稍后重试', 'danger');" in content
+    assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount, device_id: deviceId })," in content
     assert "showToast(message, 'success');" in content
     assert "showToast('请等待 1 秒后再下载', 'warning');" in content
     assert "bDownloadCooldownUntil > Date.now()" in content

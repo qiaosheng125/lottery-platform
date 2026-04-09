@@ -146,17 +146,22 @@ def confirm():
     data = request.get_json(silent=True) or {}
     ticket_ids = data.get('ticket_ids', [])
     completed_count = data.get('completed_count')
+    device_id = (data.get('device_id') or '').strip()
     if not ticket_ids:
         return jsonify({'success': False, 'error': '缺少票ID列表'}), 400
     if not isinstance(ticket_ids, list):
         return jsonify({'success': False, 'error': '票ID列表格式无效'}), 400
+    if device_id:
+        error = _validate_device_info(device_id)
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
 
     try:
         parsed_ticket_ids = [int(i) for i in ticket_ids]
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': '票ID必须是整数'}), 400
 
-    result = confirm_batch(parsed_ticket_ids, current_user.id, completed_count=completed_count)
+    result = confirm_batch(parsed_ticket_ids, current_user.id, completed_count=completed_count, device_id=device_id or None)
     if not result.get('success') and (('整数' in (result.get('error') or '')) or ('范围' in (result.get('error') or ''))):
         return jsonify(result), 400
     return jsonify(result)

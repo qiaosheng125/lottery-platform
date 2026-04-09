@@ -206,7 +206,7 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
     return batches
 
 
-def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = None) -> dict:
+def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = None, device_id: str = None) -> dict:
     """确认收到，批量改为 completed"""
     ticket_ids = list(dict.fromkeys(ticket_ids))
     if completed_count is not None:
@@ -217,7 +217,7 @@ def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = No
         if completed_count < 0 or completed_count > len(ticket_ids):
             return {'success': False, 'error': '已完成张数超出当前批次范围', 'completed_count': 0, 'expired_count': 0}
 
-    result = finalize_tickets_batch(ticket_ids, user_id, completed_count=completed_count)
+    result = finalize_tickets_batch(ticket_ids, user_id, completed_count=completed_count, device_id=device_id)
     if result['completed_count'] == 0 and result['expired_count'] == 0:
-        return {'success': False, 'error': '未找到可确认的票据，可能已完成或不属于当前用户', 'completed_count': 0}
+        return {'success': False, 'error': '未找到可确认的票据，可能已完成或不属于当前用户或设备', 'completed_count': 0}
     return {'success': True, **result}
