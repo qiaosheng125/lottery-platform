@@ -7195,6 +7195,17 @@ def test_admin_upload_template_resets_to_first_page_after_successful_mutations()
     assert "if (data.success) {\n          this.page = 1;\n          this.loadFiles();\n        }" in content
 
 
+def test_admin_upload_template_checks_export_http_errors_before_download():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "async exportByDate() {" in content
+    assert "const res = await fetch(`/admin/api/tickets/export-by-date?${params}`);" in content
+    assert "if (!res.ok) {" in content
+    assert "throw new Error(data.error || data.message || '导出失败');" in content
+    assert "const blob = await res.blob();" in content
+    assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)

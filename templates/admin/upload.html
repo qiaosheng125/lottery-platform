@@ -269,10 +269,30 @@ createApp({
       }
       this.uploading = false;
     },
-    exportByDate() {
+    async exportByDate() {
       const params = new URLSearchParams();
       if (this.filterDate) params.set('date', this.filterDate);
-      window.location.href = `/admin/api/tickets/export-by-date?${params}`;
+      try {
+        const res = await fetch(`/admin/api/tickets/export-by-date?${params}`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || data.message || '导出失败');
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const encodedName = disposition.match(/filename\\*=UTF-8''([^;]+)/i);
+        const filename = encodedName ? decodeURIComponent(encodedName[1]) : 'tickets.xlsx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        showToast(e.message || '导出失败，请稍后重试', 'danger');
+      }
     },
     async revokeFile(id, name) {
       if (!confirm(`确认撤回文件"${name}"？`)) return;
