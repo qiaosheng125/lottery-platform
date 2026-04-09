@@ -155,7 +155,9 @@
 <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 <script>
 // Dashboard auto-refresh
+let dashboardRequestSeq = 0;
 async function refreshDashboard() {
+  const requestSeq = ++dashboardRequestSeq;
   const onlineIndicator = document.getElementById('online-indicator');
   try {
     const res = await fetch('/admin/api/dashboard-data');
@@ -163,6 +165,7 @@ async function refreshDashboard() {
     if (!res.ok || data.success === false) {
       throw new Error(data.error || '仪表盘刷新失败');
     }
+    if (requestSeq !== dashboardRequestSeq) return;
     if (onlineIndicator) {
       onlineIndicator.textContent = '实时';
       onlineIndicator.className = 'badge bg-success';
@@ -251,6 +254,7 @@ async function refreshDashboard() {
       speedTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2">暂无在线设备</td></tr>';
     }
   } catch(e) {
+    if (requestSeq !== dashboardRequestSeq) return;
     console.error('Dashboard refresh error:', e);
     if (onlineIndicator) {
       onlineIndicator.textContent = '连接异常';

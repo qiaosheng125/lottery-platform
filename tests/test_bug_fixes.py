@@ -7329,6 +7329,14 @@ def test_admin_dashboard_marks_refresh_failure_in_indicator():
     assert "onlineIndicator.className = 'badge bg-danger';" in content
 
 
+def test_admin_dashboard_ignores_stale_refresh_responses():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "let dashboardRequestSeq = 0;" in content
+    assert "const requestSeq = ++dashboardRequestSeq;" in content
+    assert content.count("if (requestSeq !== dashboardRequestSeq) return;") >= 2
+
+
 def test_admin_dashboard_contains_announcement_panel():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
