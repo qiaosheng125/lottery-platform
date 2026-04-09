@@ -261,6 +261,9 @@
 </style>
 <script>
 const { createApp } = Vue;
+let winningFilterOptionsRequestSeq = 0;
+let winningRecordsRequestSeq = 0;
+let matchResultsRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -291,12 +294,14 @@ createApp({
   },
   methods: {
     async loadFilterOptions() {
+      const requestSeq = ++winningFilterOptionsRequestSeq;
       try {
         const res = await fetch('/admin/api/winning/filter-options');
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载筛选项失败');
         }
+        if (requestSeq !== winningFilterOptionsRequestSeq) return;
         this.usernameOptions = data.usernames || [];
         this.winningDateOptions = data.dates || [];
         this.lotteryTypeOptions = data.lottery_types || [];
@@ -305,6 +310,7 @@ createApp({
           this.filterDate = this.currentBusinessDate;
         }
       } catch(e) {
+        if (requestSeq !== winningFilterOptionsRequestSeq) return;
         this.usernameOptions = [];
         this.winningDateOptions = [];
         this.lotteryTypeOptions = [];
@@ -322,6 +328,7 @@ createApp({
       await this.loadWinning();
     },
     async loadWinning() {
+      const requestSeq = ++winningRecordsRequestSeq;
       this.loading = true;
       const params = new URLSearchParams({ page: this.page, per_page: 50 });
       if (this.filterUsername) params.set('username', this.filterUsername);
@@ -335,6 +342,7 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载中奖记录失败');
         }
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.records = data.records || [];
         this.total = data.total || 0;
         this.totalPages = data.pages || 1;
@@ -343,6 +351,7 @@ createApp({
         this.summaryTax = (data.summary && data.summary.tax) || 0;
         this.summaryMissing = (data.summary && data.summary.missing) || 0;
       } catch (e) {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.records = [];
         this.total = 0;
         this.totalPages = 1;
@@ -352,6 +361,7 @@ createApp({
         this.summaryMissing = 0;
         showToast(e.message || '加载中奖记录失败', 'danger');
       } finally {
+        if (requestSeq !== winningRecordsRequestSeq) return;
         this.loading = false;
       }
     },
@@ -411,6 +421,7 @@ createApp({
       }
     },
     async loadMatchResults() {
+      const requestSeq = ++matchResultsRequestSeq;
       const params = new URLSearchParams();
       if (this.mrFilterDate) params.set('date', this.mrFilterDate);
       try {
@@ -419,9 +430,11 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载赛果列表失败');
         }
+        if (requestSeq !== matchResultsRequestSeq) return;
         this.matchResults = data.results || [];
         this.mrDateOptions = data.dates || [];
       } catch (e) {
+        if (requestSeq !== matchResultsRequestSeq) return;
         this.matchResults = [];
         this.mrDateOptions = [];
         showToast(e.message || '加载赛果列表失败', 'danger');

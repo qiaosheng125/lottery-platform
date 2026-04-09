@@ -7407,6 +7407,20 @@ def test_admin_users_template_ignores_stale_list_and_lottery_type_responses():
     assert "if (requestSeq !== usersListRequestSeq) return;" in content
 
 
+def test_admin_winning_template_ignores_stale_filter_record_and_match_result_responses():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "let winningFilterOptionsRequestSeq = 0;" in content
+    assert "let winningRecordsRequestSeq = 0;" in content
+    assert "let matchResultsRequestSeq = 0;" in content
+    assert "const requestSeq = ++winningFilterOptionsRequestSeq;" in content
+    assert "const requestSeq = ++winningRecordsRequestSeq;" in content
+    assert "const requestSeq = ++matchResultsRequestSeq;" in content
+    assert "if (requestSeq !== winningFilterOptionsRequestSeq) return;" in content
+    assert "if (requestSeq !== winningRecordsRequestSeq) return;" in content
+    assert "if (requestSeq !== matchResultsRequestSeq) return;" in content
+
+
 def test_database_info_moves_to_settings_page():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     settings_content = settings_template.read_text(encoding="utf-8")
