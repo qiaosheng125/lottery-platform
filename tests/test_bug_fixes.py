@@ -7421,6 +7421,23 @@ def test_admin_winning_template_ignores_stale_filter_record_and_match_result_res
     assert "if (requestSeq !== matchResultsRequestSeq) return;" in content
 
 
+def test_client_dashboard_ignores_stale_mode_a_and_mode_b_load_responses():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "let modeACurrentTicketRequestSeq = 0;" in content
+    assert "let dailyStatsRequestSeq = 0;" in content
+    assert "let modeBProcessingRequestSeq = 0;" in content
+    assert "let modeBPoolStatusRequestSeq = 0;" in content
+    assert "const requestSeq = ++modeACurrentTicketRequestSeq;" in content
+    assert "const requestSeq = ++dailyStatsRequestSeq;" in content
+    assert "const requestSeq = ++modeBProcessingRequestSeq;" in content
+    assert "const requestSeq = ++modeBPoolStatusRequestSeq;" in content
+    assert "if (requestSeq !== modeACurrentTicketRequestSeq) return;" in content
+    assert "if (requestSeq !== dailyStatsRequestSeq) return;" in content
+    assert "if (requestSeq !== modeBProcessingRequestSeq) return;" in content
+    assert "if (requestSeq !== modeBPoolStatusRequestSeq) return;" in content
+
+
 def test_database_info_moves_to_settings_page():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     settings_content = settings_template.read_text(encoding="utf-8")

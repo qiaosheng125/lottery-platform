@@ -402,6 +402,10 @@ registerDeviceAndCheckName();
 })();
 
 const { createApp } = Vue;
+let modeACurrentTicketRequestSeq = 0;
+let dailyStatsRequestSeq = 0;
+let modeBProcessingRequestSeq = 0;
+let modeBPoolStatusRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -531,13 +535,16 @@ createApp({
       document.body.classList.remove('mode-a-active');
     },
     async loadCurrentModeATicket() {
+      const requestSeq = ++modeACurrentTicketRequestSeq;
       try {
         const res = await fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
         if (!res.ok || data.success === false || !data.ticket) {
+          if (requestSeq !== modeACurrentTicketRequestSeq) return;
           this.resetModeAState();
           return;
         }
+        if (requestSeq !== modeACurrentTicketRequestSeq) return;
         this.modeAActive = true;
         document.body.classList.add('mode-a-active');
         this.currentTicket = data.ticket;
@@ -545,16 +552,19 @@ createApp({
         this.historyOffset = 0;
         this.startCountdown(data.ticket.deadline_time);
       } catch (e) {
+        if (requestSeq !== modeACurrentTicketRequestSeq) return;
         this.resetModeAState();
       }
     },
     async loadStats() {
+      const requestSeq = ++dailyStatsRequestSeq;
       try {
         const res = await fetch('/api/user/daily-stats');
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载统计失败');
         }
+        if (requestSeq !== dailyStatsRequestSeq) return;
         this.stats = data;
         if (data.mode_b_options && data.mode_b_options.length > 0) {
           this.bOptions = data.mode_b_options;
@@ -564,6 +574,7 @@ createApp({
           }
         }
       } catch(e) {
+        if (requestSeq !== dailyStatsRequestSeq) return;
         this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };
       }
     },
@@ -765,26 +776,32 @@ createApp({
     },
     // Mode B methods
     async loadProcessingBatches() {
+      const requestSeq = ++modeBProcessingRequestSeq;
       try {
         const res = await fetch(`/api/mode-b/processing?device_id=${encodeURIComponent(deviceId)}`);
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载处理中批次失败');
         }
+        if (requestSeq !== modeBProcessingRequestSeq) return;
         this.bPendingBatches = data.batches || [];
       } catch(e) {
+        if (requestSeq !== modeBProcessingRequestSeq) return;
         this.bPendingBatches = [];
       }
     },
     async loadPoolStatus() {
+      const requestSeq = ++modeBPoolStatusRequestSeq;
       try {
         const res = await fetch('/api/mode-b/pool-status');
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载票池状态失败');
         }
+        if (requestSeq !== modeBPoolStatusRequestSeq) return;
         this.poolStatus = data;
       } catch(e) {
+        if (requestSeq !== modeBPoolStatusRequestSeq) return;
         this.poolStatus = { total_pending: 0, by_type: [] };
       }
     },
