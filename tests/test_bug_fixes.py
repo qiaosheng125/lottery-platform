@@ -7206,6 +7206,18 @@ def test_admin_upload_template_checks_export_http_errors_before_download():
     assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
 
 
+def test_admin_upload_template_listens_for_realtime_file_events():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "this._reloadFileList = () => {" in content
+    assert "window.addEventListener('file_uploaded', this._reloadFileList);" in content
+    assert "window.addEventListener('file_revoked', this._reloadFileList);" in content
+    assert "window.addEventListener('pool_updated', this._reloadFileList);" in content
+    assert "window.removeEventListener('file_uploaded', this._reloadFileList);" in content
+    assert "window.removeEventListener('file_revoked', this._reloadFileList);" in content
+    assert "window.removeEventListener('pool_updated', this._reloadFileList);" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)

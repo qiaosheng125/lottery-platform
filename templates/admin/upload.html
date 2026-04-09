@@ -154,7 +154,20 @@ createApp({
       listError: '',
     };
   },
-  mounted() { this.loadFiles(); },
+  mounted() {
+    this.loadFiles();
+    this._reloadFileList = () => {
+      this.loadFiles();
+    };
+    window.addEventListener('file_uploaded', this._reloadFileList);
+    window.addEventListener('file_revoked', this._reloadFileList);
+    window.addEventListener('pool_updated', this._reloadFileList);
+  },
+  beforeUnmount() {
+    window.removeEventListener('file_uploaded', this._reloadFileList);
+    window.removeEventListener('file_revoked', this._reloadFileList);
+    window.removeEventListener('pool_updated', this._reloadFileList);
+  },
   methods: {
     async loadFiles() {
       this.loading = true;
