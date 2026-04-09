@@ -292,6 +292,7 @@ def upload_files():
         try:
             result = process_uploaded_file(f, current_user.id)
         except Exception as exc:
+            db.session.rollback()
             current_app.logger.exception("Admin upload failed for file %s", getattr(f, 'filename', ''))
             result = {
                 'success': False,

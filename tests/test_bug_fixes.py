@@ -1419,6 +1419,49 @@ def test_admin_file_upload_keeps_batch_running_when_one_file_raises(app, client,
     assert notified["count"] == 1
 
 
+def test_admin_file_upload_rolls_back_dirty_session_after_real_processing_exception(app, client, monkeypatch):
+    from services import file_parser
+
+    original_parse_ticket_line = file_parser.parse_ticket_line
+
+    def flaky_parse_ticket_line(line):
+        if line == "BOOM":
+            raise RuntimeError("解析炸了")
+        return original_parse_ticket_line(line)
+
+    monkeypatch.setattr(file_parser, "parse_ticket_line", flaky_parse_ticket_line)
+
+    with app.app_context():
+        admin = User(username="admin_upload_real_exception", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_real_exception", "password": "secret123"})
+    assert resp.status_code == 200
+
+    upload = client.post(
+        "/admin/files/upload",
+        data={
+            "files": [
+                (make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "BOOM\n"), "AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt"),
+                (make_upload_file("BB_P7胜平负2倍投_金额4元_1张_00.56_26034.txt", "SPF|1=3|1*1|2\n"), "BB_P7胜平负2倍投_金额4元_1张_00.56_26034.txt"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    assert upload.status_code == 200
+    data = upload.get_json()
+    assert data["success"] is True
+    assert data["results"][0]["success"] is False
+    assert "上传处理失败" in data["results"][0]["message"]
+    assert data["results"][1]["success"] is True
+
+    with app.app_context():
+        assert UploadedFile.query.filter_by(original_filename="AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt").count() == 0
+        assert UploadedFile.query.filter_by(original_filename="BB_P7胜平负2倍投_金额4元_1张_00.56_26034.txt").count() == 1
+
+
 def test_admin_file_upload_reports_empty_filename_as_failure(app, client):
     with app.app_context():
         admin = User(username="admin_upload_empty_name", is_admin=True)
