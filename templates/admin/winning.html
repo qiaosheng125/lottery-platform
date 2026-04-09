@@ -264,6 +264,7 @@ const { createApp } = Vue;
 let winningFilterOptionsRequestSeq = 0;
 let winningRecordsRequestSeq = 0;
 let matchResultsRequestSeq = 0;
+let matchResultDetailRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -491,6 +492,7 @@ createApp({
       }
     },
     async viewResultDetail(r) {
+      const requestSeq = ++matchResultDetailRequestSeq;
       this.detailVisible = true;
       this.detailLoading = true;
       this.detailPeriod = r.detail_period;
@@ -507,11 +509,14 @@ createApp({
         Object.keys(data.result_data || {}).sort((a, b) => Number(a) - Number(b)).forEach(k => {
           sorted[k] = data.result_data[k];
         });
+        if (requestSeq !== matchResultDetailRequestSeq) return;
         this.detailRows = sorted;
       } catch (e) {
+        if (requestSeq !== matchResultDetailRequestSeq) return;
         this.detailRows = {};
         showToast(e.message || '加载赛果详情失败', 'danger');
       } finally {
+        if (requestSeq !== matchResultDetailRequestSeq) return;
         this.detailLoading = false;
       }
     },

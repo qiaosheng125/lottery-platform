@@ -7421,6 +7421,15 @@ def test_admin_winning_template_ignores_stale_filter_record_and_match_result_res
     assert "if (requestSeq !== matchResultsRequestSeq) return;" in content
 
 
+def test_admin_winning_template_ignores_stale_match_result_detail_responses():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "let matchResultDetailRequestSeq = 0;" in content
+    assert "const requestSeq = ++matchResultDetailRequestSeq;" in content
+    assert "if (requestSeq !== matchResultDetailRequestSeq) return;" in content
+    assert "this.detailLoading = true;" in content
+
+
 def test_client_dashboard_ignores_stale_mode_a_and_mode_b_load_responses():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
