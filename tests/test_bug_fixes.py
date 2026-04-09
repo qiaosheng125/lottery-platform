@@ -1507,7 +1507,7 @@ def make_upload_file(filename: str, content: str) -> FileStorage:
     return FileStorage(stream=io.BytesIO(content.encode("utf-8")), filename=filename, content_type="text/plain")
 
 
-def test_mode_b_processing_without_device_id_returns_all_batches(app, client):
+def test_mode_b_processing_requires_device_id(app, client):
     with app.app_context():
         user = create_user("modeb_user", "secret123", client_mode="mode_b")
         create_assigned_ticket(user, "device-a", "A001", 1)
@@ -1517,14 +1517,11 @@ def test_mode_b_processing_without_device_id_returns_all_batches(app, client):
     assert resp.status_code == 200
 
     resp = client.get("/api/mode-b/processing")
-    assert resp.status_code == 200
+    assert resp.status_code == 400
 
     data = resp.get_json()
-    assert data["success"] is True
-    total_count = sum(batch["count"] for batch in data["batches"])
-    all_ticket_ids = sorted(ticket_id for batch in data["batches"] for ticket_id in batch["ticket_ids"])
-    assert total_count == 2
-    assert len(all_ticket_ids) == 2
+    assert data["success"] is False
+    assert "设备ID" in data["error"]
 
 
 def test_mode_b_processing_with_device_id_filters_batches(app, client):

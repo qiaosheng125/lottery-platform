@@ -129,12 +129,14 @@ def download():
 def processing():
     """Return assigned batches for the current user."""
     device_id = (request.args.get('device_id') or '').strip()
-    if device_id:
-        error = _validate_device_info(device_id)
-        if error:
-            return jsonify({'success': False, 'error': error}), 400
+    if not device_id:
+        return jsonify({'success': False, 'error': '缺少设备ID'}), 400
 
-    batches = get_processing_batches(current_user.id, device_id or None)
+    error = _validate_device_info(device_id)
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
+
+    batches = get_processing_batches(current_user.id, device_id)
     return jsonify({'success': True, 'batches': batches})
 
 
