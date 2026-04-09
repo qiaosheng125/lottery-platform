@@ -6,11 +6,14 @@ def _engine_options(db_url: str) -> dict:
     """SQLite doesn't support pool_size etc."""
     if db_url.startswith('sqlite'):
         return {'pool_pre_ping': True}
+    pool_size = int(os.environ.get('DB_POOL_SIZE', '5'))
+    max_overflow = int(os.environ.get('DB_MAX_OVERFLOW', '5'))
+    pool_recycle = int(os.environ.get('DB_POOL_RECYCLE', '300'))
     return {
         'pool_pre_ping': True,
-        'pool_recycle': 300,
-        'pool_size': 10,
-        'max_overflow': 20,
+        'pool_recycle': pool_recycle,
+        'pool_size': pool_size,
+        'max_overflow': max_overflow,
     }
 
 
@@ -58,4 +61,3 @@ config = {
     'production': ProductionConfig,
     'default': DevelopmentConfig,
 }
-

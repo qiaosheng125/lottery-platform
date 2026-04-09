@@ -1,11 +1,13 @@
 """
 Live concurrency test for the core ticket assignment flow.
 
-Scenario:
+Default scenario:
 - 4 accounts total: 2 mode A, 2 mode B
 - 10 devices per account, 40 devices concurrent
 - Each mode B device downloads 20 tickets once
 - Each mode A device requests one ticket once
+
+This script also supports strict multi-worker acceptance runs via env vars.
 
 Run manually:
   $env:RUN_LIVE_CONCURRENCY_TESTS=1
@@ -23,6 +25,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -56,21 +59,24 @@ if os.environ.get("RUN_LIVE_CONCURRENCY_TESTS") != "1":
 
 BASE_URL = "http://127.0.0.1:5000"
 TEST_PASSWORD = "test123456"
-DEVICES_PER_ACCOUNT = 10
-MODE_B_BATCH_COUNT = 20
-MODE_A_REQUESTS_PER_DEVICE = 1
+DEVICES_PER_ACCOUNT = int(os.environ.get("LIVE_TEST_DEVICES_PER_ACCOUNT", "10"))
+MODE_B_BATCH_COUNT = int(os.environ.get("LIVE_TEST_MODE_B_BATCH_COUNT", "20"))
+MODE_A_REQUESTS_PER_DEVICE = int(os.environ.get("LIVE_TEST_MODE_A_REQUESTS_PER_DEVICE", "1"))
+MODE_A_ACCOUNT_COUNT = int(os.environ.get("LIVE_TEST_MODE_A_ACCOUNTS", "2"))
+MODE_B_ACCOUNT_COUNT = int(os.environ.get("LIVE_TEST_MODE_B_ACCOUNTS", "2"))
 SERVER_START_TIMEOUT_SECONDS = 30
 DEVICE_REQUEST_TIMEOUT_SECONDS = 20
 LIVE_TEST_FILES_DIR = ROOT / "tests" / "live_test_files"
 SERVER_LOG_PATH = ROOT / "tests" / "live_concurrency_server.log"
 RUN_LABEL = uuid.uuid4().hex[:6]
+LIVE_TEST_SERVER_MODE = os.environ.get("LIVE_TEST_SERVER_MODE", "socketio").lower()
+LIVE_TEST_GUNICORN_WORKERS = int(os.environ.get("LIVE_TEST_GUNICORN_WORKERS", "2"))
+LIVE_TEST_STRICT_DEVICE_GUARD = os.environ.get("LIVE_TEST_STRICT_DEVICE_GUARD", "1") == "1"
 
-TEST_ACCOUNTS = [
-    {"username": "load_mode_a_1", "client_mode": "mode_a"},
-    {"username": "load_mode_a_2", "client_mode": "mode_a"},
-    {"username": "load_mode_b_1", "client_mode": "mode_b"},
-    {"username": "load_mode_b_2", "client_mode": "mode_b"},
-]
+TEST_ACCOUNTS = (
+    [{"username": f"load_mode_a_{i}", "client_mode": "mode_a"} for i in range(1, MODE_A_ACCOUNT_COUNT + 1)]
+    + [{"username": f"load_mode_b_{i}", "client_mode": "mode_b"} for i in range(1, MODE_B_ACCOUNT_COUNT + 1)]
+)
 
 RESULTS = []
 LOCK = threading.Lock()
@@ -209,8 +215,8 @@ def prepare_live_environment():
         ensure_test_accounts()
         reset_test_account_tickets()
 
-        required_pending = DEVICES_PER_ACCOUNT * 2 * MODE_A_REQUESTS_PER_DEVICE
-        required_pending += DEVICES_PER_ACCOUNT * 2 * MODE_B_BATCH_COUNT
+        required_pending = DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
+        required_pending += DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT * MODE_B_BATCH_COUNT
         required_pending += 40  # leave headroom over the mode B reserve
 
         pending = import_test_files_until_sufficient(required_pending)
@@ -234,14 +240,36 @@ def wait_for_server():
 
 def start_server_process():
     log_file = open(SERVER_LOG_PATH, "w", encoding="utf-8")
-    process = subprocess.Popen(
-        [
+    if LIVE_TEST_SERVER_MODE == "gunicorn":
+        if os.name == "nt":
+            log_file.close()
+            raise RuntimeError(
+                "gunicorn multi-worker live validation is unsupported on Windows; "
+                "run this test on a Linux host with PostgreSQL + Redis"
+            )
+        command = [
+            sys.executable,
+            "-m",
+            "gunicorn",
+            "-c",
+            str(ROOT / "gunicorn_config.py"),
+            "-w",
+            str(LIVE_TEST_GUNICORN_WORKERS),
+            "-b",
+            "127.0.0.1:5000",
+            "app:create_app()",
+        ]
+    else:
+        command = [
             sys.executable,
             "-c",
             "from app import create_app; from extensions import socketio; "
             "app=create_app(); "
             "socketio.run(app, host='127.0.0.1', port=5000, debug=False, use_reloader=False, allow_unsafe_werkzeug=True)",
-        ],
+        ]
+
+    process = subprocess.Popen(
+        command,
         cwd=ROOT,
         stdout=log_file,
         stderr=subprocess.STDOUT,
@@ -325,6 +353,8 @@ def worker_mode_a(username: str, device_label: str, assigned_ids: list[int], err
                 RESULTS.append(
                     {
                         "device": device_label,
+                        "device_id": device_id,
+                        "device_name": device_name,
                         "username": username,
                         "mode": "A",
                         "status_code": resp.status_code,
@@ -366,9 +396,21 @@ def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], err
             for file_entry in data.get("files", []):
                 ticket_ids.extend(file_entry.get("ticket_ids", []))
             if ticket_ids:
+                if LIVE_TEST_STRICT_DEVICE_GUARD:
+                    wrong_confirm_resp = session.post(
+                        f"{BASE_URL}/api/mode-b/confirm",
+                        json={"ticket_ids": ticket_ids, "device_id": f"wrong-{device_id}"},
+                        timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
+                    )
+                    wrong_confirm_data = wrong_confirm_resp.json()
+                    if wrong_confirm_data.get("success"):
+                        raise RuntimeError(
+                            f"mode_b wrong-device confirm unexpectedly succeeded: {wrong_confirm_data}"
+                        )
+
                 confirm_resp = session.post(
                     f"{BASE_URL}/api/mode-b/confirm",
-                    json={"ticket_ids": ticket_ids},
+                    json={"ticket_ids": ticket_ids, "device_id": device_id},
                     timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
                 )
                 confirm_data = confirm_resp.json()
@@ -379,6 +421,8 @@ def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], err
             RESULTS.append(
                 {
                     "device": device_label,
+                    "device_id": device_id,
+                    "device_name": device_name,
                     "username": username,
                     "mode": "B",
                     "status_code": resp.status_code,
@@ -397,35 +441,18 @@ def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], err
 
 def build_threads(assigned_ids: list[int], errors: list[str]):
     threads = []
-    for index in range(DEVICES_PER_ACCOUNT):
-        threads.append(
-            threading.Thread(
-                target=worker_mode_a,
-                args=("load_mode_a_1", f"A1-D{index + 1:02d}", assigned_ids, errors),
-                daemon=True,
+    for account in TEST_ACCOUNTS:
+        prefix = "A" if account["client_mode"] == "mode_a" else "B"
+        suffix = account["username"].rsplit("_", 1)[-1]
+        worker = worker_mode_a if account["client_mode"] == "mode_a" else worker_mode_b
+        for index in range(DEVICES_PER_ACCOUNT):
+            threads.append(
+                threading.Thread(
+                    target=worker,
+                    args=(account["username"], f"{prefix}{suffix}-D{index + 1:02d}", assigned_ids, errors),
+                    daemon=True,
+                )
             )
-        )
-        threads.append(
-            threading.Thread(
-                target=worker_mode_a,
-                args=("load_mode_a_2", f"A2-D{index + 1:02d}", assigned_ids, errors),
-                daemon=True,
-            )
-        )
-        threads.append(
-            threading.Thread(
-                target=worker_mode_b,
-                args=("load_mode_b_1", f"B1-D{index + 1:02d}", assigned_ids, errors),
-                daemon=True,
-            )
-        )
-        threads.append(
-            threading.Thread(
-                target=worker_mode_b,
-                args=("load_mode_b_2", f"B2-D{index + 1:02d}", assigned_ids, errors),
-                daemon=True,
-            )
-        )
     return threads
 
 
@@ -458,26 +485,130 @@ def summarize_results(all_assigned_ids: list[int], errors: list[str], total_elap
         for item in errors[:20]:
             print(f"  - {item}")
 
-    checker = requests.Session()
-    login_resp = checker.post(
-        f"{BASE_URL}/auth/login",
-        json={"username": "load_mode_b_1", "password": TEST_PASSWORD, "device_id": f"checker-{uuid.uuid4().hex[:6]}"},
-        timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
-    )
-    if login_resp.status_code == 200:
-        pool_resp = checker.get(f"{BASE_URL}/api/mode-b/pool-status", timeout=DEVICE_REQUEST_TIMEOUT_SECONDS)
-        if pool_resp.status_code == 200:
-            pool_data = pool_resp.json()
-            print(f"pool remaining after run: {pool_data.get('total_pending', 0)}")
-            print("pool by_type after run:")
-            for entry in pool_data.get("by_type", [])[:20]:
-                print(
-                    f"  - type={entry.get('lottery_type')} "
-                    f"deadline={entry.get('deadline_time')} count={entry.get('count')}"
-                )
+    checker_account = next((account for account in TEST_ACCOUNTS if account["client_mode"] == "mode_b"), None)
+    if checker_account:
+        checker = requests.Session()
+        login_resp = checker.post(
+            f"{BASE_URL}/auth/login",
+            json={"username": checker_account["username"], "password": TEST_PASSWORD, "device_id": f"checker-{uuid.uuid4().hex[:6]}"},
+            timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
+        )
+        if login_resp.status_code == 200:
+            pool_resp = checker.get(f"{BASE_URL}/api/mode-b/pool-status", timeout=DEVICE_REQUEST_TIMEOUT_SECONDS)
+            if pool_resp.status_code == 200:
+                pool_data = pool_resp.json()
+                print(f"pool remaining after run: {pool_data.get('total_pending', 0)}")
+                print("pool by_type after run:")
+                for entry in pool_data.get("by_type", [])[:20]:
+                    print(
+                        f"  - type={entry.get('lottery_type')} "
+                        f"deadline={entry.get('deadline_time')} count={entry.get('count')}"
+                    )
 
     print("=" * 72)
     return duplicate_ids, slow_requests
+
+
+def validate_strict_invariants():
+    app = create_app()
+    with app.app_context():
+        usernames = [account["username"] for account in TEST_ACCOUNTS]
+        test_users = {
+            user.username: user
+            for user in User.query.filter(User.username.in_(usernames)).all()
+        }
+        assert len(test_users) == len(TEST_ACCOUNTS), "missing test accounts in database"
+
+        success_results = [item for item in RESULTS if item.get("success")]
+        ownership = {}
+        for item in success_results:
+            for ticket_id in item.get("ticket_ids", []):
+                if ticket_id in ownership:
+                    raise AssertionError(f"ticket {ticket_id} claimed twice in success results")
+                ownership[ticket_id] = item
+
+        if not ownership:
+            raise AssertionError("strict validation found no successfully claimed ticket ids")
+
+        tickets = LotteryTicket.query.filter(LotteryTicket.id.in_(list(ownership.keys()))).all()
+        ticket_map = {ticket.id: ticket for ticket in tickets}
+        missing_ids = [ticket_id for ticket_id in ownership if ticket_id not in ticket_map]
+        assert not missing_ids, f"claimed tickets missing from database: {missing_ids[:10]}"
+
+        touched_file_ids = set()
+        per_user_completed = Counter()
+        per_user_assigned = Counter()
+
+        for ticket_id, result in ownership.items():
+            ticket = ticket_map[ticket_id]
+            touched_file_ids.add(ticket.source_file_id)
+            expected_user = test_users[result["username"]]
+
+            assert ticket.status == "completed", f"ticket {ticket_id} not completed: {ticket.status}"
+            assert ticket.assigned_user_id == expected_user.id, (
+                f"ticket {ticket_id} assigned_user mismatch: expected {expected_user.id}, got {ticket.assigned_user_id}"
+            )
+            assert ticket.assigned_username == result["username"], (
+                f"ticket {ticket_id} assigned_username mismatch: expected {result['username']}, got {ticket.assigned_username}"
+            )
+            assert ticket.assigned_device_id == result["device_id"], (
+                f"ticket {ticket_id} device mismatch: expected {result['device_id']}, got {ticket.assigned_device_id}"
+            )
+            assert ticket.assigned_device_name == result["device_name"], (
+                f"ticket {ticket_id} device_name mismatch: expected {result['device_name']}, got {ticket.assigned_device_name}"
+            )
+            assert ticket.completed_at is not None, f"ticket {ticket_id} completed_at missing"
+            per_user_completed[result["username"]] += 1
+
+        lingering_assigned = LotteryTicket.query.filter(
+            LotteryTicket.assigned_user_id.in_([user.id for user in test_users.values()]),
+            LotteryTicket.status == "assigned",
+        ).all()
+        assert not lingering_assigned, f"assigned tickets left behind: {[ticket.id for ticket in lingering_assigned[:10]]}"
+
+        for username, user in test_users.items():
+            per_user_assigned[username] = LotteryTicket.query.filter(
+                LotteryTicket.assigned_user_id == user.id,
+                LotteryTicket.status == "assigned",
+            ).count()
+            if user.daily_ticket_limit is not None:
+                assert per_user_completed[username] <= user.daily_ticket_limit, (
+                    f"user {username} exceeded daily_ticket_limit: {per_user_completed[username]} > {user.daily_ticket_limit}"
+                )
+            if user.max_processing_b_mode is not None:
+                assert per_user_assigned[username] <= user.max_processing_b_mode, (
+                    f"user {username} exceeded max_processing_b_mode: {per_user_assigned[username]} > {user.max_processing_b_mode}"
+                )
+
+        for file_id in touched_file_ids:
+            uploaded_file = db.session.get(UploadedFile, file_id)
+            assert uploaded_file is not None, f"missing uploaded_file {file_id}"
+            pending_count = LotteryTicket.query.filter_by(source_file_id=file_id, status="pending").count()
+            assigned_count = LotteryTicket.query.filter_by(source_file_id=file_id, status="assigned").count()
+            completed_count = LotteryTicket.query.filter_by(source_file_id=file_id, status="completed").count()
+            expired_count = LotteryTicket.query.filter_by(source_file_id=file_id, status="expired").count()
+            revoked_count = LotteryTicket.query.filter_by(source_file_id=file_id, status="revoked").count()
+
+            actual_total = pending_count + assigned_count + completed_count + expired_count + revoked_count
+            assert uploaded_file.total_tickets == actual_total, (
+                f"file {file_id} total mismatch: denorm={uploaded_file.total_tickets}, actual={actual_total}"
+            )
+            assert uploaded_file.pending_count == pending_count, (
+                f"file {file_id} pending_count mismatch: denorm={uploaded_file.pending_count}, actual={pending_count}"
+            )
+            assert uploaded_file.assigned_count == assigned_count, (
+                f"file {file_id} assigned_count mismatch: denorm={uploaded_file.assigned_count}, actual={assigned_count}"
+            )
+            assert uploaded_file.completed_count == completed_count, (
+                f"file {file_id} completed_count mismatch: denorm={uploaded_file.completed_count}, actual={completed_count}"
+            )
+
+            amount_total = db.session.query(db.func.coalesce(db.func.sum(LotteryTicket.ticket_amount), Decimal("0"))).filter(
+                LotteryTicket.source_file_id == file_id
+            ).scalar()
+            assert Decimal(uploaded_file.actual_total_amount or 0) == Decimal(amount_total or 0), (
+                f"file {file_id} actual_total_amount drifted: denorm={uploaded_file.actual_total_amount}, actual={amount_total}"
+            )
 
 
 def test_concurrent_40_devices_core_ticket_distribution():
@@ -490,23 +621,25 @@ def test_concurrent_40_devices_core_ticket_distribution():
         all_assigned_ids = []
         threads = build_threads(all_assigned_ids, errors)
 
-        inspector = requests.Session()
-        inspector_login = inspector.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": "load_mode_b_1", "password": TEST_PASSWORD, "device_id": f"inspector-{uuid.uuid4().hex[:6]}"},
-            timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
-        )
-        if inspector_login.status_code == 200:
-            before_pool_resp = inspector.get(f"{BASE_URL}/api/mode-b/pool-status", timeout=DEVICE_REQUEST_TIMEOUT_SECONDS)
-            if before_pool_resp.status_code == 200:
-                before_pool = before_pool_resp.json()
-                print(f"pool before run: {before_pool.get('total_pending', 0)}")
-                print("pool by_type before run:")
-                for entry in before_pool.get("by_type", [])[:20]:
-                    print(
-                        f"  - type={entry.get('lottery_type')} "
-                        f"deadline={entry.get('deadline_time')} count={entry.get('count')}"
-                    )
+        inspector_account = next((account for account in TEST_ACCOUNTS if account["client_mode"] == "mode_b"), None)
+        if inspector_account:
+            inspector = requests.Session()
+            inspector_login = inspector.post(
+                f"{BASE_URL}/auth/login",
+                json={"username": inspector_account["username"], "password": TEST_PASSWORD, "device_id": f"inspector-{uuid.uuid4().hex[:6]}"},
+                timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
+            )
+            if inspector_login.status_code == 200:
+                before_pool_resp = inspector.get(f"{BASE_URL}/api/mode-b/pool-status", timeout=DEVICE_REQUEST_TIMEOUT_SECONDS)
+                if before_pool_resp.status_code == 200:
+                    before_pool = before_pool_resp.json()
+                    print(f"pool before run: {before_pool.get('total_pending', 0)}")
+                    print("pool by_type before run:")
+                    for entry in before_pool.get("by_type", [])[:20]:
+                        print(
+                            f"  - type={entry.get('lottery_type')} "
+                            f"deadline={entry.get('deadline_time')} count={entry.get('count')}"
+                        )
 
         started = time.time()
         for thread in threads:
@@ -521,8 +654,8 @@ def test_concurrent_40_devices_core_ticket_distribution():
         assert RESULTS, "no requests were recorded"
         assert not duplicate_ids, f"duplicate ticket ids detected: {duplicate_ids[:10]}"
 
-        expected_mode_a_success = DEVICES_PER_ACCOUNT * 2 * MODE_A_REQUESTS_PER_DEVICE
-        expected_mode_b_success = DEVICES_PER_ACCOUNT * 2
+        expected_mode_a_success = DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
+        expected_mode_b_success = DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT
         actual_mode_a_success = sum(1 for item in RESULTS if item["mode"] == "A" and item.get("success"))
         actual_mode_b_success = sum(1 for item in RESULTS if item["mode"] == "B" and item.get("success"))
 
@@ -534,10 +667,10 @@ def test_concurrent_40_devices_core_ticket_distribution():
         )
         assert len(slow_requests) <= 5, f"too many slow requests: {len(slow_requests)}"
 
+        validate_strict_invariants()
+
         app = create_app()
         with app.app_context():
-            from models.ticket import LotteryTicket
-
             remaining_assigned = LotteryTicket.query.filter_by(status="assigned").count()
             assert remaining_assigned == 0, f"assigned tickets left behind after full flow: {remaining_assigned}"
     finally:
