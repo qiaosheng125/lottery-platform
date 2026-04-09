@@ -7218,6 +7218,14 @@ def test_admin_upload_template_listens_for_realtime_file_events():
     assert "window.removeEventListener('pool_updated', this._reloadFileList);" in content
 
 
+def test_admin_upload_template_ignores_stale_file_list_responses():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "listRequestSeq: 0," in content
+    assert "const requestSeq = ++this.listRequestSeq;" in content
+    assert content.count("if (requestSeq !== this.listRequestSeq) return;") >= 3
+
+
 def test_socket_client_dispatches_file_uploaded_custom_event():
     socket_client = Path(__file__).resolve().parents[1] / "static" / "js" / "socket_client.js"
     content = socket_client.read_text(encoding="utf-8")

@@ -150,6 +150,7 @@ createApp({
       filterDate: '', dateOptions: [],
       uploadQueue: [], uploading: false,
       detailTickets: [],
+      listRequestSeq: 0,
       detailRequestSeq: 0,
       listError: '',
     };
@@ -170,6 +171,7 @@ createApp({
   },
   methods: {
     async loadFiles() {
+      const requestSeq = ++this.listRequestSeq;
       this.loading = true;
       this.listError = '';
       try {
@@ -180,6 +182,7 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载文件列表失败');
         }
+        if (requestSeq !== this.listRequestSeq) return;
         this.files = data.files || [];
         this.total = data.total || 0;
         this.page = data.page || 1;
@@ -194,6 +197,7 @@ createApp({
           }
         }
       } catch (e) {
+        if (requestSeq !== this.listRequestSeq) return;
         this.files = [];
         this.total = 0;
         this.page = 1;
@@ -202,6 +206,7 @@ createApp({
         this.listError = e.message || '加载文件列表失败';
         showToast(this.listError, 'danger');
       } finally {
+        if (requestSeq !== this.listRequestSeq) return;
         this.loading = false;
       }
     },
