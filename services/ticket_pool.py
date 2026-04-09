@@ -158,7 +158,10 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = GREATEST(pending_count - 1, 0),
+                        SET pending_count = CASE
+                                WHEN pending_count > 0 THEN pending_count - 1
+                                ELSE 0
+                            END,
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
                     """),
@@ -286,7 +289,10 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = GREATEST(pending_count - 1, 0),
+                        SET pending_count = CASE
+                                WHEN pending_count > 0 THEN pending_count - 1
+                                ELSE 0
+                            END,
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
                     """),
@@ -526,6 +532,7 @@ def assign_tickets_batch(
             assigned_tickets = LotteryTicket.query.filter(
                 LotteryTicket.id.in_(ids),
                 LotteryTicket.assigned_user_id == user_id,
+                LotteryTicket.assigned_device_id == device_id,
                 LotteryTicket.status == 'assigned',
                 LotteryTicket.assigned_at == now,
             ).all()
@@ -537,7 +544,10 @@ def assign_tickets_batch(
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = GREATEST(pending_count - 1, 0),
+                        SET pending_count = CASE
+                                WHEN pending_count > 0 THEN pending_count - 1
+                                ELSE 0
+                            END,
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
                     """),

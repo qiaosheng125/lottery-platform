@@ -2502,20 +2502,29 @@ def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(ap
         def __init__(self, ticket_id):
             self.id = ticket_id
 
+    class FakeColumn:
+        def __init__(self, name):
+            self.name = name
+
+        def __eq__(self, other):
+            return (self.name, other)
+
     class FakeAssignedQuery:
         def all(self):
             return [FakeTicketRecord(202)]
 
     class FakeLotteryQuery:
         def filter(self, *args, **kwargs):
+            assert ("assigned_device_id", "device-b") in args
             return FakeAssignedQuery()
 
     class FakeLotteryTicket:
         query = FakeLotteryQuery()
         id = SimpleNamespace(in_=lambda ids: ids)
-        assigned_user_id = object()
-        status = object()
-        assigned_at = object()
+        assigned_user_id = FakeColumn("assigned_user_id")
+        assigned_device_id = FakeColumn("assigned_device_id")
+        status = FakeColumn("status")
+        assigned_at = FakeColumn("assigned_at")
 
     call_state = {"count": 0}
 
