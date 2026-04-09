@@ -1,8 +1,8 @@
-# Ubuntu VM Strict Load Test
+# Ubuntu 虚拟机严格压测说明
 
-## Goal
+## 目标
 
-Run production-like strict acceptance on:
+在以下环境里执行接近生产的严格验收：
 
 - Ubuntu 22.04
 - 2 vCPU
@@ -11,9 +11,9 @@ Run production-like strict acceptance on:
 - Redis
 - gunicorn `workers=2`
 
-Correctness is the hard gate. Performance only matters after correctness passes.
+正确性是硬门槛，只有正确性通过之后，性能结果才有意义。
 
-## Files Added For This Flow
+## 这条流程涉及的脚本
 
 - `scripts/setup_ubuntu_vm.sh`
 - `scripts/configure_postgres_redis.sh`
@@ -21,31 +21,37 @@ Correctness is the hard gate. Performance only matters after correctness passes.
 - `scripts/run_linux_strict_acceptance.sh`
 - `scripts/run_linux_capacity_sweep.sh`
 
-## One-Time VM Setup
+## 虚拟机的一次性初始化
 
-Clone the repo, then run:
+先克隆仓库，然后执行：
 
 ```bash
 chmod +x scripts/*.sh
 ./scripts/setup_ubuntu_vm.sh
 ```
 
-This installs system packages, creates `.venv`, installs Python dependencies, enables PostgreSQL and Redis, and creates `.env` from `.env.example` if missing.
+这个脚本会：
 
-## Configure PostgreSQL And Redis
+- 安装系统依赖
+- 创建 `.venv`
+- 安装 Python 依赖
+- 启用 PostgreSQL 和 Redis
+- 如果 `.env` 不存在，就基于 `.env.example` 自动生成
 
-Pick a DB password, then run:
+## 配置 PostgreSQL 和 Redis
+
+先选一个数据库密码，然后执行：
 
 ```bash
 export APP_DB_NAME=lottery_platform
 export APP_DB_USER=lottery_app
-export APP_DB_PASSWORD='replace-this'
+export APP_DB_PASSWORD='替换成你的密码'
 ./scripts/configure_postgres_redis.sh
 ```
 
-Then write the emitted `DATABASE_URL` and `REDIS_URL` into `.env`.
+执行完成后，把脚本输出的 `DATABASE_URL` 和 `REDIS_URL` 写进 `.env`。
 
-Recommended `.env` values for a 2-core / 2GB VM:
+推荐的 `.env` 配置如下，适合 `2 核 / 2GB` 虚拟机：
 
 ```env
 FLASK_ENV=production
@@ -59,36 +65,36 @@ GUNICORN_TIMEOUT=120
 GUNICORN_KEEPALIVE=5
 ```
 
-## Start The App
+## 启动应用
 
 ```bash
 ./scripts/run_linux_app.sh
 ```
 
-This initializes the schema and starts:
+这个脚本会先初始化数据库，然后启动：
 
 ```bash
 gunicorn -c gunicorn_config.py "app:create_app()"
 ```
 
-## Strict Acceptance Run
+## 严格验收压测
 
-The default strict run matches your current target:
+默认的严格压测参数，就是你之前要测的那组目标：
 
-- `30` users
-- `100` devices
-- `20` mode A accounts x `2` devices
-- `10` mode B accounts x `6` devices
+- `30` 个用户
+- `100` 台设备
+- `20` 个 A 模式账号，每个 `2` 台设备
+- `10` 个 B 模式账号，每个 `6` 台设备
 
-Run:
+执行：
 
 ```bash
 ./scripts/run_linux_strict_acceptance.sh
 ```
 
-## Custom Pressure-Test Parameters
+## 自定义压测参数
 
-Override env vars before the script when needed:
+如果你想自己覆盖参数，可以先设置环境变量再执行脚本：
 
 ```bash
 export LIVE_TEST_MODE_A_ACCOUNTS=20
@@ -100,38 +106,38 @@ export LIVE_TEST_MAX_SLOW_REQUESTS=20
 ./scripts/run_linux_strict_acceptance.sh
 ```
 
-## Capacity Sweep
+## 阶梯压测
 
-To find the stable ceiling before retrying the full `100`-device target, run:
+如果要先找到稳定上限，再决定是否继续冲 `100` 设备，可以执行：
 
 ```bash
 ./scripts/run_linux_capacity_sweep.sh
 ```
 
-This executes staged runs for:
+这个脚本会依次跑：
 
-- `40` devices
-- `60` devices
-- `80` devices
-- `100` devices
+- `40` 台设备
+- `60` 台设备
+- `80` 台设备
+- `100` 台设备
 
-The goal is to separate correctness failures from capacity failures and identify the first unstable step.
+它的目标是把“正确性失败”和“容量不够导致的超时失败”区分开，并找出第一档不稳定的位置。
 
-## Pass Criteria
+## 通过标准
 
-The test must fail immediately if any of these happen:
+只要出现下面任意一种情况，本轮测试就必须立即判定失败：
 
-1. Duplicate ticket assignment.
-2. Wrong-device B-mode confirm succeeds.
-3. Any claimed ticket is not `completed`.
-4. Ticket ownership fields do not match the claiming device.
-5. Residual `assigned` tickets remain.
-6. User limits are exceeded.
-7. File counters or amount totals drift from actual ticket rows.
+1. 重复分票。
+2. 错误设备的 B 模式确认成功。
+3. 任意已领取票最终不是 `completed`。
+4. 票归属字段和实际领票设备不一致。
+5. 压测结束后仍残留 `assigned`。
+6. 用户限制被穿透。
+7. 文件计数或总金额和真实票数据发生漂移。
 
-## Important Limits
+## 重要边界
 
-- Multi-worker strict acceptance must be run on Linux.
-- Windows is not valid for gunicorn multi-worker verification.
-- SQLite is not valid for this acceptance run.
-- Redis fallback mode is not valid for this acceptance run.
+- 多 worker 严格验收必须在 Linux 下执行。
+- Windows 不能作为 gunicorn 多 worker 验证环境。
+- SQLite 不能用于这轮严格验收。
+- Redis fallback 模式也不能用于这轮严格验收。

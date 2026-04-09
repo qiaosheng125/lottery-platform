@@ -1,18 +1,18 @@
-# Multi-Worker Strict Acceptance
+# 多 Worker 严格验收说明
 
-## Goal
+## 目标
 
-Deploy on a `2-core / 2GB` host with:
+在一台 `2 核 / 2GB` 主机上，以以下形态部署：
 
 - `PostgreSQL`
 - `Redis`
 - `gunicorn workers=2`
 
-Core requirement: correctness first. Throughput gains do not count if any ticket state becomes wrong.
+核心要求只有一条：正确性优先。只要票状态有任何错乱，吞吐提升都没有意义。
 
-## Recommended Production Defaults
+## 推荐的生产默认值
 
-Use these environment variables:
+建议使用以下环境变量：
 
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/lottery_platform
@@ -25,35 +25,35 @@ GUNICORN_TIMEOUT=120
 GUNICORN_KEEPALIVE=5
 ```
 
-Reasoning:
+原因：
 
-- `workers=2` matches the host CPU count without pushing process contention too early.
-- Smaller DB pools are safer on a small host and reduce idle connection waste.
-- `PostgreSQL` row locks and advisory locks provide cross-worker correctness.
-- `Redis` keeps the shared pending pool consistent across workers.
+- `workers=2` 和主机 CPU 核数匹配，不会太早把进程竞争放大。
+- 小一点的数据库连接池更适合小机器，也能减少空闲连接浪费。
+- `PostgreSQL` 的行锁和 advisory lock 能保证跨 worker 的正确性。
+- `Redis` 能保证共享 pending 池在多 worker 下保持一致。
 
-## Strict Acceptance Rules
+## 严格验收规则
 
-Every pressure-test run must reject the build if any of these happen:
+只要出现下面任意一种情况，本轮压测就必须判定失败：
 
-1. One ticket is claimed twice.
-2. A claimed ticket is not `completed` at the end of the full A/B workflow.
-3. `assigned_user_id`, `assigned_username`, `assigned_device_id`, or `assigned_device_name` does not match the device that claimed the ticket.
-4. Any touched test account still has `assigned` tickets after the run.
-5. Any user exceeds `daily_ticket_limit`.
-6. Any user exceeds `max_processing_b_mode`.
-7. Any touched file has drifted `pending_count`, `assigned_count`, `completed_count`, `total_tickets`, or `actual_total_amount`.
-8. Wrong-device B-mode confirmation succeeds.
+1. 同一张票被领取两次。
+2. 一张已领取的票在完整 A/B 流程结束后不是 `completed`。
+3. `assigned_user_id`、`assigned_username`、`assigned_device_id`、`assigned_device_name` 任一字段和实际领票设备不一致。
+4. 任意测试账号在压测结束后仍残留 `assigned` 票。
+5. 任意用户穿透 `daily_ticket_limit`。
+6. 任意用户穿透 `max_processing_b_mode`。
+7. 任意测试文件的 `pending_count`、`assigned_count`、`completed_count`、`total_tickets`、`actual_total_amount` 与真实票数据发生漂移。
+8. 错误设备的 B 模式确认请求居然成功。
 
-## How To Run
+## 如何执行
 
-Important:
+注意：
 
-- `LIVE_TEST_SERVER_MODE=gunicorn` must be executed on Linux.
-- Windows cannot run this path because `gunicorn` depends on `fcntl`.
-- If you only run the test on Windows, you are not proving multi-worker correctness.
+- `LIVE_TEST_SERVER_MODE=gunicorn` 必须在 Linux 下执行。
+- Windows 不能用于这条路径，因为 `gunicorn` 依赖 `fcntl`。
+- 如果只在 Windows 上跑测试，不能证明多 worker 正确性。
 
-Example strict run on a production-like host:
+在接近生产的 Linux 主机上，可以这样跑一轮严格验收：
 
 ```powershell
 $env:RUN_LIVE_CONCURRENCY_TESTS=1
@@ -67,7 +67,7 @@ $env:LIVE_TEST_MODE_B_BATCH_COUNT='20'
 python -m pytest tests/test_concurrent_20devices.py -v -s
 ```
 
-For heavier batches:
+如果要测更重的 B 模式批次：
 
 ```powershell
 $env:LIVE_TEST_MODE_A_ACCOUNTS='3'
@@ -77,15 +77,15 @@ $env:LIVE_TEST_MODE_B_BATCH_COUNT='30'
 python -m pytest tests/test_concurrent_20devices.py -v -s
 ```
 
-## What The Test Now Verifies
+## 这套测试现在会校验什么
 
-The live test script now checks both response-level and database-level invariants:
+当前的活体压测脚本会同时校验接口层和数据库层的不变量：
 
-- duplicate ticket IDs in successful responses
-- wrong-device confirm rejection
-- no residual `assigned` tickets for test users
-- every claimed ticket ends in `completed`
-- ticket ownership fields match the claiming device exactly
-- file counters and total amount stay in sync with actual ticket rows
+- 成功响应里是否出现重复票 ID
+- 错误设备确认是否被正确拒绝
+- 测试账号是否还残留 `assigned` 票
+- 每一张领取成功的票最终是否都落到 `completed`
+- 票的归属字段是否和实际设备完全一致
+- 文件计数和总金额是否始终和真实票数据一致
 
-This is the minimum standard before trusting a multi-worker deployment.
+这是当前项目在信任多 worker 生产部署之前，至少必须通过的基线标准。
