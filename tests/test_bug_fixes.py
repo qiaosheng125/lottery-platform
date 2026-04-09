@@ -7206,6 +7206,16 @@ def test_admin_upload_template_checks_export_http_errors_before_download():
     assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
 
 
+def test_admin_winning_template_checks_export_http_errors_before_download():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "async exportWinning() {" in content
+    assert "const res = await fetch(`/admin/api/winning/export?${params}`);" in content
+    assert "if (!res.ok) {" in content
+    assert "const blob = await res.blob();" in content
+    assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
+
+
 def test_admin_upload_template_listens_for_realtime_file_events():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")

@@ -441,14 +441,38 @@ createApp({
         showToast(e.message || '加载赛果列表失败', 'danger');
       }
     },
-    exportWinning() {
+    async exportWinning() {
       const params = new URLSearchParams();
       if (this.filterUsername) params.set('username', this.filterUsername);
       if (this.filterDate) params.set('date', this.filterDate);
       if (this.filterLotteryType) params.set('lottery_type', this.filterLotteryType);
       if (this.filterImage) params.set('image_filter', this.filterImage);
       if (this.filterChecked) params.set('checked_status', this.filterChecked);
-      window.location.href = `/admin/api/winning/export?${params}`;
+      try {
+        const res = await fetch(`/admin/api/winning/export?${params}`);
+        if (!res.ok) {
+          let error = '导出失败';
+          try {
+            const data = await res.json();
+            error = data.error || data.message || error;
+          } catch (_) {}
+          throw new Error(error);
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
+        const filename = decodeURIComponent(match?.[1] || match?.[2] || '中签记录.xlsx');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        showToast(e.message || '导出失败，请稍后重试', 'danger');
+      }
     },
     async recalc(id) {
       try {
