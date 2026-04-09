@@ -91,7 +91,8 @@ def expire_overdue_tickets():
             rows = db.session.execute(
                 text("""
                     UPDATE lottery_tickets
-                    SET status = 'expired'
+                    SET status = 'expired',
+                        version = version + 1
                     WHERE status IN ('pending', 'assigned')
                       AND deadline_time <= :now
                 """),
@@ -111,6 +112,7 @@ def expire_overdue_tickets():
                 if ticket.status == 'pending':
                     expired_pending_ticket_ids.append(ticket.id)
                 ticket.status = 'expired'
+                ticket.version += 1
 
         _sync_uploaded_file_counters(sorted(set(affected_file_ids)))
         db.session.commit()

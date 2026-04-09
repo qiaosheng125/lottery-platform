@@ -4252,6 +4252,41 @@ def test_expire_overdue_tickets_expires_exact_deadline(app, monkeypatch):
         assert refreshed_file.pending_count == 0
 
 
+def test_expire_overdue_tickets_increments_ticket_version(app):
+    from tasks.expire_tickets import expire_overdue_tickets
+
+    with app.app_context():
+        uploaded_file = UploadedFile(
+            display_id="2026/04/07-91",
+            original_filename="expired-version.txt",
+            stored_filename="expired-version.txt",
+            uploaded_by=1,
+            total_tickets=1,
+            pending_count=1,
+            assigned_count=0,
+            completed_count=0,
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+        ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="PENDING-VERSION-001",
+            status="pending",
+            deadline_time=beijing_now() - timedelta(minutes=1),
+            version=3,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+        expire_overdue_tickets()
+
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+        assert refreshed_ticket.status == "expired"
+        assert refreshed_ticket.version == 4
+
+
 def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
     from tasks.archive import archive_old_tickets
 
