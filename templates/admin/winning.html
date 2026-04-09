@@ -369,14 +369,13 @@ createApp({
           headers: { 'Content-Type': 'application/json' },
         });
         const data = await res.json();
-        if (data.success) {
-          showToast('已标记为已检查', 'success');
-          await this.loadWinning();  // 重新加载列表
-        } else {
-          showToast(data.error || '标记失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '标记失败');
         }
+        showToast('已标记为已检查', 'success');
+        await this.loadWinning();  // 重新加载列表
       } catch(e) {
-        showToast('标记出错: ' + e.message, 'danger');
+        showToast(e.message || '标记失败', 'danger');
       } finally {
         this.markingCheckedId = null;
       }
@@ -393,20 +392,20 @@ createApp({
       try {
         const res = await fetch('/admin/match-results/upload', { method: 'POST', body: fd });
         const data = await res.json();
-        this.uploadSuccess = data.success;
-        this.uploadMsg = data.success
-          ? `上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列`
-          : (data.error || '上传失败');
-        if (data.success) {
-          this.uploadPeriod = '';
-          this.$refs.resultFileInput.value = '';
-          this.resultFile = null;
-          await this.loadMatchResults();
-          await this.loadWinning();
-          await this.loadFilterOptions();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '上传失败');
         }
+        this.uploadSuccess = true;
+        this.uploadMsg = `上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列`;
+        this.uploadPeriod = '';
+        this.$refs.resultFileInput.value = '';
+        this.resultFile = null;
+        await this.loadMatchResults();
+        await this.loadWinning();
+        await this.loadFilterOptions();
       } catch(e) {
-        this.uploadSuccess = false; this.uploadMsg = '网络异常，请稍后重试';
+        this.uploadSuccess = false;
+        this.uploadMsg = e.message || '网络异常，请稍后重试';
       } finally {
         this.uploading = false;
       }
@@ -441,12 +440,13 @@ createApp({
       try {
         const res = await fetch(`/admin/api/match-results/${id}/recalc`, { method: 'POST' });
         const data = await res.json();
-        showToast(data.success ? '已提交重算' : (data.error || '提交失败'), data.success ? 'success' : 'danger');
-        if (data.success) {
-          await this.loadMatchResults();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '提交失败');
         }
+        showToast('已提交重算', 'success');
+        await this.loadMatchResults();
       } catch (e) {
-        showToast('提交失败', 'danger');
+        showToast(e.message || '提交失败', 'danger');
       }
     },
     previewImage(url) {
@@ -465,14 +465,13 @@ createApp({
           method: 'POST', body: fd,
         });
         const data = await res.json();
-        if (data.success) {
-          Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
-          showToast('图片上传成功', 'success');
-        } else {
-          showToast(data.error || '上传失败', 'danger');
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '上传失败');
         }
+        Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
+        showToast('图片上传成功', 'success');
       } catch(e) {
-        showToast('上传出错: ' + e.message, 'danger');
+        showToast(e.message || '上传失败', 'danger');
       } finally {
         this.uploadingImageId = null;
         event.target.value = '';

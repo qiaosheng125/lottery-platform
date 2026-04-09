@@ -7005,6 +7005,23 @@ def test_admin_winning_template_handles_list_and_detail_load_failures():
     assert "showToast(e.message || '加载赛果详情失败', 'danger');" in content
 
 
+def test_admin_dashboard_and_winning_templates_check_http_status_on_actions():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    dashboard_content = dashboard_template.read_text(encoding="utf-8")
+    assert "if (!res.ok || data.success === false) {" in dashboard_content
+    assert "throw new Error(data.error || '操作失败');" in dashboard_content
+    assert "showToast(e.message || '操作失败', 'danger');" in dashboard_content
+
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    winning_content = winning_template.read_text(encoding="utf-8")
+    assert winning_content.count("if (!res.ok || data.success === false) {") >= 4
+    assert "throw new Error(data.error || '标记失败');" in winning_content
+    assert "throw new Error(data.error || '上传失败');" in winning_content
+    assert "throw new Error(data.error || '提交失败');" in winning_content
+    assert "showToast(e.message || '标记失败', 'danger');" in winning_content
+    assert "this.uploadMsg = e.message || '网络异常，请稍后重试';" in winning_content
+
+
 def test_admin_winning_defaults_date_filter_to_current_business_day():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")

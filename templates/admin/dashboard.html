@@ -316,14 +316,13 @@ async function forceLogout(userId) {
   try {
     const res = await fetch(`/admin/api/users/${userId}/force-logout`, { method: 'POST' });
     const data = await res.json();
-    if (data.success) {
-      showToast('已强制下线', 'success');
-      refreshDashboard();
-    } else {
-      showToast(data.error || '操作失败', 'danger');
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || '操作失败');
     }
+    showToast('已强制下线', 'success');
+    refreshDashboard();
   } catch (e) {
-    showToast('操作失败', 'danger');
+    showToast(e.message || '操作失败', 'danger');
   }
 }
 
