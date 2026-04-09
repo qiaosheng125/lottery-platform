@@ -53,6 +53,10 @@
     window.dispatchEvent(new CustomEvent('file_revoked', { detail: data }));
   });
 
+  socket.on('file_uploaded', (data) => {
+    window.dispatchEvent(new CustomEvent('file_uploaded', { detail: data }));
+  });
+
   socket.on('winning_calc_done', (data) => {
     showToast(`期号 ${data.period} 中奖计算完成，共 ${data.winning_count} 张中奖`, 'success');
   });

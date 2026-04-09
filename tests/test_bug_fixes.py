@@ -7218,6 +7218,13 @@ def test_admin_upload_template_listens_for_realtime_file_events():
     assert "window.removeEventListener('pool_updated', this._reloadFileList);" in content
 
 
+def test_socket_client_dispatches_file_uploaded_custom_event():
+    socket_client = Path(__file__).resolve().parents[1] / "static" / "js" / "socket_client.js"
+    content = socket_client.read_text(encoding="utf-8")
+    assert "socket.on('file_uploaded', (data) => {" in content
+    assert "window.dispatchEvent(new CustomEvent('file_uploaded', { detail: data }));" in content
+
+
 def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     with app.app_context():
         admin = User(username="admin_file_page_clamp", is_admin=True)
