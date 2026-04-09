@@ -242,7 +242,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
 
                 if ticket.deadline_time and ticket.deadline_time <= now:
                     db.session.execute(
-                        text("UPDATE lottery_tickets SET status='expired' WHERE id=:id"),
+                        text("UPDATE lottery_tickets SET status='expired', version = version + 1 WHERE id=:id"),
                         {'id': ticket_id}
                     )
                     if ticket.source_file_id:

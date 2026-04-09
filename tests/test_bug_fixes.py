@@ -2242,7 +2242,7 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
     monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
     monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
-    monkeypatch.setattr("services.ticket_pool.LotteryTicket", SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id, assigned_at=fixed_now))))
+    monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
         result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
@@ -2291,7 +2291,7 @@ def test_mode_a_postgres_assignment_clamps_file_pending_count(app, monkeypatch):
     monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
     monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
     monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
-    monkeypatch.setattr("services.ticket_pool.LotteryTicket", SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id, assigned_at=fixed_now))))
+    monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
         result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="璁惧A")
@@ -2351,7 +2351,7 @@ def test_mode_a_postgres_assignment_falls_back_when_redis_returns_stale_id(app, 
     monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
     monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
     monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
-    monkeypatch.setattr("services.ticket_pool.LotteryTicket", SimpleNamespace(query=SimpleNamespace(get=lambda _id: SimpleNamespace(id=_id, assigned_at=fixed_now))))
+    monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
         result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
@@ -2391,6 +2391,7 @@ def test_mode_a_postgres_assignment_expires_redis_ticket_at_exact_deadline(app, 
             return FakeResult(fetchone_data=FakeTicketRow())
         if "UPDATE lottery_tickets SET status='expired'" in sql:
             assert params["id"] == 555
+            assert "version = version + 1" in sql
             return FakeResult(rowcount=1)
         if "UPDATE uploaded_files" in sql and "pending_count = CASE" in sql:
             assert params["file_id"] == 9
