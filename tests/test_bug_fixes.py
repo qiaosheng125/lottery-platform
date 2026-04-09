@@ -5003,6 +5003,77 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
         assert statuses == {"revoked"}
 
 
+def test_revoke_file_increments_ticket_versions(app):
+    from decimal import Decimal
+    from services import file_parser
+
+    with app.app_context():
+        admin = User(username="revoke_version_admin", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("revoke_version_user", "secret123", client_mode="mode_b")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded = UploadedFile(
+            display_id="2026/04/07-04",
+            original_filename="revoke-version.txt",
+            stored_filename="txt/2026-04-07/revoke-version.txt",
+            uploaded_by=admin.id,
+            total_tickets=2,
+            pending_count=1,
+            assigned_count=1,
+            completed_count=0,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+
+        pending_ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="SPF|2=3|1*1|2",
+            lottery_type="胜平负",
+            multiplier=1,
+            detail_period="26034",
+            ticket_amount=Decimal("4"),
+            deadline_time=uploaded.deadline_time,
+            status="pending",
+            version=2,
+            admin_upload_time=beijing_now(),
+        )
+        assigned_ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=2,
+            raw_content="SPF|2=0|1*1|2",
+            lottery_type="胜平负",
+            multiplier=1,
+            detail_period="26034",
+            ticket_amount=Decimal("4"),
+            deadline_time=uploaded.deadline_time,
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-rv",
+            assigned_device_name="设备RV",
+            assigned_at=beijing_now(),
+            version=5,
+            admin_upload_time=beijing_now(),
+        )
+        db.session.add_all([pending_ticket, assigned_ticket])
+        db.session.commit()
+
+        result = file_parser.revoke_file(uploaded.id, admin.id)
+        db.session.expire_all()
+        refreshed_pending = db.session.get(LotteryTicket, pending_ticket.id)
+        refreshed_assigned = db.session.get(LotteryTicket, assigned_ticket.id)
+
+    assert result["success"] is True
+    assert refreshed_pending.status == "revoked"
+    assert refreshed_assigned.status == "revoked"
+    assert refreshed_pending.version == 3
+    assert refreshed_assigned.version == 6
+
+
 def test_admin_revoke_rejects_non_active_files(app, client):
     with app.app_context():
         admin = User(username="admin_revoke_non_active", is_admin=True)

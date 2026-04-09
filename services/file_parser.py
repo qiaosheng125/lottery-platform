@@ -361,7 +361,10 @@ def revoke_file(file_id: int, admin_id: int) -> dict:
     revoked_count = LotteryTicket.query.filter(
         LotteryTicket.source_file_id == file_id,
         LotteryTicket.status.in_(['pending', 'assigned'])
-    ).update({'status': 'revoked'}, synchronize_session=False)
+    ).update({
+        'status': 'revoked',
+        'version': LotteryTicket.version + 1,
+    }, synchronize_session=False)
 
     completed_count = LotteryTicket.query.filter_by(
         source_file_id=file_id, status='completed'
