@@ -7,8 +7,10 @@
 import os
 import shutil
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
+from gevent.lock import BoundedSemaphore
 
 from flask import current_app
 from sqlalchemy import func, text
@@ -20,6 +22,46 @@ from models.audit import AuditLog
 from utils.filename_parser import parse_filename
 from utils.amount_parser import calculate_ticket_amount, parse_ticket_line
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
+
+
+_sqlite_upload_lock = BoundedSemaphore(1)
+_sqlite_pending_upload_keys = set()
+
+
+def _is_postgres() -> bool:
+    uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    return 'postgresql' in uri or 'postgres' in uri
+
+
+@contextmanager
+def _deduplicate_filename_upload_scope(filename: str, business_date):
+    """Serialize same-business-day duplicate filename checks."""
+    if _is_postgres():
+        lock_key = f"{str(business_date)}:{filename.lower()}"
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, hashtext(:lock_key))"),
+            {'ns': 1002, 'lock_key': lock_key},
+        )
+        yield
+        return
+
+    with _sqlite_upload_lock:
+        yield
+
+
+def _enter_sqlite_duplicate_guard(filename: str, business_date) -> bool:
+    guard_key = f"{str(business_date)}:{filename.lower()}"
+    with _sqlite_upload_lock:
+        if guard_key in _sqlite_pending_upload_keys:
+            return False
+        _sqlite_pending_upload_keys.add(guard_key)
+        return True
+
+
+def _leave_sqlite_duplicate_guard(filename: str, business_date) -> None:
+    guard_key = f"{str(business_date)}:{filename.lower()}"
+    with _sqlite_upload_lock:
+        _sqlite_pending_upload_keys.discard(guard_key)
 
 
 def _generate_display_id() -> str:
@@ -109,13 +151,30 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not parsed_meta:
         return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
 
-    business_start, business_end = get_business_window(get_business_date(upload_dt))
+    business_date = get_business_date(upload_dt)
+    if _is_postgres():
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:ns, hashtext(:lock_key))"),
+            {'ns': 1002, 'lock_key': f"{str(business_date)}:{filename.lower()}"},
+        )
+    else:
+        if not _enter_sqlite_duplicate_guard(filename, business_date):
+            return {
+                'success': False,
+                'message': f'褰撳墠涓氬姟鏃ュ唴宸蹭笂浼犲悓鍚嶆枃浠? {filename}',
+                'file_id': None,
+                'filename': filename,
+            }
+
+    business_start, business_end = get_business_window(business_date)
     existing_same_name = UploadedFile.query.filter(
         func.lower(UploadedFile.original_filename) == filename.lower(),
         UploadedFile.uploaded_at >= business_start,
         UploadedFile.uploaded_at < business_end,
     ).first()
     if existing_same_name:
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(filename, business_date)
         return {
             'success': False,
             'message': f'当前业务日内已上传同名文件: {filename}',
@@ -160,6 +219,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         except UnicodeDecodeError:
             db.session.rollback()
             os.remove(file_path)
+            if not _is_postgres():
+                _leave_sqlite_duplicate_guard(filename, business_date)
             return {
                 'success': False,
                 'message': '文件编码无法识别，请使用 UTF-8 或 GBK',
@@ -185,6 +246,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not expected_bet_code:
         db.session.rollback()
         os.remove(file_path)
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(filename, business_date)
         return {
             'success': False,
             'message': f'文件名彩种不支持: {lottery_type}',
@@ -200,6 +263,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         if not parsed_ticket:
             db.session.rollback()
             os.remove(file_path)
+            if not _is_postgres():
+                _leave_sqlite_duplicate_guard(filename, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行内容格式无效',
@@ -209,6 +274,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         if expected_bet_code and parsed_ticket['bet_code'] != expected_bet_code:
             db.session.rollback()
             os.remove(file_path)
+            if not _is_postgres():
+                _leave_sqlite_duplicate_guard(filename, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行玩法与文件名彩种不一致',
@@ -218,6 +285,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         if parsed_ticket['final_multiplier'] != parsed_meta['multiplier']:
             db.session.rollback()
             os.remove(file_path)
+            if not _is_postgres():
+                _leave_sqlite_duplicate_guard(filename, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行倍数与文件名倍数不一致',
@@ -244,6 +313,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not tickets:
         db.session.rollback()
         os.remove(file_path)
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(filename, business_date)
         return {'success': False, 'message': '文件内容为空', 'file_id': None, 'filename': filename}
 
     declared_count = int(parsed_meta['declared_count'])
@@ -251,6 +322,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if len(tickets) != declared_count:
         db.session.rollback()
         os.remove(file_path)
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(filename, business_date)
         return {
             'success': False,
             'message': f'文件名声明 {declared_count} 张，实际解析 {len(tickets)} 张',
@@ -260,6 +333,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if total_amount != declared_amount:
         db.session.rollback()
         os.remove(file_path)
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(filename, business_date)
         return {
             'success': False,
             'message': f'文件名声明金额 {declared_amount} 元，实际解析金额 {total_amount} 元',
@@ -294,6 +369,8 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     )
 
     db.session.commit()
+    if not _is_postgres():
+        _leave_sqlite_duplicate_guard(filename, business_date)
 
     # Push to Redis queue (after DB commit for consistency)
     if ticket_ids and redis_client:

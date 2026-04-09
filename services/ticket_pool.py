@@ -40,6 +40,30 @@ def _get_redis():
     return rc
 
 
+def _acquire_postgres_user_assignment_lock(user_id: int) -> None:
+    """Serialize per-user assignment limit checks in PostgreSQL."""
+    if not _is_postgres():
+        return
+    db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, :user_id)"),
+        {'ns': 1001, 'user_id': int(user_id)},
+    )
+
+
+def _get_ticket_by_id(ticket_id: int):
+    try:
+        ticket = db.session.get(LotteryTicket, ticket_id)
+    except Exception:
+        ticket = None
+    if ticket is not None:
+        return ticket
+
+    query = getattr(LotteryTicket, 'query', None)
+    if query is not None and hasattr(query, 'get'):
+        return query.get(ticket_id)
+    return None
+
+
 def _build_blocked_condition(blocked_types: List[str]) -> tuple[str, dict]:
     """构建排除禁止彩种的SQL条件片段和参数"""
     if not blocked_types:
@@ -175,11 +199,13 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     {'id': ticket_id}
                 )
                 db.session.commit()
-                return db.session.get(LotteryTicket, ticket_id)
+                return _get_ticket_by_id(ticket_id)
             return None
 
     # ── PostgreSQL production path ────────────────────────────────
     # 检查每日上限
+    _acquire_postgres_user_assignment_lock(user_id)
+
     if daily_limit is not None:
         from utils.time_utils import get_today_noon
         business_start = get_today_noon()
@@ -296,10 +322,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 db.session.execute(
                     text("""
                         UPDATE uploaded_files
-                        SET pending_count = CASE
-                                WHEN pending_count > 0 THEN pending_count - 1
-                                ELSE 0
-                            END,
+                        SET pending_count = GREATEST(pending_count - 1, 0),
                             assigned_count = assigned_count + 1
                         WHERE id = (SELECT source_file_id FROM lottery_tickets WHERE id = :id)
                     """),
@@ -307,7 +330,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                 )
 
                 db.session.commit()
-                return db.session.get(LotteryTicket, ticket_id)
+                return _get_ticket_by_id(ticket_id)
 
             except Exception as e:
                 db.session.rollback()
@@ -565,6 +588,7 @@ def assign_tickets_batch(
             return assigned_tickets, adjustment_message
 
     adjustment_message = None
+    _acquire_postgres_user_assignment_lock(user_id)
 
     # PostgreSQL: 检查每日上限
     if daily_limit is not None:

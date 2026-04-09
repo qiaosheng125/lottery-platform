@@ -3,6 +3,7 @@
 """
 
 import os
+import re
 import uuid
 from datetime import datetime, timedelta
 from urllib.parse import unquote
@@ -53,6 +54,15 @@ def _get_winning_ticket_or_error(ticket_id_value):
     if not ticket.is_winning:
         return None, (jsonify({'success': False, 'error': '该票未被系统判定为中奖，不能上传中奖图片'}), 400)
     return ticket, None
+
+
+def _winning_key_matches_ticket(ticket_id: int, oss_key: str) -> bool:
+    normalized_key = (oss_key or '').strip()
+    if not normalized_key:
+        return False
+
+    pattern = rf"^winning(?:[/_]\d{{4}})(?:[/_]\d{{2}})(?:[/_]\d{{2}})[/_]{int(ticket_id)}\.(jpg|jpeg|png|gif|webp)$"
+    return re.fullmatch(pattern, normalized_key, flags=re.IGNORECASE) is not None
 
 
 def _parse_int_arg(value, minimum=None):
@@ -1111,6 +1121,9 @@ def admin_winning_record():
     ticket, error_response = _get_winning_ticket_or_error(ticket_id)
     if error_response:
         return error_response
+    if not _winning_key_matches_ticket(ticket.id, oss_key):
+        return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
+
     from services.oss_service import delete_stored_image, get_public_url
     image_url = get_public_url(oss_key) if oss_key else ''
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()

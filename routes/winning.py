@@ -1,3 +1,5 @@
+import re
+
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
@@ -22,6 +24,15 @@ def _get_winning_ticket_or_error(ticket_id_value):
     if not ticket.is_winning:
         return None, (jsonify({'success': False, 'error': '该票未被系统判定为中奖，不能上传中奖图片'}), 400)
     return ticket, None
+
+
+def _winning_key_matches_ticket(ticket_id: int, oss_key: str) -> bool:
+    normalized_key = (oss_key or '').strip()
+    if not normalized_key:
+        return False
+
+    pattern = rf"^winning(?:[/_]\d{{4}})(?:[/_]\d{{2}})(?:[/_]\d{{2}})[/_]{int(ticket_id)}\.(jpg|jpeg|png|gif|webp)$"
+    return re.fullmatch(pattern, normalized_key, flags=re.IGNORECASE) is not None
 
 
 @winning_bp.route('/presign')
@@ -138,6 +149,8 @@ def record_winning():
     if record:
         if record.is_checked:
             return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+        if not _winning_key_matches_ticket(ticket.id, oss_key):
+            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
         old_key = record.image_oss_key
         old_url = record.winning_image_url
         if old_key != oss_key or old_url != image_url:
@@ -148,6 +161,8 @@ def record_winning():
         record.uploaded_by = current_user.id
         record.uploaded_at = beijing_now()
     else:
+        if not _winning_key_matches_ticket(ticket.id, oss_key):
+            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
         record = WinningRecord(
             ticket_id=ticket_id,
             source_file_id=ticket.source_file_id,

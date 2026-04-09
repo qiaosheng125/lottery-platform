@@ -2327,6 +2327,8 @@ def test_mode_a_postgres_assignment_clamps_file_pending_count(app, monkeypatch):
 
     def fake_execute(statement, params=None):
         sql = str(statement)
+        if "SELECT pg_advisory_xact_lock" in sql:
+            return FakeResult(rowcount=1)
         if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
             return FakeResult(fetchone_data=(321,))
         if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
@@ -5942,6 +5944,65 @@ def test_admin_winning_presign_rejects_non_winning_ticket(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "未被系统判定为中奖" in data["error"]
+
+
+def test_record_winning_rejects_oss_key_for_other_ticket(app, client):
+    with app.app_context():
+        user = create_user("winning_bad_key_user", "secret123", client_mode="mode_a")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-BAD-KEY-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_bad_key_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/test/not-this-ticket.jpg"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "oss_key" in data["error"]
+
+
+def test_admin_winning_record_rejects_oss_key_for_other_ticket(app, client):
+    with app.app_context():
+        admin = User(username="admin_bad_winning_key", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="ADMIN-BAD-KEY-001",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_bad_winning_key", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/winning/record",
+        json={"ticket_id": ticket_id, "oss_key": "winning/test/not-this-ticket.jpg"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "oss_key" in data["error"]
 
 
 def test_admin_upload_winning_image_creates_winning_record(app, client):
