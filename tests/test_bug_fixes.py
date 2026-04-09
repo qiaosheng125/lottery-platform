@@ -7396,6 +7396,17 @@ def test_admin_settings_template_ignores_stale_load_and_save_responses():
     assert "setTimeout(() => this.saved = false, 3000);" in content
 
 
+def test_admin_users_template_ignores_stale_list_and_lottery_type_responses():
+    users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
+    content = users_template.read_text(encoding="utf-8")
+    assert "let usersListRequestSeq = 0;" in content
+    assert "let lotteryTypesRequestSeq = 0;" in content
+    assert "const requestSeq = ++lotteryTypesRequestSeq;" in content
+    assert "const requestSeq = ++usersListRequestSeq;" in content
+    assert "if (requestSeq !== lotteryTypesRequestSeq) return;" in content
+    assert "if (requestSeq !== usersListRequestSeq) return;" in content
+
+
 def test_database_info_moves_to_settings_page():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     settings_content = settings_template.read_text(encoding="utf-8")

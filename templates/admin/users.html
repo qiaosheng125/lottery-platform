@@ -169,6 +169,8 @@
 {% block scripts %}
 <script>
 const { createApp } = Vue;
+let usersListRequestSeq = 0;
+let lotteryTypesRequestSeq = 0;
 createApp({
   data() {
     return {
@@ -198,19 +200,23 @@ createApp({
   },
   methods: {
     async loadLotteryTypes() {
+      const requestSeq = ++lotteryTypesRequestSeq;
       try {
         const res = await fetch('/admin/api/lottery-types');
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载彩种列表失败');
         }
+        if (requestSeq !== lotteryTypesRequestSeq) return;
         this.lotteryTypes = data.lottery_types || [];
       } catch (e) {
+        if (requestSeq !== lotteryTypesRequestSeq) return;
         this.lotteryTypes = [];
         showToast(e.message || '加载彩种列表失败', 'danger');
       }
     },
     async loadUsers() {
+      const requestSeq = ++usersListRequestSeq;
       this.loading = true;
       this.loadError = '';
       try {
@@ -219,12 +225,15 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载用户列表失败');
         }
+        if (requestSeq !== usersListRequestSeq) return;
         this.users = data.users || [];
       } catch (e) {
+        if (requestSeq !== usersListRequestSeq) return;
         this.users = [];
         this.loadError = e.message || '加载用户列表失败';
         showToast(this.loadError, 'danger');
       } finally {
+        if (requestSeq !== usersListRequestSeq) return;
         this.loading = false;
       }
     },
