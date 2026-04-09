@@ -54,6 +54,7 @@ Thumbs.db
 !/scripts/run_linux_app.sh
 !/scripts/run_linux_strict_acceptance.sh
 !/scripts/run_linux_capacity_sweep.sh
+!/scripts/deploy_production_ubuntu.sh
 
 # Client configuration (contains sensitive data)
 client_config.json

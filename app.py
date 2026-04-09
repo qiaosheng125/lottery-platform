@@ -77,6 +77,10 @@ def ensure_runtime_aux_tables(app):
         ArchivedLotteryTicket.__table__.create(bind=db.engine, checkfirst=True)
 
 
+def should_start_scheduler() -> bool:
+    return os.environ.get('DISABLE_SCHEDULER', '0') != '1'
+
+
 def create_app(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
@@ -196,9 +200,10 @@ def create_app(config_name=None):
             return redirect(url_for('user.dashboard'))
         return redirect(url_for('auth.login'))
 
-    # Start scheduler
-    from tasks.scheduler import start_scheduler
-    start_scheduler(app)
+    # Start scheduler unless a bootstrap/one-off task disables it explicitly.
+    if should_start_scheduler():
+        from tasks.scheduler import start_scheduler
+        start_scheduler(app)
 
     return app
 
