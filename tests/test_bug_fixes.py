@@ -4537,9 +4537,10 @@ def test_admin_settings_template_handles_save_failures():
     content = settings_template.read_text(encoding="utf-8")
     assert "v-if=\"error\"" in content
     assert "error: ''" in content
-    assert "this.error = data.error || '保存失败';" in content
-    assert "this.error = '保存失败';" in content
-    assert "this.error = '加载设置失败';" in content
+    assert "if (!res.ok || data.success === false) {" in content
+    assert "throw new Error(data.error || '保存失败');" in content
+    assert "this.error = e.message || '保存失败';" in content
+    assert "this.error = e.message || '加载设置失败';" in content
 
 
 def test_admin_users_template_uses_readable_chinese_labels():
@@ -7081,7 +7082,7 @@ def test_admin_settings_template_checks_http_status_on_load():
     content = settings_template.read_text(encoding="utf-8")
     assert "if (!res.ok || data.success === false) {" in content
     assert "throw new Error(data.error ||" in content
-    assert "if (res.ok && data.success) {" in content
+    assert "this.saved = true;" in content
 
 
 def test_database_info_moves_to_settings_page():
