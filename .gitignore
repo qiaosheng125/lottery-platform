@@ -33,6 +33,21 @@ build/
 # Logs
 *.log
 logs/
+server.log
+server_err.log
+tests/live_concurrency_server.log
+
+# Test / cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+test_progress.txt
+tests/__pycache__/
+tests/*.log
+
+# Local generated agent helper scripts
+.agents/skills/*/scripts/
 
 # IDE
 .vscode/
