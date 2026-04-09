@@ -84,6 +84,7 @@ def daily_stats():
 
 
 @user_bp.route('/export-daily')
+@login_required_json
 @login_required
 def export_daily():
     """下载当日出票清单 XLSX（仅含已过截止时间的票）"""

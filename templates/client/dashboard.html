@@ -977,7 +977,7 @@ createApp({
           }
         } else {
           const data = await res.json();
-          showToast(data.message || '暂无可导出记录', 'warning');
+          showToast(data.error || data.message || '暂无可导出记录', 'warning');
         }
       } catch (e) {
         showToast('导出失败，请稍后重试', 'danger');

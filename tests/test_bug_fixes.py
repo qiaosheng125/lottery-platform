@@ -6782,6 +6782,15 @@ def test_client_dashboard_handles_export_daily_network_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "showToast('导出失败，请稍后重试', 'danger');" in content
+    assert "showToast(data.error || data.message || '暂无可导出记录', 'warning');" in content
+
+
+def test_user_export_daily_requires_login_json_response(app, client):
+    resp = client.get("/api/user/export-daily")
+    assert resp.status_code == 401
+    assert resp.is_json
+    data = resp.get_json()
+    assert data["success"] is False
 
 
 def test_client_dashboard_merges_returned_winning_record_after_upload():
