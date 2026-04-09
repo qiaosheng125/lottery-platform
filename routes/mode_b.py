@@ -102,8 +102,10 @@ def download():
     count = _parse_batch_count(data.get('count', 100) if data else 100)
     if count is None:
         return jsonify({'success': False, 'error': '下载张数必须是大于 0 的整数'}), 400
-    device_id = data.get('device_id') or 'Web'
+    device_id = (data.get('device_id') or '').strip()
     device_name = data.get('device_name') or '网页浏览器'
+    if not device_id:
+        return jsonify({'success': False, 'error': '缺少设备ID'}), 400
     error = _validate_device_info(device_id, device_name)
     if error:
         return jsonify({'success': False, 'error': error}), 400

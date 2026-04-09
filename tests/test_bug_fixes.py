@@ -1706,6 +1706,20 @@ def test_mode_b_download_rejects_invalid_device_info(app, client):
     assert "设备名称过长" in long_name_resp.get_json()["error"]
 
 
+def test_mode_b_download_requires_device_id(app, client):
+    with app.app_context():
+        create_user("mode_b_device_required_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_device_required_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": 1})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "设备ID" in data["error"]
+
+
 def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     with app.app_context():
         create_user("modeb_confirm_guard_user", "secret123", client_mode="mode_b")
