@@ -360,7 +360,8 @@ class ModeBClient:
         def run():
             try:
                 resp = self.session.post(f"{BASE_URL}/api/mode-b/confirm", json={
-                    "ticket_ids": ticket_ids
+                    "ticket_ids": ticket_ids,
+                    "device_id": self.device_id,
                 }, timeout=10)
                 
                 data = resp.json()

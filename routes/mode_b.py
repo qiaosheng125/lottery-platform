@@ -147,6 +147,8 @@ def confirm():
     ticket_ids = data.get('ticket_ids', [])
     completed_count = data.get('completed_count')
     device_id = (data.get('device_id') or '').strip()
+    if not device_id:
+        return jsonify({'success': False, 'error': '缺少设备ID'}), 400
     if not ticket_ids:
         return jsonify({'success': False, 'error': '缺少票ID列表'}), 400
     if not isinstance(ticket_ids, list):

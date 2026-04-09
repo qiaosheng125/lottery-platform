@@ -1673,11 +1673,25 @@ def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     resp = login(client, "modeb_confirm_guard_user", "secret123")
     assert resp.status_code == 200
 
-    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": ["abc"]})
+    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": ["abc"], "device_id": "device-a"})
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
     assert "整数" in data["error"]
+
+
+def test_mode_b_confirm_requires_device_id(app, client):
+    with app.app_context():
+        create_user("modeb_confirm_requires_device_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "modeb_confirm_requires_device_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": [1]})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "设备ID" in data["error"]
 
 
 def test_mode_b_confirm_rejects_other_device_tickets(app):
