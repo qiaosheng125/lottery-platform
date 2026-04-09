@@ -19,6 +19,7 @@ Correctness is the hard gate. Performance only matters after correctness passes.
 - `scripts/configure_postgres_redis.sh`
 - `scripts/run_linux_app.sh`
 - `scripts/run_linux_strict_acceptance.sh`
+- `scripts/run_linux_capacity_sweep.sh`
 
 ## One-Time VM Setup
 
@@ -98,6 +99,23 @@ export LIVE_TEST_MODE_B_BATCH_COUNT=1
 export LIVE_TEST_MAX_SLOW_REQUESTS=20
 ./scripts/run_linux_strict_acceptance.sh
 ```
+
+## Capacity Sweep
+
+To find the stable ceiling before retrying the full `100`-device target, run:
+
+```bash
+./scripts/run_linux_capacity_sweep.sh
+```
+
+This executes staged runs for:
+
+- `40` devices
+- `60` devices
+- `80` devices
+- `100` devices
+
+The goal is to separate correctness failures from capacity failures and identify the first unstable step.
 
 ## Pass Criteria
 

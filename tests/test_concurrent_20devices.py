@@ -315,25 +315,30 @@ def make_session(username: str, device_label: str):
     device_id = f"{device_label}-{uuid.uuid4().hex[:8]}"
     device_name = f"{device_label}-{RUN_LABEL}"
 
-    resp = session.post(
-        f"{BASE_URL}/auth/login",
-        json={"username": username, "password": TEST_PASSWORD, "device_id": device_id},
-        timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
-    )
-    if resp.status_code != 200 or not resp.json().get("success"):
-        return None, device_id, device_name, resp.text
+    try:
+        resp = session.post(
+            f"{BASE_URL}/auth/login",
+            json={"username": username, "password": TEST_PASSWORD, "device_id": device_id},
+            timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200 or not resp.json().get("success"):
+            return None, device_id, device_name, f"login failed: status={resp.status_code} body={resp.text}"
 
-    register_resp = session.post(
-        f"{BASE_URL}/api/device/register",
-        json={
-            "device_id": device_id,
-            "device_name": device_name,
-            "client_info": {"test": True, "live_concurrency": True},
-        },
-        timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
-    )
-    if register_resp.status_code not in (200, 201):
-        return None, device_id, device_name, register_resp.text
+        register_resp = session.post(
+            f"{BASE_URL}/api/device/register",
+            json={
+                "device_id": device_id,
+                "device_name": device_name,
+                "client_info": {"test": True, "live_concurrency": True},
+            },
+            timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
+        )
+        if register_resp.status_code not in (200, 201):
+            return None, device_id, device_name, (
+                f"register failed: status={register_resp.status_code} body={register_resp.text}"
+            )
+    except Exception as exc:
+        return None, device_id, device_name, f"{type(exc).__name__}: {exc}"
 
     return session, device_id, device_name, None
 

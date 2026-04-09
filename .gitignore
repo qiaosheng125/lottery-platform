@@ -53,6 +53,7 @@ Thumbs.db
 !/scripts/configure_postgres_redis.sh
 !/scripts/run_linux_app.sh
 !/scripts/run_linux_strict_acceptance.sh
+!/scripts/run_linux_capacity_sweep.sh
 
 # Client configuration (contains sensitive data)
 client_config.json
