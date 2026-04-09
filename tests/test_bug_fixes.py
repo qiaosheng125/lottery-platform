@@ -7164,6 +7164,14 @@ def test_admin_upload_template_clears_stale_detail_rows_before_and_after_failed_
     assert "this.detailTickets = detailTickets;" in content
 
 
+def test_admin_upload_template_ignores_stale_detail_responses():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "detailRequestSeq: 0," in content
+    assert "const requestSeq = ++this.detailRequestSeq;" in content
+    assert content.count("if (requestSeq !== this.detailRequestSeq) return;") >= 3
+
+
 def test_admin_upload_template_syncs_page_with_server_response():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")

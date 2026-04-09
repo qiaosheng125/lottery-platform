@@ -150,6 +150,7 @@ createApp({
       filterDate: '', dateOptions: [],
       uploadQueue: [], uploading: false,
       detailTickets: [],
+      detailRequestSeq: 0,
       listError: '',
     };
   },
@@ -292,6 +293,7 @@ createApp({
     },
     async viewDetail(fileId) {
       this.detailTickets = [];
+      const requestSeq = ++this.detailRequestSeq;
       try {
         const detailTickets = [];
         let page = 1;
@@ -303,14 +305,17 @@ createApp({
           if (!res.ok || data.success === false) {
             throw new Error(data.error || '加载详情失败');
           }
+          if (requestSeq !== this.detailRequestSeq) return;
           detailTickets.push(...(data.tickets || []));
           totalPages = data.pages || 1;
           page += 1;
         } while (page <= totalPages);
 
+        if (requestSeq !== this.detailRequestSeq) return;
         this.detailTickets = detailTickets;
         new bootstrap.Modal(document.getElementById('detailModal')).show();
       } catch (e) {
+        if (requestSeq !== this.detailRequestSeq) return;
         this.detailTickets = [];
         showToast(e.message || '加载详情失败，请稍后重试', 'danger');
       }
