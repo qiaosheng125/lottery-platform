@@ -60,10 +60,13 @@ if os.environ.get("RUN_LIVE_CONCURRENCY_TESTS") != "1":
 BASE_URL = "http://127.0.0.1:5000"
 TEST_PASSWORD = "test123456"
 DEVICES_PER_ACCOUNT = int(os.environ.get("LIVE_TEST_DEVICES_PER_ACCOUNT", "10"))
+MODE_A_DEVICES_PER_ACCOUNT = int(os.environ.get("LIVE_TEST_MODE_A_DEVICES_PER_ACCOUNT", str(DEVICES_PER_ACCOUNT)))
+MODE_B_DEVICES_PER_ACCOUNT = int(os.environ.get("LIVE_TEST_MODE_B_DEVICES_PER_ACCOUNT", str(DEVICES_PER_ACCOUNT)))
 MODE_B_BATCH_COUNT = int(os.environ.get("LIVE_TEST_MODE_B_BATCH_COUNT", "20"))
 MODE_A_REQUESTS_PER_DEVICE = int(os.environ.get("LIVE_TEST_MODE_A_REQUESTS_PER_DEVICE", "1"))
 MODE_A_ACCOUNT_COUNT = int(os.environ.get("LIVE_TEST_MODE_A_ACCOUNTS", "2"))
 MODE_B_ACCOUNT_COUNT = int(os.environ.get("LIVE_TEST_MODE_B_ACCOUNTS", "2"))
+PENDING_HEADROOM = int(os.environ.get("LIVE_TEST_PENDING_HEADROOM", "40"))
 SERVER_START_TIMEOUT_SECONDS = 30
 DEVICE_REQUEST_TIMEOUT_SECONDS = 20
 LIVE_TEST_FILES_DIR = ROOT / "tests" / "live_test_files"
@@ -72,6 +75,7 @@ RUN_LABEL = uuid.uuid4().hex[:6]
 LIVE_TEST_SERVER_MODE = os.environ.get("LIVE_TEST_SERVER_MODE", "socketio").lower()
 LIVE_TEST_GUNICORN_WORKERS = int(os.environ.get("LIVE_TEST_GUNICORN_WORKERS", "2"))
 LIVE_TEST_STRICT_DEVICE_GUARD = os.environ.get("LIVE_TEST_STRICT_DEVICE_GUARD", "1") == "1"
+LIVE_TEST_MAX_SLOW_REQUESTS = int(os.environ.get("LIVE_TEST_MAX_SLOW_REQUESTS", "5"))
 
 TEST_ACCOUNTS = (
     [{"username": f"load_mode_a_{i}", "client_mode": "mode_a"} for i in range(1, MODE_A_ACCOUNT_COUNT + 1)]
@@ -101,19 +105,30 @@ def ensure_test_accounts():
             user = User(
                 username=account["username"],
                 client_mode=account["client_mode"],
-                max_devices=DEVICES_PER_ACCOUNT + 2,
+                max_devices=(
+                    MODE_A_DEVICES_PER_ACCOUNT + 2
+                    if account["client_mode"] == "mode_a"
+                    else MODE_B_DEVICES_PER_ACCOUNT + 2
+                ),
                 can_receive=True,
             )
             user.set_password(TEST_PASSWORD)
             db.session.add(user)
         else:
             user.client_mode = account["client_mode"]
-            user.max_devices = DEVICES_PER_ACCOUNT + 2
+            user.max_devices = (
+                MODE_A_DEVICES_PER_ACCOUNT + 2
+                if account["client_mode"] == "mode_a"
+                else MODE_B_DEVICES_PER_ACCOUNT + 2
+            )
             user.can_receive = True
             user.is_active = True
-            user.max_processing_b_mode = max(user.max_processing_b_mode or 0, DEVICES_PER_ACCOUNT * MODE_B_BATCH_COUNT + 50)
+            user.max_processing_b_mode = max(
+                user.max_processing_b_mode or 0,
+                MODE_B_DEVICES_PER_ACCOUNT * MODE_B_BATCH_COUNT + 50,
+            )
         if account["client_mode"] == "mode_b":
-            user.max_processing_b_mode = DEVICES_PER_ACCOUNT * MODE_B_BATCH_COUNT * 3
+            user.max_processing_b_mode = MODE_B_DEVICES_PER_ACCOUNT * MODE_B_BATCH_COUNT * 3
     db.session.commit()
 
     usernames = [account["username"] for account in TEST_ACCOUNTS]
@@ -130,13 +145,13 @@ def reset_test_account_tickets():
     if not user_ids:
         return
 
-    assigned_tickets = LotteryTicket.query.filter(
+    recycled_tickets = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id.in_(user_ids),
-        LotteryTicket.status == 'assigned',
+        LotteryTicket.status.in_(["assigned", "completed"]),
     ).all()
 
     touched_file_ids = set()
-    for ticket in assigned_tickets:
+    for ticket in recycled_tickets:
         touched_file_ids.add(ticket.source_file_id)
         ticket.status = 'pending'
         ticket.assigned_user_id = None
@@ -144,6 +159,7 @@ def reset_test_account_tickets():
         ticket.assigned_device_id = None
         ticket.assigned_device_name = None
         ticket.assigned_at = None
+        ticket.completed_at = None
         ticket.locked_until = None
 
     db.session.commit()
@@ -215,9 +231,9 @@ def prepare_live_environment():
         ensure_test_accounts()
         reset_test_account_tickets()
 
-        required_pending = DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
-        required_pending += DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT * MODE_B_BATCH_COUNT
-        required_pending += 40  # leave headroom over the mode B reserve
+        required_pending = MODE_A_DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
+        required_pending += MODE_B_DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT * MODE_B_BATCH_COUNT
+        required_pending += PENDING_HEADROOM
 
         pending = import_test_files_until_sufficient(required_pending)
         print(f"[setup] environment ready, pending tickets={pending}")
@@ -445,7 +461,10 @@ def build_threads(assigned_ids: list[int], errors: list[str]):
         prefix = "A" if account["client_mode"] == "mode_a" else "B"
         suffix = account["username"].rsplit("_", 1)[-1]
         worker = worker_mode_a if account["client_mode"] == "mode_a" else worker_mode_b
-        for index in range(DEVICES_PER_ACCOUNT):
+        per_account_devices = (
+            MODE_A_DEVICES_PER_ACCOUNT if account["client_mode"] == "mode_a" else MODE_B_DEVICES_PER_ACCOUNT
+        )
+        for index in range(per_account_devices):
             threads.append(
                 threading.Thread(
                     target=worker,
@@ -654,8 +673,8 @@ def test_concurrent_40_devices_core_ticket_distribution():
         assert RESULTS, "no requests were recorded"
         assert not duplicate_ids, f"duplicate ticket ids detected: {duplicate_ids[:10]}"
 
-        expected_mode_a_success = DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
-        expected_mode_b_success = DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT
+        expected_mode_a_success = MODE_A_DEVICES_PER_ACCOUNT * MODE_A_ACCOUNT_COUNT * MODE_A_REQUESTS_PER_DEVICE
+        expected_mode_b_success = MODE_B_DEVICES_PER_ACCOUNT * MODE_B_ACCOUNT_COUNT
         actual_mode_a_success = sum(1 for item in RESULTS if item["mode"] == "A" and item.get("success"))
         actual_mode_b_success = sum(1 for item in RESULTS if item["mode"] == "B" and item.get("success"))
 
@@ -665,7 +684,9 @@ def test_concurrent_40_devices_core_ticket_distribution():
         assert actual_mode_b_success == expected_mode_b_success, (
             f"mode B success mismatch: expected {expected_mode_b_success}, got {actual_mode_b_success}"
         )
-        assert len(slow_requests) <= 5, f"too many slow requests: {len(slow_requests)}"
+        assert len(slow_requests) <= LIVE_TEST_MAX_SLOW_REQUESTS, (
+            f"too many slow requests: {len(slow_requests)} > {LIVE_TEST_MAX_SLOW_REQUESTS}"
+        )
 
         validate_strict_invariants()
 

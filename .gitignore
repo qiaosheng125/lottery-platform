@@ -48,7 +48,11 @@ Thumbs.db
 # migrations/versions/*.py
 
 # Scripts directory (auto upload and monitoring scripts)
-scripts/
+/scripts/*
+!/scripts/setup_ubuntu_vm.sh
+!/scripts/configure_postgres_redis.sh
+!/scripts/run_linux_app.sh
+!/scripts/run_linux_strict_acceptance.sh
 
 # Client configuration (contains sensitive data)
 client_config.json
