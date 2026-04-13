@@ -27,6 +27,16 @@ def _validate_device_info(device_id: str, device_name: str = ''):
     return None
 
 
+def _is_desktop_client(device_id: str, device_name: str = '') -> bool:
+    """判断是否为桌面端客户端"""
+    device_name = (device_name or '').strip()
+    # 网页浏览器标识为非桌面端
+    if device_name == '网页浏览器':
+        return False
+    # 其他情况视为桌面端
+    return True
+
+
 def _parse_batch_count(value, default: int = 100):
     try:
         count = int(value if value is not None else default)
@@ -109,6 +119,10 @@ def download():
     error = _validate_device_info(device_id, device_name)
     if error:
         return jsonify({'success': False, 'error': error}), 400
+
+    # 检查B模式桌面端限制
+    if current_user.desktop_only_b_mode and not _is_desktop_client(device_id, device_name):
+        return jsonify({'success': False, 'error': 'B模式用户仅允许通过桌面端接单'}), 403
 
     result = download_batch(
         user_id=current_user.id,

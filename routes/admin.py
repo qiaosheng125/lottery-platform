@@ -849,6 +849,11 @@ def api_create_user():
     max_devices = _parse_int_arg(data.get('max_devices', 1), minimum=1)
     if max_devices is None:
         return jsonify({'success': False, 'error': '最大设备数必须是大于 0 的整数'}), 400
+    desktop_only_b_mode = True
+    if 'desktop_only_b_mode' in data:
+        desktop_only_b_mode = _parse_bool_flag(data.get('desktop_only_b_mode'))
+        if desktop_only_b_mode is None:
+            return jsonify({'success': False, 'error': 'desktop_only_b_mode 必须是布尔值'}), 400
 
     # 验证 max_processing_b_mode
     max_processing_b_mode = data.get('max_processing_b_mode')
@@ -886,7 +891,8 @@ def api_create_user():
         return jsonify({'success': False, 'error': '用户名已存在'}), 409
 
     user = User(username=username, client_mode=client_mode, max_devices=max_devices,
-                max_processing_b_mode=max_processing_b_mode, daily_ticket_limit=daily_ticket_limit)
+                max_processing_b_mode=max_processing_b_mode, daily_ticket_limit=daily_ticket_limit,
+                desktop_only_b_mode=desktop_only_b_mode)
     user.set_password(password)
     if blocked_lottery_types is not None:
         user.set_blocked_lottery_types(blocked_lottery_types)
@@ -947,6 +953,11 @@ def api_update_user(user_id):
             return jsonify({'success': False, 'error': 'can_receive 必须是布尔值'}), 400
         user.can_receive = parsed_can_receive
         should_refresh_pool_views = True
+    if 'desktop_only_b_mode' in data:
+        parsed_desktop_only = _parse_bool_flag(data['desktop_only_b_mode'])
+        if parsed_desktop_only is None:
+            return jsonify({'success': False, 'error': 'desktop_only_b_mode 必须是布尔值'}), 400
+        user.desktop_only_b_mode = parsed_desktop_only
     if 'password' in data and data['password']:
         if len(data['password']) < 6:
             return jsonify({'success': False, 'error': '密码至少需要 6 位'}), 400
@@ -1053,6 +1064,127 @@ def api_toggle_can_receive(user_id):
     except Exception:
         current_app.logger.warning('推送接单开关更新后的票池刷新事件失败', exc_info=True)
     return jsonify({'success': True, 'can_receive': user.can_receive})
+
+
+@admin_bp.route('/api/users/export')
+@login_required
+@admin_required
+def api_export_users():
+    """导出所有非管理员用户为 XLSX 文件"""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from datetime import datetime
+
+    # 查询所有非管理员用户
+    users = User.query.filter_by(is_admin=False).order_by(User.id).all()
+
+    # 创建工作簿
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '用户列表'
+
+    # 设置表头
+    headers = [
+        '用户名', '密码', '接单模式', '最大设备数', 'B模式处理上限', '每日处理上限',
+        '禁止彩种', '账号状态', '接单开关', 'B模式仅桌面端'
+    ]
+    ws.append(headers)
+
+    # 设置表头样式
+    header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+    header_font = Font(bold=True, color='FFFFFF')
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    # 填充数据
+    for user in users:
+        # 转换布尔值为中文
+        client_mode_text = 'mode_a' if user.client_mode == 'mode_a' else 'mode_b'
+        is_active_text = '启用' if user.is_active else '禁用'
+        can_receive_text = '开启' if user.can_receive else '关闭'
+        desktop_only_text = '是' if user.desktop_only_b_mode else '否'
+
+        # 转换禁止彩种列表为逗号分隔字符串
+        blocked_types = ','.join(user.get_blocked_lottery_types()) if user.get_blocked_lottery_types() else ''
+
+        ws.append([
+            user.username,
+            user.password_hash,  # 导出加密后的密码哈希
+            client_mode_text,
+            user.max_devices,
+            user.max_processing_b_mode if user.max_processing_b_mode else '',
+            user.daily_ticket_limit if user.daily_ticket_limit else '',
+            blocked_types,
+            is_active_text,
+            can_receive_text,
+            desktop_only_text,
+        ])
+
+    # 调整列宽
+    column_widths = [15, 60, 12, 12, 18, 15, 30, 12, 12, 18]
+    for i, width in enumerate(column_widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = width
+
+    # 生成文件
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # 生成文件名
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'用户列表_{timestamp}.xlsx'
+
+    from flask import Response
+    from urllib.parse import quote
+    return Response(
+        output.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename*=UTF-8\'\'{quote(filename)}'}
+    )
+
+
+@admin_bp.route('/api/users/import', methods=['POST'])
+@login_required_json
+@login_required
+@admin_required
+def api_import_users():
+    """从 XLSX 文件批量导入用户"""
+    import tempfile
+    from services.user_import_service import import_users
+
+    # 检查文件
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未上传文件'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'success': False, 'error': '未选择文件'}), 400
+
+    if not file.filename.endswith('.xlsx'):
+        return jsonify({'success': False, 'error': '文件格式必须是 .xlsx'}), 400
+
+    # 保存临时文件
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            file.save(tmp_file.name)
+            tmp_path = tmp_file.name
+
+        # 导入用户
+        result = import_users(tmp_path, current_user.id)
+
+        # 清理临时文件
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+        return jsonify(result)
+
+    except Exception as e:
+        current_app.logger.error(f'导入用户失败: {str(e)}', exc_info=True)
+        return jsonify({'success': False, 'error': f'导入失败: {str(e)}'}), 500
 
 
 # ── Winning management ────────────────────────────────────────────────

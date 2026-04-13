@@ -29,12 +29,16 @@ with app.app_context():
     db.create_all()
     print("[OK] 数据库表创建成功")
 
-    # Create default admin
-    admin = User(username='zucaixu', is_admin=True)
-    admin.set_password('zhongdajiang888')
-    db.session.add(admin)
-    db.session.commit()
-    print("[OK] 默认管理员账号创建成功: zucaixu / zhongdajiang888")
+    # Create default admin if not exists
+    admin = User.query.filter_by(username='zucaixu').first()
+    if not admin:
+        admin = User(username='zucaixu', is_admin=True)
+        admin.set_password('zhongdajiang888')
+        db.session.add(admin)
+        db.session.commit()
+        print("[OK] 默认管理员账号创建成功: zucaixu / zhongdajiang888")
+    else:
+        print("[INFO] 管理员账号已存在: zucaixu")
 
     # Ensure system settings row exists
     SystemSettings.get()

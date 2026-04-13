@@ -229,6 +229,61 @@ def test_admin_create_user_rejects_short_password(app, client):
     assert "至少需要 6 位" in data["error"]
 
 
+def test_admin_create_user_accepts_desktop_only_b_mode_flag(app, client):
+    with app.app_context():
+        admin = User(username="admin_create_desktop_only_flag", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_create_desktop_only_flag", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/users",
+        json={
+            "username": "mode_b_web_allowed_user",
+            "password": "secret123",
+            "client_mode": "mode_b",
+            "desktop_only_b_mode": False,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["user"]["desktop_only_b_mode"] is False
+
+    with app.app_context():
+        created = User.query.filter_by(username="mode_b_web_allowed_user").first()
+        assert created is not None
+        assert created.desktop_only_b_mode is False
+
+
+def test_admin_create_user_rejects_invalid_desktop_only_b_mode_flag(app, client):
+    with app.app_context():
+        admin = User(username="admin_create_bad_desktop_only", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_create_bad_desktop_only", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/admin/api/users",
+        json={
+            "username": "bad_desktop_only_flag_user",
+            "password": "secret123",
+            "client_mode": "mode_b",
+            "desktop_only_b_mode": "not-bool",
+        },
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "desktop_only_b_mode 必须是布尔值" in data["error"]
+
+
 def test_admin_update_user_rejects_invalid_client_mode(app, client):
     with app.app_context():
         admin = User(username="admin_invalid_update_mode", is_admin=True)
@@ -290,6 +345,26 @@ def test_admin_update_user_parses_string_boolean_flags(app, client):
         refreshed_user = User.query.get(user_id)
         assert refreshed_user.is_active is False
         assert refreshed_user.can_receive is False
+
+
+def test_admin_update_user_parses_desktop_only_b_mode_flag(app, client):
+    with app.app_context():
+        admin = User(username="admin_update_desktop_only_flag", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("update_desktop_only_flag_user", "secret123", client_mode="mode_b")
+        db.session.add(admin)
+        db.session.commit()
+        user_id = user.id
+
+    resp = client.post("/auth/login", json={"username": "admin_update_desktop_only_flag", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put(f"/admin/api/users/{user_id}", json={"desktop_only_b_mode": "false"})
+    assert resp.status_code == 200
+
+    with app.app_context():
+        refreshed_user = User.query.get(user_id)
+        assert refreshed_user.desktop_only_b_mode is False
 
 
 def test_admin_disabling_user_forces_logout_existing_sessions(app, client):
@@ -1737,6 +1812,51 @@ def test_mode_b_download_requires_device_id(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "设备ID" in data["error"]
+
+
+def test_mode_b_download_blocks_web_when_desktop_only_enabled(app, client):
+    with app.app_context():
+        create_user("mode_b_desktop_only_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_desktop_only_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-b/download",
+        json={"count": 1, "device_id": "web-1", "device_name": "网页浏览器"},
+    )
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "仅允许通过桌面端接单" in data["error"]
+
+
+def test_mode_b_download_allows_web_when_desktop_only_disabled(app, client, monkeypatch):
+    called = []
+
+    def fake_download_batch(**kwargs):
+        called.append(kwargs)
+        return {"success": True, "ticket_ids": [101], "count": 1}
+
+    monkeypatch.setattr("routes.mode_b.download_batch", fake_download_batch)
+
+    with app.app_context():
+        user = create_user("mode_b_web_allowed_route_user", "secret123", client_mode="mode_b")
+        user.desktop_only_b_mode = False
+        db.session.commit()
+
+    resp = login(client, "mode_b_web_allowed_route_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-b/download",
+        json={"count": 1, "device_id": "web-1", "device_name": "网页浏览器"},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert called
+    assert called[0]["device_name"] == "网页浏览器"
 
 
 def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
@@ -5941,6 +6061,80 @@ def test_admin_winning_export_honors_checked_status_filter(app, client):
     exported_values = [row[1] for row in ws.iter_rows(min_row=2, values_only=True)]
     assert "CHK-001" in exported_values
     assert "UNCHK-001" not in exported_values
+
+
+def test_admin_users_export_contains_desktop_only_column_and_value(app, client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    with app.app_context():
+        admin = User(username="admin_users_export", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("users_export_target", "secret123", client_mode="mode_b")
+        user.desktop_only_b_mode = False
+        user.set_blocked_lottery_types(["胜平负", "比分"])
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_users_export", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/users/export")
+    assert resp.status_code == 200
+    wb = load_workbook(BytesIO(resp.data))
+    ws = wb.active
+    header = [cell for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    target_row = next(row for row in rows if row[0] == "users_export_target")
+
+    assert "B模式仅桌面端" in header
+    assert target_row[9] == "否"
+    assert target_row[6] == "胜平负,比分"
+
+
+def test_admin_users_import_accepts_hashed_password_and_desktop_only_flag(app, client):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    with app.app_context():
+        admin = User(username="admin_users_import", is_admin=True)
+        admin.set_password("secret123")
+        hashed_user = User(username="hash_seed_user")
+        hashed_user.set_password("import-secret")
+        password_hash = hashed_user.password_hash
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_users_import", "password": "secret123"})
+    assert resp.status_code == 200
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["用户名", "密码", "接单模式", "最大设备数", "B模式处理上限", "每日处理上限", "禁止彩种", "账号状态", "接单开关", "B模式仅桌面端"])
+    ws.append(["imported_hash_user", password_hash, "mode_b", 2, 88, 99, "胜平负,比分", "启用", "开启", "否"])
+    payload = BytesIO()
+    wb.save(payload)
+    payload.seek(0)
+
+    resp = client.post(
+        "/admin/api/users/import",
+        data={"file": (payload, "users-import.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["success_count"] == 1
+
+    with app.app_context():
+        imported = User.query.filter_by(username="imported_hash_user").first()
+        assert imported is not None
+        assert imported.client_mode == "mode_b"
+        assert imported.desktop_only_b_mode is False
+        assert imported.max_processing_b_mode == 88
+        assert imported.daily_ticket_limit == 99
+        assert imported.get_blocked_lottery_types() == ["胜平负", "比分"]
+        assert imported.check_password("import-secret") is True
 
 
 def test_admin_checked_winning_record_cannot_replace_image(app, client):

@@ -27,6 +27,7 @@ class User(UserMixin, db.Model):
     blocked_lottery_types = db.Column(db.Text, nullable=True)  # JSON数组，禁止接收的彩种列表
     is_active = db.Column(db.Boolean, default=True, nullable=False)  # account active
     can_receive = db.Column(db.Boolean, default=True, nullable=False)  # admin-controlled receive switch
+    desktop_only_b_mode = db.Column(db.Boolean, default=True, nullable=False)  # B模式是否仅限桌面端接单
     created_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
     updated_at = db.Column(db.DateTime, default=beijing_now, onupdate=beijing_now, nullable=False)
 
@@ -80,6 +81,7 @@ class User(UserMixin, db.Model):
             'blocked_lottery_types': self.get_blocked_lottery_types(),
             'is_active': self.is_active,
             'can_receive': self.can_receive,
+            'desktop_only_b_mode': self.desktop_only_b_mode,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
