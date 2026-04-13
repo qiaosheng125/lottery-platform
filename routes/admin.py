@@ -1001,8 +1001,14 @@ def api_delete_user(user_id):
     if user.is_admin:
         return jsonify({'success': False, 'error': '不允许在此接口删除管理员账号'}), 403
 
+    # 获取强制删除参数
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    # 检查关联数据
     has_ticket_refs = LotteryTicket.query.filter(LotteryTicket.assigned_user_id == user_id).first() is not None
-    has_uploaded_file_refs = UploadedFile.query.filter(UploadedFile.uploaded_by == user_id).first() is not None
+    has_uploaded_file_refs = UploadedFile.query.filter(
+        (UploadedFile.uploaded_by == user_id) | (UploadedFile.revoked_by == user_id)
+    ).first() is not None
     has_winning_refs = WinningRecord.query.filter(
         (WinningRecord.uploaded_by == user_id) |
         (WinningRecord.verified_by == user_id) |
@@ -1013,11 +1019,32 @@ def api_delete_user(user_id):
     ).first() is not None
     has_audit_refs = AuditLog.query.filter(AuditLog.user_id == user_id).first() is not None
 
-    if has_ticket_refs or has_uploaded_file_refs or has_winning_refs or has_result_refs or has_audit_refs:
+    has_refs = has_ticket_refs or has_uploaded_file_refs or has_winning_refs or has_result_refs or has_audit_refs
+
+    if has_refs and not force:
         return jsonify({
             'success': False,
-            'error': '该用户已有历史业务数据，不能直接删除，请改为禁用账号',
+            'error': '该用户已有历史业务数据，不能直接删除，请改为禁用账号。如果您确定要彻底删除该用户（将保留业务数据但置空用户关联），请重试。',
+            'has_refs': True
         }), 409
+
+    if has_refs and force:
+        # 强制删除：将所有关联引用置空
+        # 1. 票据
+        LotteryTicket.query.filter(LotteryTicket.assigned_user_id == user_id).update({LotteryTicket.assigned_user_id: None})
+        # 2. 上传文件
+        UploadedFile.query.filter(UploadedFile.uploaded_by == user_id).update({UploadedFile.uploaded_by: None})
+        UploadedFile.query.filter(UploadedFile.revoked_by == user_id).update({UploadedFile.revoked_by: None})
+        # 3. 中奖记录
+        WinningRecord.query.filter(WinningRecord.uploaded_by == user_id).update({WinningRecord.uploaded_by: None})
+        WinningRecord.query.filter(WinningRecord.verified_by == user_id).update({WinningRecord.verified_by: None})
+        WinningRecord.query.filter(WinningRecord.checked_by == user_id).update({WinningRecord.checked_by: None})
+        # 4. 赛果
+        ResultFile.query.filter(ResultFile.uploaded_by == user_id).update({ResultFile.uploaded_by: None})
+        MatchResult.query.filter(MatchResult.uploaded_by == user_id).update({MatchResult.uploaded_by: None})
+        # 5. 审计日志与设置
+        AuditLog.query.filter(AuditLog.user_id == user_id).update({AuditLog.user_id: None})
+        SystemSettings.query.filter(SystemSettings.updated_by == user_id).update({SystemSettings.updated_by: None})
 
     db.session.delete(user)
     db.session.commit()

@@ -172,7 +172,7 @@ def create_app(config_name=None):
 
             from models.user import UserSession
             sess = UserSession.query.filter_by(session_token=token).first()
-            if not sess:
+            if not sess or not cu.is_active:
                 return invalidate_current_session()
             if sess.is_expired():
                 db.session.delete(sess)

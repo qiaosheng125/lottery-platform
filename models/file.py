@@ -27,7 +27,7 @@ class UploadedFile(db.Model):
     status = db.Column(db.String(20), default='active', nullable=False, index=True)
     # active | revoked | exhausted | expired
 
-    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     uploaded_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
     revoked_at = db.Column(db.DateTime, nullable=True)
     revoked_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)

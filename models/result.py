@@ -12,7 +12,7 @@ class ResultFile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     original_filename = db.Column(db.String(512), nullable=False)
     stored_filename = db.Column(db.String(512), nullable=False)
-    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     uploaded_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
     periods_count = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(20), default='parsed', nullable=False)  # parsed | error
@@ -42,7 +42,7 @@ class MatchResult(db.Model):
     # Structure: {"61": {"SPF": {"result": "3", "sp": 1.85}, "CBF": {...}, ...}, "62": {...}}
 
     result_file_id = db.Column(db.Integer, db.ForeignKey('result_files.id'), nullable=True)
-    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     uploaded_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
 
     calc_status = db.Column(db.String(20), default='pending', nullable=False)

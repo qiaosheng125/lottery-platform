@@ -27,7 +27,9 @@
         <tbody>
           <tr v-if="loading"><td colspan="11" class="text-center py-3">加载中...</td></tr>
           <tr v-else-if="users.length === 0"><td colspan="11" class="text-center py-3 text-muted">暂无用户</td></tr>
-          <tr v-for="u in users" :key="u.id">
+          
+          <!-- 活跃用户 -->
+          <tr v-for="u in activeUsers" :key="u.id">
             <td><strong>{{ u.username }}</strong></td>
             <td>
               <select class="form-select form-select-sm" v-model="u.client_mode" @change="updateUser(u)">
@@ -83,6 +85,79 @@
                 <input class="form-check-input" type="checkbox" v-model="u.desktop_only_b_mode" @change="updateUser(u)"
                        :disabled="u.client_mode !== 'mode_b'"
                        :title="u.client_mode === 'mode_b' ? 'B模式是否仅限桌面端接单' : '仅 B 模式可设置'">
+              </div>
+            </td>
+            <td class="small">{{ u.created_at ? u.created_at.substring(0,10) : '' }}</td>
+            <td>
+              <button class="btn btn-xs btn-outline-warning me-1" @click="resetPassword(u)">改密</button>
+              <button class="btn btn-xs btn-outline-danger me-1" @click="forceLogout(u)">踢出</button>
+              <button class="btn btn-xs btn-outline-danger" @click="deleteUser(u)">删除</button>
+            </td>
+          </tr>
+
+          <!-- 已禁用用户收起/展开栏 -->
+          <tr v-if="disabledUsers.length > 0" class="table-light">
+            <td colspan="11" class="py-2 text-center" style="cursor:pointer; background-color: #f8f9fa;" @click="showDisabled = !showDisabled">
+              <span class="text-muted small">
+                <i :class="showDisabled ? 'bi bi-chevron-up' : 'bi bi-chevron-down'"></i>
+                {{ showDisabled ? '收起' : '展开' }}已禁用账户 ({{ disabledUsers.length }}个)
+              </span>
+            </td>
+          </tr>
+
+          <!-- 已禁用用户列表 -->
+          <tr v-if="showDisabled" v-for="u in disabledUsers" :key="'disabled-' + u.id" class="text-muted" style="background-color: #fafafa;">
+            <td><strong>{{ u.username }}</strong></td>
+            <td>
+              <select class="form-select form-select-sm" v-model="u.client_mode" @change="updateUser(u)">
+                <option value="mode_a">A模式（逐单）</option>
+                <option value="mode_b">B模式（批量）</option>
+              </select>
+            </td>
+            <td>
+              <input type="number" class="form-control form-control-sm" style="width:70px"
+                     v-model.number="u.max_devices" min="1" max="10"
+                     @change="updateUser(u)">
+            </td>
+            <td>
+              <input type="number" class="form-control form-control-sm" style="width:80px"
+                     v-model.number="u.max_processing_b_mode" min="1" max="10000"
+                     placeholder="不限"
+                     @change="updateUser(u)"
+                     :disabled="u.client_mode !== 'mode_b'">
+            </td>
+            <td>
+              <input type="number" class="form-control form-control-sm" style="width:80px"
+                     v-model.number="u.daily_ticket_limit" min="1" max="100000"
+                     placeholder="不限"
+                     @change="updateUser(u)">
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-1">
+                <span v-if="u.blocked_lottery_types && u.blocked_lottery_types.length > 0"
+                      class="badge bg-secondary" style="cursor:pointer" @click="openBlockedTypesModal(u)">
+                  {{ u.blocked_lottery_types.length }} 种
+                </span>
+                <span v-else class="text-muted small">无</span>
+                <button class="btn btn-xs btn-outline-secondary" @click="openBlockedTypesModal(u)">
+                  <i class="bi bi-gear"></i>
+                </button>
+              </div>
+            </td>
+            <td>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" v-model="u.is_active" @change="updateUser(u)">
+              </div>
+            </td>
+            <td>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" v-model="u.can_receive" @change="updateUser(u)">
+              </div>
+            </td>
+            <td>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" v-model="u.desktop_only_b_mode" @change="updateUser(u)"
+                       :disabled="u.client_mode !== 'mode_b'">
               </div>
             </td>
             <td class="small">{{ u.created_at ? u.created_at.substring(0,10) : '' }}</td>
@@ -288,7 +363,16 @@ createApp({
       importSuccess: false,
       importResult: null,
       selectedFile: null,
+      showDisabled: false,
     };
+  },
+  computed: {
+    activeUsers() {
+      return this.users.filter(u => u.is_active);
+    },
+    disabledUsers() {
+      return this.users.filter(u => !u.is_active);
+    }
   },
   mounted() {
     this.loadUsers();
@@ -453,11 +537,23 @@ createApp({
     async deleteUser(u) {
       if (!confirm('确认删除用户 ' + u.username + ' 吗？此操作不可恢复。')) return;
       try {
-        const res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
-        const data = await res.json();
-        if (!res.ok || data.success === false) {
-          throw new Error(data.error || '删除失败');
+        let res = await fetch(`/admin/api/users/${u.id}`, { method: 'DELETE' });
+        let data = await res.json();
+        
+        if (!res.ok) {
+          if (res.status === 409 && data.has_refs) {
+            if (confirm(data.error + '\n\n是否强制删除？(将置空所有业务数据中的用户关联)')) {
+              res = await fetch(`/admin/api/users/${u.id}?force=true`, { method: 'DELETE' });
+              data = await res.json();
+              if (!res.ok) throw new Error(data.error || '强制删除失败');
+            } else {
+              return;
+            }
+          } else {
+            throw new Error(data.error || '删除失败');
+          }
         }
+        
         this.loadUsers();
         showToast('用户已删除', 'success');
       } catch (e) {
