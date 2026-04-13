@@ -77,7 +77,13 @@ def daily_stats():
         'ticket_count': ticket_count,
         'total_amount': total_amount,
         'active_count': active,
+        'can_receive': current_user.can_receive,
         'pool_total_pending': pool_total_pending,
+        'announcement': (
+            (settings.announcement or '').strip()
+            if current_user.can_receive and settings.announcement_enabled
+            else ''
+        ),
         'mode_b_options': settings.mode_b_options or [50, 100, 200, 300, 400, 500],
         'device_stats': device_stats_list,
     })

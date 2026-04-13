@@ -3658,6 +3658,45 @@ def test_deleted_user_session_invalidates_api_access(app, client):
     assert data["success"] is False
 
 
+def test_daily_stats_returns_announcement_for_receiving_user(app, client):
+    with app.app_context():
+        user = create_user("daily_stats_announcement_user", "secret123", client_mode="mode_a")
+        settings = SystemSettings.get()
+        settings.announcement_enabled = True
+        settings.announcement = "今晚 8 点维护"
+        db.session.commit()
+
+    resp = login(client, "daily_stats_announcement_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["can_receive"] is True
+    assert data["announcement"] == "今晚 8 点维护"
+
+
+def test_daily_stats_hides_announcement_for_non_receiving_user(app, client):
+    with app.app_context():
+        user = create_user("daily_stats_no_announcement_user", "secret123", client_mode="mode_a")
+        user.can_receive = False
+        settings = SystemSettings.get()
+        settings.announcement_enabled = True
+        settings.announcement = "这条公告不应显示"
+        db.session.commit()
+
+    resp = login(client, "daily_stats_no_announcement_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/user/daily-stats")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["can_receive"] is False
+    assert data["announcement"] == ""
+
+
 def test_expired_user_session_invalidates_api_access(app, client):
     with app.app_context():
         user = create_user("expired_session_user", "secret123", client_mode="mode_a")
@@ -8040,6 +8079,20 @@ def test_client_dashboard_handles_mode_b_network_failures():
     assert "showToast(e.message || '预览失败，请稍后重试', 'danger');" in content
     assert "throw new Error(data.error || '确认失败');" in content
     assert "showToast(e.message || '确认失败，请稍后重试', 'danger');" in content
+
+
+def test_client_dashboard_renders_fixed_announcement_card_and_hides_global_bar():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "当前公告" in content
+    assert "announcementDisplay" in content
+    assert "if (!this.stats.can_receive) {" in content
+    assert "return '无公告';" in content
+    assert "const announcementBar = document.getElementById('announcement-bar');" in content
+    assert "announcementBar.classList.add('d-none');" in content
+    assert ".client-announcement-card {" in content
+
+
 def test_client_dashboard_handles_download_and_open_winning_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

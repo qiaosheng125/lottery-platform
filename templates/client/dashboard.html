@@ -40,8 +40,16 @@
   </div>
 
   <!-- Announcement -->
-  <div v-if="announcement" class="alert alert-info">
-    <i class="bi bi-megaphone"></i> {{ announcement }}
+  <div class="card mb-3 client-announcement-card">
+    <div class="card-body py-2">
+      <div class="d-flex align-items-start gap-2">
+        <i class="bi bi-megaphone text-primary"></i>
+        <div>
+          <div class="small fw-bold">当前公告</div>
+          <div class="small text-muted">{{ announcementDisplay }}</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 今日设备统计 -->
@@ -408,9 +416,17 @@ let modeBProcessingRequestSeq = 0;
 let modeBPoolStatusRequestSeq = 0;
 let winningRecordsRequestSeq = 0;
 createApp({
+  computed: {
+    announcementDisplay() {
+      if (!this.stats.can_receive) {
+        return '无公告';
+      }
+      return this.announcement || '无公告';
+    },
+  },
   data() {
     return {
-      stats: { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] },
+      stats: { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, can_receive: true, device_stats: [] },
       announcement: '',
       // Mode A
       modeAActive: false,
@@ -452,6 +468,10 @@ createApp({
     };
   },
   mounted() {
+    const announcementBar = document.getElementById('announcement-bar');
+    if (announcementBar) {
+      announcementBar.classList.add('d-none');
+    }
     this.loadStats();
     if (!this.isModeB) {
       this.loadCurrentModeATicket();
@@ -466,6 +486,14 @@ createApp({
     }
 
     this._onAnnouncement = (event) => {
+      const announcementBar = document.getElementById('announcement-bar');
+      if (announcementBar) {
+        announcementBar.classList.add('d-none');
+      }
+      if (!this.stats.can_receive) {
+        this.announcement = '';
+        return;
+      }
       this.announcement = (event.detail && event.detail.content) || '';
     };
     this._onPoolUpdated = () => {
@@ -567,6 +595,7 @@ createApp({
         }
         if (requestSeq !== dailyStatsRequestSeq) return;
         this.stats = data;
+        this.announcement = data.announcement || '';
         if (data.mode_b_options && data.mode_b_options.length > 0) {
           this.bOptions = data.mode_b_options;
           // 如果当前选择的张数不在新选项里，重置为第一个
@@ -576,7 +605,8 @@ createApp({
         }
       } catch(e) {
         if (requestSeq !== dailyStatsRequestSeq) return;
-        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };
+        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, can_receive: true, device_stats: [] };
+        this.announcement = '';
       }
     },
     // Mode A methods
@@ -1108,6 +1138,11 @@ createApp({
 }).mount('#client-dashboard');
 </script>
 <style>
+.client-announcement-card {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 20;
+}
 .modal-backdrop-custom {
   position: fixed; inset: 0; background: rgba(0,0,0,.5);
   z-index: 1050; display: flex; align-items: center; justify-content: center;
