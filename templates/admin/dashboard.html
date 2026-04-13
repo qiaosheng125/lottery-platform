@@ -3,6 +3,21 @@
 {% block content %}
 <div id="admin-dashboard">
   <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="card border-info" id="health-summary-card">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <strong>系统健康摘要</strong>
+            <span class="badge bg-secondary" id="health-summary-badge">未加载</span>
+          </div>
+          <div class="small text-muted mb-1" id="health-summary-text">加载中...</div>
+          <ul class="small mb-0 ps-3" id="health-summary-items"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
     <!-- Pool stats -->
     <div class="col-md-2">
       <div class="card border-primary">
@@ -79,24 +94,6 @@
         </div>
       </div>
 
-      <!-- Device speed stats -->
-      <div class="card">
-        <div class="card-header"><i class="bi bi-speedometer2"></i> 设备处理速度统计</div>
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
-              <thead class="table-light">
-                <tr>
-                  <th>用户名</th><th>设备名</th><th>速度(张/分)</th><th>最近票数</th><th>时间跨度</th>
-                </tr>
-              </thead>
-              <tbody id="device-speed-tbody">
-                <tr><td colspan="5" class="text-center text-muted py-2">加载中...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Pool by type -->
@@ -157,6 +154,41 @@
 // Dashboard auto-refresh
 let dashboardRequestSeq = 0;
 let announcementRequestSeq = 0;
+function renderHealthSummary(summary) {
+  const badge = document.getElementById('health-summary-badge');
+  const text = document.getElementById('health-summary-text');
+  const items = document.getElementById('health-summary-items');
+  if (!badge || !text || !items) return;
+
+  const fallback = {
+    status: 'warning',
+    summary: '健康摘要暂不可用，不影响当前统计。',
+    items: [],
+  };
+  const data = summary || fallback;
+  const statusMap = {
+    normal: { label: '正常', cls: 'bg-success' },
+    warning: { label: '有提醒', cls: 'bg-warning text-dark' },
+    critical: { label: '有严重问题', cls: 'bg-danger' },
+  };
+  const mapped = statusMap[data.status] || statusMap.warning;
+  badge.textContent = mapped.label;
+  badge.className = `badge ${mapped.cls}`;
+  text.textContent = data.summary || fallback.summary;
+
+  const summaryItems = Array.isArray(data.items) ? data.items : [];
+  if (!summaryItems.length) {
+    items.innerHTML = '<li class="text-muted">暂无异常项</li>';
+    return;
+  }
+
+  items.innerHTML = summaryItems.map(item => {
+    const count = Number(item.count || 0);
+    const action = item.action || '请按当前流程继续观察。';
+    return `<li><strong>${item.message || item.type}</strong>（${count}） - ${action}</li>`;
+  }).join('');
+}
+
 async function refreshDashboard() {
   const requestSeq = ++dashboardRequestSeq;
   const onlineIndicator = document.getElementById('online-indicator');
@@ -183,6 +215,7 @@ async function refreshDashboard() {
     // Update speed and ETA
     document.getElementById('stat-speed').textContent = data.total_speed ? data.total_speed.toFixed(2) : '-';
     document.getElementById('stat-eta').textContent = data.estimated_time || '-';
+    renderHealthSummary(data.health_summary);
 
     // Update online users
     const tbody = document.getElementById('online-users-tbody');
@@ -231,29 +264,6 @@ async function refreshDashboard() {
       dailyTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">暂无数据</td></tr>';
     }
 
-    // Update device speed stats (sort by username to group same user's devices together)
-    const speedTbody = document.getElementById('device-speed-tbody');
-    if (data.device_speed_stats && data.device_speed_stats.length > 0) {
-      // Sort by username first, then by device_id
-      const sortedStats = [...data.device_speed_stats].sort((a, b) => {
-        if (a.username !== b.username) {
-          return a.username.localeCompare(b.username);
-        }
-        return a.device_id.localeCompare(b.device_id);
-      });
-
-      speedTbody.innerHTML = sortedStats.map(d => `
-        <tr>
-          <td><strong>${d.username}</strong></td>
-          <td>${d.device_name}</td>
-          <td><span class="badge bg-primary">${d.speed_per_minute}</span></td>
-          <td>${d.recent_count}张</td>
-          <td>${d.time_span_minutes.toFixed(1)}分钟</td>
-        </tr>
-      `).join('');
-    } else {
-      speedTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2">暂无在线设备</td></tr>';
-    }
   } catch(e) {
     if (requestSeq !== dashboardRequestSeq) return;
     console.error('Dashboard refresh error:', e);
@@ -261,6 +271,17 @@ async function refreshDashboard() {
       onlineIndicator.textContent = '连接异常';
       onlineIndicator.className = 'badge bg-danger';
     }
+    renderHealthSummary({
+      status: 'warning',
+      summary: '健康摘要暂不可用，不影响当前统计。',
+      items: [{
+        type: 'summary_unavailable',
+        level: 'warning',
+        count: 1,
+        message: '健康摘要加载失败',
+        action: '可继续核心操作，稍后联系技术排查。',
+      }],
+    });
   }
 }
 

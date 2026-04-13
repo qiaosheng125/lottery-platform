@@ -10,6 +10,7 @@ from urllib.parse import unquote
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, send_file, current_app
 from flask_login import login_required, current_user
+from sqlalchemy import case, func, or_
 
 from extensions import db
 from models.user import User, UserSession
@@ -27,6 +28,15 @@ from utils.decorators import admin_required, get_client_ip, login_required_json
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
 
 admin_bp = Blueprint('admin', __name__)
+SCHEDULER_EXPECTED_JOB_IDS = (
+    'expire_tickets',
+    'clean_sessions',
+    'daily_reset',
+    'db_keepalive',
+    'archive_tickets',
+    'archive_uploaded_txt_files',
+    'purge_old_auxiliary_records',
+)
 
 
 def _winning_terminal_at(ticket: LotteryTicket):
@@ -110,6 +120,209 @@ def _database_display_info():
     }
 
 
+def _build_health_summary(now=None):
+    now = now or beijing_now()
+    items = []
+
+    overdue_pending_count = LotteryTicket.query.filter(
+        LotteryTicket.status == 'pending',
+        LotteryTicket.deadline_time.isnot(None),
+        LotteryTicket.deadline_time < now,
+    ).count()
+    if overdue_pending_count:
+        items.append({
+            'type': 'overdue_pending_tickets',
+            'level': 'warning',
+            'count': int(overdue_pending_count),
+            'message': '发现过期未处理票据',
+            'action': '请优先检查文件管理页并处理过期残留。',
+        })
+
+    stale_assigned_cutoff = now - timedelta(hours=2)
+    stale_assigned_count = LotteryTicket.query.filter(
+        LotteryTicket.status == 'assigned',
+        LotteryTicket.assigned_at.isnot(None),
+        LotteryTicket.assigned_at < stale_assigned_cutoff,
+    ).count()
+    if stale_assigned_count:
+        items.append({
+            'type': 'stale_assigned_tickets',
+            'level': 'warning',
+            'count': int(stale_assigned_count),
+            'message': '发现长时间未完成的处理中票据',
+            'action': '请先确认对应设备是否仍在线并清理残留分配。',
+        })
+
+    ticket_counter_sq = db.session.query(
+        LotteryTicket.source_file_id.label('file_id'),
+        func.sum(case((LotteryTicket.status == 'pending', 1), else_=0)).label('pending_actual'),
+        func.sum(case((LotteryTicket.status == 'assigned', 1), else_=0)).label('assigned_actual'),
+        func.sum(case((LotteryTicket.status == 'completed', 1), else_=0)).label('completed_actual'),
+    ).group_by(LotteryTicket.source_file_id).subquery()
+
+    mismatch_count = db.session.query(func.count(UploadedFile.id)).outerjoin(
+        ticket_counter_sq, ticket_counter_sq.c.file_id == UploadedFile.id
+    ).filter(
+        UploadedFile.status != 'revoked',
+        or_(
+            UploadedFile.pending_count != func.coalesce(ticket_counter_sq.c.pending_actual, 0),
+            UploadedFile.assigned_count != func.coalesce(ticket_counter_sq.c.assigned_actual, 0),
+            UploadedFile.completed_count != func.coalesce(ticket_counter_sq.c.completed_actual, 0),
+        ),
+    ).scalar() or 0
+    if mismatch_count:
+        items.append({
+            'type': 'uploaded_file_counter_mismatch',
+            'level': 'critical',
+            'count': int(mismatch_count),
+            'message': '发现文件计数与票据状态不一致',
+            'action': '请暂停相关文件操作并联系技术排查计数修复逻辑。',
+        })
+
+    result_file_error_count = ResultFile.query.filter(ResultFile.status == 'error').count()
+    if result_file_error_count:
+        items.append({
+            'type': 'result_file_parse_error',
+            'level': 'critical',
+            'count': int(result_file_error_count),
+            'message': '发现赛果文件解析失败',
+            'action': '请暂停重复上传同一期赛果并先排查失败文件。',
+        })
+
+    match_calc_error_count = MatchResult.query.filter(MatchResult.calc_status == 'error').count()
+    if match_calc_error_count:
+        items.append({
+            'type': 'match_result_calc_error',
+            'level': 'critical',
+            'count': int(match_calc_error_count),
+            'message': '发现赛果重算失败',
+            'action': '请暂停赛果重算操作并联系技术处理。',
+        })
+
+    match_processing_stale_count = MatchResult.query.filter(
+        MatchResult.calc_status == 'processing',
+        MatchResult.calc_started_at.isnot(None),
+        MatchResult.calc_started_at < (now - timedelta(minutes=30)),
+    ).count()
+    if match_processing_stale_count:
+        items.append({
+            'type': 'match_result_processing_stale',
+            'level': 'warning',
+            'count': int(match_processing_stale_count),
+            'message': '存在长时间未结束的赛果计算',
+            'action': '请在赛果页确认计算进度，必要时触发重算。',
+        })
+
+    # 业务口径：中奖票不强制上传图片或补中奖记录，因此不纳入健康摘要提醒项。
+
+    from tasks.scheduler import get_scheduler
+
+    scheduler = get_scheduler()
+    expected_job_ids = set(SCHEDULER_EXPECTED_JOB_IDS)
+    if scheduler is None:
+        items.append({
+            'type': 'scheduler_not_started',
+            'level': 'critical',
+            'count': 1,
+            'message': '调度器未启动',
+            'action': '请先确认服务启动日志与定时任务初始化状态。',
+        })
+    else:
+        current_job_ids = {job.id for job in scheduler.get_jobs()}
+        missing_job_count = len(expected_job_ids - current_job_ids)
+        if missing_job_count:
+            items.append({
+                'type': 'scheduler_job_missing',
+                'level': 'critical',
+                'count': int(missing_job_count),
+                'message': '调度器关键任务缺失',
+                'action': '请在设置页核对调度任务并联系技术补齐。',
+            })
+
+    level_order = {'critical': 2, 'warning': 1}
+    items.sort(key=lambda item: (level_order.get(item['level'], 0), item['count']), reverse=True)
+    items = items[:5]
+
+    if any(item['level'] == 'critical' for item in items):
+        status = 'critical'
+        summary = '发现严重异常，请先暂停相关操作并联系技术。'
+    elif items:
+        status = 'warning'
+        summary = f'发现 {len(items)} 类提醒项，请优先处理。'
+    else:
+        status = 'normal'
+        summary = '系统正常，可以继续处理。'
+
+    return {
+        'status': status,
+        'summary': summary,
+        'items': items,
+        'generated_at': now.isoformat(),
+    }
+
+
+def _build_scheduler_status():
+    expected_job_ids = list(SCHEDULER_EXPECTED_JOB_IDS)
+
+    from tasks.scheduler import get_scheduler
+
+    scheduler = get_scheduler()
+    if scheduler is None:
+        return {
+            'scheduler_present': False,
+            'scheduler_running': False,
+            'job_count': 0,
+            'job_ids': [],
+            'expected_job_ids': expected_job_ids,
+            'missing_job_ids': expected_job_ids,
+            'status': 'critical',
+            'message': '调度器未启动。',
+            'action': '请暂停依赖自动过期与自动清理的操作并联系技术。',
+        }
+
+    scheduler_running = bool(getattr(scheduler, 'running', True))
+    try:
+        job_ids = sorted(job.id for job in scheduler.get_jobs())
+    except Exception:
+        return {
+            'scheduler_present': True,
+            'scheduler_running': scheduler_running,
+            'job_count': 0,
+            'job_ids': [],
+            'expected_job_ids': expected_job_ids,
+            'missing_job_ids': expected_job_ids,
+            'status': 'warning',
+            'message': '调度器状态部分字段暂不可读。',
+            'action': '请留意过期票与会话清理结果，必要时联系技术排查。',
+        }
+
+    missing_job_ids = sorted(set(expected_job_ids) - set(job_ids))
+    if not scheduler_running:
+        status = 'critical'
+        message = '调度器未运行。'
+        action = '请暂停依赖自动任务的操作并联系技术。'
+    elif missing_job_ids:
+        status = 'critical'
+        message = '调度器关键任务缺失。'
+        action = '请在设置页核对任务状态并联系技术补齐。'
+    else:
+        status = 'normal'
+        message = '调度器正常，可以继续操作。'
+        action = '可继续日常操作。'
+
+    return {
+        'scheduler_present': True,
+        'scheduler_running': scheduler_running,
+        'job_count': len(job_ids),
+        'job_ids': job_ids,
+        'expected_job_ids': expected_job_ids,
+        'missing_job_ids': missing_job_ids,
+        'status': status,
+        'message': message,
+        'action': action,
+    }
+
+
 @admin_bp.route('/')
 @admin_bp.route('/dashboard')
 @login_required
@@ -126,7 +339,7 @@ def dashboard_data():
     """实时 Dashboard 数据接口"""
     pool = get_pool_status()
 
-    from sqlalchemy import text, func
+    from sqlalchemy import text
     from datetime import timedelta
     from models.user import UserSession
     cutoff = beijing_now() - timedelta(minutes=2)  # 2分钟内活跃视为在线
@@ -267,6 +480,23 @@ def dashboard_data():
         for row in daily_stats_query
     ]
 
+    try:
+        health_summary = _build_health_summary()
+    except Exception:
+        current_app.logger.exception("Failed to build health summary")
+        health_summary = {
+            'status': 'warning',
+            'summary': '健康摘要暂不可用，不影响当前统计。',
+            'items': [{
+                'type': 'summary_unavailable',
+                'level': 'warning',
+                'count': 1,
+                'message': '健康摘要查询失败',
+                'action': '可先继续核心操作，稍后联系技术排查。',
+            }],
+            'generated_at': beijing_now().isoformat(),
+        }
+
     return jsonify({
         'pool': pool,
         'online_users': user_stats,
@@ -275,6 +505,7 @@ def dashboard_data():
         'total_speed': round(total_speed, 2),
         'estimated_time': estimated_time_str,
         'estimated_minutes': round(estimated_minutes, 1) if estimated_minutes else None,
+        'health_summary': health_summary,
     })
 
 
@@ -492,19 +723,34 @@ def export_tickets_by_date():
 
     date_str = request.args.get('date', '').strip()
 
-    q = LotteryTicket.query
+    q = db.session.query(
+        LotteryTicket.line_number.label('line_number'),
+        LotteryTicket.raw_content.label('raw_content'),
+        LotteryTicket.lottery_type.label('lottery_type'),
+        LotteryTicket.multiplier.label('multiplier'),
+        LotteryTicket.deadline_time.label('deadline_time'),
+        LotteryTicket.detail_period.label('detail_period'),
+        LotteryTicket.ticket_amount.label('ticket_amount'),
+        LotteryTicket.status.label('status'),
+        LotteryTicket.assigned_username.label('assigned_username'),
+        LotteryTicket.assigned_device_id.label('assigned_device_id'),
+        LotteryTicket.assigned_device_name.label('assigned_device_name'),
+        LotteryTicket.assigned_at.label('assigned_at'),
+        LotteryTicket.completed_at.label('completed_at'),
+        LotteryTicket.source_file_id.label('source_file_id'),
+        UploadedFile.original_filename.label('original_filename'),
+    ).outerjoin(UploadedFile, UploadedFile.id == LotteryTicket.source_file_id)
     if date_str:
         try:
             selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
         start_at, end_at = get_business_window(selected_date)
-        file_ids = db.session.query(UploadedFile.id).filter(
+        file_exists = db.session.query(UploadedFile.id).filter(
             UploadedFile.uploaded_at >= start_at,
             UploadedFile.uploaded_at < end_at,
-        ).all()
-        file_ids = [r[0] for r in file_ids]
-        if not file_ids:
+        ).first()
+        if not file_exists:
             wb = Workbook()
             ws = wb.active
             ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名'])
@@ -517,11 +763,12 @@ def export_tickets_by_date():
             return Response(buf.read(),
                             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                             headers={'Content-Disposition': f"attachment; filename*=UTF-8''{empty_filename_encoded}"})
-        q = q.filter(LotteryTicket.source_file_id.in_(file_ids))
+        q = q.filter(
+            UploadedFile.uploaded_at >= start_at,
+            UploadedFile.uploaded_at < end_at,
+        )
 
     tickets = q.order_by(LotteryTicket.source_file_id, LotteryTicket.line_number).all()
-
-    file_map = {f.id: f.original_filename for f in UploadedFile.query.all()}
 
     wb = Workbook()
     ws = wb.active
@@ -543,7 +790,7 @@ def export_tickets_by_date():
             t.assigned_device_name or '',
             t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
             t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
-            file_map.get(t.source_file_id, ''),
+            t.original_filename or '',
         ])
 
     buf = _io.BytesIO()
@@ -1379,6 +1626,21 @@ def api_get_settings():
     settings = SystemSettings.get()
     payload = settings.to_dict()
     payload['database_info'] = _database_display_info()
+    try:
+        payload['scheduler_status'] = _build_scheduler_status()
+    except Exception:
+        current_app.logger.exception("Failed to build scheduler status")
+        payload['scheduler_status'] = {
+            'scheduler_present': False,
+            'scheduler_running': False,
+            'job_count': 0,
+            'job_ids': [],
+            'expected_job_ids': list(SCHEDULER_EXPECTED_JOB_IDS),
+            'missing_job_ids': list(SCHEDULER_EXPECTED_JOB_IDS),
+            'status': 'warning',
+            'message': '调度器状态暂不可用。',
+            'action': '可先继续设置操作，稍后联系技术排查。',
+        }
     return jsonify(payload)
 
 

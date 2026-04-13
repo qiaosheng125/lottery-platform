@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Optional
 
 from flask import current_app
+from sqlalchemy import and_, or_
 
 from extensions import db
 from models.user import User, UserSession
@@ -72,8 +73,14 @@ def force_logout_user(user_id: int, reason: str = '管理员强制下线') -> in
 
 def clean_inactive_sessions(hours: int = 3) -> int:
     """清理超过 hours 小时无活动的会话"""
+    now = beijing_now()
     cutoff = beijing_now() - timedelta(hours=hours)
-    count = UserSession.query.filter(UserSession.last_seen < cutoff).delete()
+    count = UserSession.query.filter(
+        or_(
+            UserSession.last_seen < cutoff,
+            and_(UserSession.expires_at.isnot(None), UserSession.expires_at < now),
+        )
+    ).delete(synchronize_session=False)
     db.session.commit()
     return count
 

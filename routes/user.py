@@ -93,15 +93,18 @@ def export_daily():
     today_start = get_today_noon()
     today_end = today_start + timedelta(days=1)
 
-    all_rows = LotteryTicket.query.filter(
+    base_query = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
         LotteryTicket.status == 'completed',
         LotteryTicket.completed_at >= today_start,
         LotteryTicket.completed_at < today_end,
+    )
+    all_count = base_query.count()
+    rows = base_query.filter(
+        LotteryTicket.deadline_time.isnot(None),
+        LotteryTicket.deadline_time <= now,
     ).order_by(LotteryTicket.completed_at).all()
-
-    rows = [r for r in all_rows if r.deadline_time and r.deadline_time <= now]
-    pending_count = len(all_rows) - len(rows)
+    pending_count = max(0, all_count - len(rows))
 
     if not rows:
         msg = '今日暂无可下载记录'

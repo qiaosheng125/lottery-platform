@@ -16,6 +16,19 @@
       </div>
     </div>
 
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-activity"></i> 调度器状态</div>
+      <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <span :class="['badge', schedulerStatusBadgeClass(schedulerStatus.status)]">{{ schedulerStatusLabel(schedulerStatus.status) }}</span>
+          <span class="small text-muted">{{ schedulerStatus.message || '状态未加载' }}</span>
+        </div>
+        <div class="small mb-1">任务数：{{ schedulerStatus.job_count ?? 0 }}</div>
+        <div class="small mb-1">缺失任务：{{ (schedulerStatus.missing_job_ids || []).join(', ') || '无' }}</div>
+        <div class="small text-muted">建议：{{ schedulerStatus.action || '请按当前流程继续观察。' }}</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header"><i class="bi bi-gear"></i> 系统设置</div>
       <div class="card-body">
@@ -92,6 +105,7 @@ createApp({
       error: '',
       modeBOptionsStr: '',
       databaseInfo: { engine: '', path: '' },
+      schedulerStatus: { status: 'warning', message: '状态未加载', action: '', job_count: 0, missing_job_ids: [] },
     };
   },
   async mounted() {
@@ -104,7 +118,9 @@ createApp({
       }
       if (requestSeq !== settingsRequestSeq) return;
       this.databaseInfo = data.database_info || { engine: '', path: '' };
+      this.schedulerStatus = data.scheduler_status || { status: 'warning', message: '状态未加载', action: '', job_count: 0, missing_job_ids: [] };
       delete data.database_info;
+      delete data.scheduler_status;
       this.s = data;
       this.modeBOptionsStr = (this.s.mode_b_options || []).join(',');
     } catch (e) {
@@ -113,6 +129,16 @@ createApp({
     }
   },
   methods: {
+    schedulerStatusLabel(status) {
+      if (status === 'normal') return '正常';
+      if (status === 'critical') return '有严重问题';
+      return '有提醒';
+    },
+    schedulerStatusBadgeClass(status) {
+      if (status === 'normal') return 'bg-success';
+      if (status === 'critical') return 'bg-danger';
+      return 'bg-warning text-dark';
+    },
     async saveSettings() {
       const requestSeq = ++settingsRequestSeq;
       this.saving = true;

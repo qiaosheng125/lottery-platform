@@ -44,6 +44,9 @@ def _acquire_postgres_user_assignment_lock(user_id: int) -> None:
     """Serialize per-user assignment limit checks in PostgreSQL."""
     if not _is_postgres():
         return
+    bind = db.session.get_bind()
+    if bind is None or bind.dialect.name != 'postgresql':
+        return
     db.session.execute(
         text("SELECT pg_advisory_xact_lock(:ns, :user_id)"),
         {'ns': 1001, 'user_id': int(user_id)},

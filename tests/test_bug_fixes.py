@@ -18,7 +18,7 @@ from models.settings import SystemSettings
 from models.file import UploadedFile
 from models.ticket import LotteryTicket
 from models.user import User
-from models.result import MatchResult
+from models.result import MatchResult, ResultFile
 from models.archive import ArchivedLotteryTicket
 from models.winning import WinningRecord
 from utils.time_utils import beijing_now
@@ -134,6 +134,25 @@ def test_login_does_not_treat_stale_same_device_session_as_active(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "最大设备数" in data["error"]
+
+
+def test_logout_redirects_to_login_and_invalidates_heartbeat(app, client):
+    with app.app_context():
+        create_user("logout_user", "secret123", client_mode="mode_b")
+
+    login_resp = login(client, "logout_user", "secret123")
+    assert login_resp.status_code == 200
+    assert login_resp.get_json()["success"] is True
+
+    logout_resp = client.post("/auth/logout", follow_redirects=False)
+    assert logout_resp.status_code in (302, 303)
+    assert "/auth/login" in logout_resp.headers.get("Location", "")
+
+    heartbeat_resp = client.post("/auth/heartbeat", json={})
+    assert heartbeat_resp.status_code == 401
+    assert heartbeat_resp.is_json is True
+    heartbeat_data = heartbeat_resp.get_json()
+    assert heartbeat_data["success"] is False
 
 
 def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
@@ -696,21 +715,21 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
         "parse_filename",
         lambda filename, upload_dt=None: {
             "identifier": "AA",
-            "internal_code": "P7",
-            "lottery_type": "胜平负",
-            "multiplier": 3,
-            "declared_amount": 8.0,
-            "declared_count": 2,
-            "deadline_hhmm": "00.55",
-            "deadline_time": datetime(2026, 4, 7, 0, 55, 0),
-            "detail_period": "26034",
-        },
+                "internal_code": "P7",
+                "lottery_type": "胜平负",
+                "multiplier": 3,
+                "declared_amount": 12.0,
+                "declared_count": 2,
+                "deadline_hhmm": "00.55",
+                "deadline_time": datetime(2026, 4, 7, 0, 55, 0),
+                "detail_period": "26034",
+            },
     )
 
     with app.app_context():
         user = create_user("upload_overdue_user", "secret123", client_mode="mode_b")
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|2\nSPF|1=0|1*1|2\n"),
+            make_upload_file("AA_P7TEST_600_47_00.55_26034.txt", "SPF|1=3|1*1|3\nSPF|1=0|1*1|3\n"),
             uploader_id=user.id,
         )
         assert result["success"] is True
@@ -1085,8 +1104,8 @@ def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
                 "identifier": "AA",
                 "internal_code": "P7",
                 "lottery_type": "胜平负",
-                "multiplier": 2,
-                "declared_amount": 2.0,
+                "multiplier": 3,
+                "declared_amount": 4.0,
                 "declared_count": 1,
                 "deadline_hhmm": "23.55",
                 "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
@@ -3653,7 +3672,7 @@ def test_mode_b_confirm_handles_empty_json_body(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "票ID列表" in data["error"]
+    assert "缺少设备ID" in data["error"]
 
 
 def test_heartbeat_can_backfill_session_device_id(app, client):
@@ -3704,6 +3723,52 @@ def test_create_session_uses_db_session_lifetime_setting(app):
     assert 5.9 <= delta_hours <= 6.1
 
 
+def test_clean_inactive_sessions_cleans_expired_sessions_even_if_last_seen_recent(app):
+    from services.session_service import clean_inactive_sessions
+    from models.user import UserSession
+
+    with app.app_context():
+        user = create_user("cleanup_expired_user", "secret123", client_mode="mode_b")
+        now = beijing_now()
+        session = UserSession(
+            user_id=user.id,
+            session_token="cleanup-expired-token",
+            device_id="cleanup-device",
+            last_seen=now,
+            expires_at=now - timedelta(minutes=1),
+        )
+        db.session.add(session)
+        db.session.commit()
+
+        cleaned = clean_inactive_sessions(hours=3)
+
+        assert cleaned == 1
+        assert UserSession.query.filter_by(session_token="cleanup-expired-token").first() is None
+
+
+def test_clean_inactive_sessions_keeps_recent_non_expired_session(app):
+    from services.session_service import clean_inactive_sessions
+    from models.user import UserSession
+
+    with app.app_context():
+        user = create_user("cleanup_keep_user", "secret123", client_mode="mode_b")
+        now = beijing_now()
+        session = UserSession(
+            user_id=user.id,
+            session_token="cleanup-keep-token",
+            device_id="cleanup-keep-device",
+            last_seen=now,
+            expires_at=now + timedelta(hours=2),
+        )
+        db.session.add(session)
+        db.session.commit()
+
+        cleaned = clean_inactive_sessions(hours=3)
+
+        assert cleaned == 0
+        assert UserSession.query.filter_by(session_token="cleanup-keep-token").first() is not None
+
+
 def test_authenticated_request_extends_session_expiry(app, client):
     with app.app_context():
         user = create_user("session_extend_user", "secret123", client_mode="mode_a")
@@ -3752,7 +3817,9 @@ def test_time_utils_use_configured_daily_reset_hour(app):
         assert deadline == datetime(2026, 4, 8, 5, 30, 0)
 
 
-def test_my_winning_uses_configured_business_reset_hour(app, client):
+def test_my_winning_uses_configured_business_reset_hour(app, client, monkeypatch):
+    monkeypatch.setattr("utils.time_utils.beijing_now", lambda: datetime(2026, 4, 7, 7, 0, 0))
+
     with app.app_context():
         user = create_user("winning_reset_hour_user", "secret123", client_mode="mode_a")
         settings = SystemSettings.get()
@@ -4495,7 +4562,7 @@ def test_process_uploaded_file_stores_txt_under_business_date_folder(app, monkey
                 "internal_code": "P7",
                 "lottery_type": "胜平负",
                 "multiplier": 2,
-                "declared_amount": 2.0,
+                "declared_amount": 4.0,
                 "declared_count": 1,
                 "deadline_hhmm": "23.55",
                 "deadline_time": datetime(2026, 4, 7, 23, 55, 0),
@@ -4524,7 +4591,7 @@ def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
     with app.app_context():
         user = create_user("archive_txt_user", "secret123", client_mode="mode_b")
         result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            make_upload_file("芳_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
             uploader_id=user.id,
         )
         uploaded = UploadedFile.query.get(result["file_id"])
@@ -4557,7 +4624,7 @@ def test_archive_old_uploaded_txt_files_keeps_file_with_recent_ticket_history(ap
     with app.app_context():
         user = create_user("archive_txt_recent_ticket_user", "secret123", client_mode="mode_b")
         result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额600元_47张_00.55_26034.txt", "3\n1\n"),
+            make_upload_file("芳_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
             uploader_id=user.id,
         )
         uploaded = UploadedFile.query.get(result["file_id"])
@@ -4673,7 +4740,7 @@ def test_admin_dashboard_template_uses_readable_chinese_labels():
     # 数据库信息已迁移到设置页，不再在 dashboard 中
     assert "总速度(张/分)" in content
     assert "暂无在线用户" in content
-    assert "showToast(data.error || '操作失败', 'danger');" in content
+    assert "showToast(e.message || '操作失败', 'danger');" in content
 
 
 def test_admin_settings_template_handles_save_failures():
@@ -5352,6 +5419,400 @@ def test_admin_update_settings_normalizes_mode_b_options(app, client):
     assert data["settings"]["mode_b_options"] == [200, 50, 100]
 
 
+def test_admin_dashboard_data_includes_normal_health_summary(app, client, monkeypatch):
+    expected_job_ids = {
+        "expire_tickets",
+        "clean_sessions",
+        "daily_reset",
+        "db_keepalive",
+        "archive_tickets",
+        "archive_uploaded_txt_files",
+        "purge_old_auxiliary_records",
+    }
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        def get_jobs(self):
+            return [FakeJob(job_id) for job_id in sorted(expected_job_ids)]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_health_normal", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_normal", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    assert health["status"] == "normal"
+    assert health["items"] == []
+    assert "系统正常" in health["summary"]
+    assert health["generated_at"]
+
+
+def test_admin_dashboard_data_marks_overdue_pending_as_warning(app, client, monkeypatch):
+    expected_job_ids = {
+        "expire_tickets",
+        "clean_sessions",
+        "daily_reset",
+        "db_keepalive",
+        "archive_tickets",
+        "archive_uploaded_txt_files",
+        "purge_old_auxiliary_records",
+    }
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        def get_jobs(self):
+            return [FakeJob(job_id) for job_id in sorted(expected_job_ids)]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_health_warning", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded_file = UploadedFile(
+            original_filename="warning.txt",
+            stored_filename="warning.txt",
+            uploaded_by=admin.id,
+            status="active",
+            total_tickets=1,
+            pending_count=1,
+            assigned_count=0,
+            completed_count=0,
+            deadline_time=beijing_now() - timedelta(hours=1),
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+
+        overdue_ticket = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="1(3.00)",
+            status="pending",
+            deadline_time=beijing_now() - timedelta(minutes=30),
+        )
+        db.session.add(overdue_ticket)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_warning", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    assert health["status"] == "warning"
+    overdue_item = next(item for item in health["items"] if item["type"] == "overdue_pending_tickets")
+    assert overdue_item["count"] >= 1
+
+
+def test_admin_dashboard_data_marks_result_parse_error_as_critical(app, client, monkeypatch):
+    expected_job_ids = {
+        "expire_tickets",
+        "clean_sessions",
+        "daily_reset",
+        "db_keepalive",
+        "archive_tickets",
+        "archive_uploaded_txt_files",
+        "purge_old_auxiliary_records",
+    }
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        def get_jobs(self):
+            return [FakeJob(job_id) for job_id in sorted(expected_job_ids)]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_health_critical", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        db.session.add(
+            ResultFile(
+                original_filename="bad_result.txt",
+                stored_filename="bad_result.txt",
+                uploaded_by=admin.id,
+                status="error",
+                parse_error="bad format",
+            )
+        )
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_critical", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    assert health["status"] == "critical"
+    parse_error_item = next(item for item in health["items"] if item["type"] == "result_file_parse_error")
+    assert parse_error_item["count"] >= 1
+
+
+def test_admin_dashboard_data_does_not_warn_for_missing_winning_record_or_image(app, client, monkeypatch):
+    expected_job_ids = {
+        "expire_tickets",
+        "clean_sessions",
+        "daily_reset",
+        "db_keepalive",
+        "archive_tickets",
+        "archive_uploaded_txt_files",
+        "purge_old_auxiliary_records",
+    }
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        def get_jobs(self):
+            return [FakeJob(job_id) for job_id in sorted(expected_job_ids)]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_health_winning_optional", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded_file = UploadedFile(
+            original_filename="winning_optional.txt",
+            stored_filename="winning_optional.txt",
+            uploaded_by=admin.id,
+            status="active",
+            total_tickets=2,
+            pending_count=0,
+            assigned_count=0,
+            completed_count=2,
+            deadline_time=beijing_now() + timedelta(hours=1),
+        )
+        db.session.add(uploaded_file)
+        db.session.flush()
+
+        ticket_with_record = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=1,
+            raw_content="SPF|61=3|1*1|1",
+            status="completed",
+            is_winning=True,
+            winning_amount=10,
+            winning_gross=12,
+            winning_tax=2,
+            deadline_time=beijing_now() + timedelta(hours=1),
+            assigned_at=beijing_now(),
+            completed_at=beijing_now(),
+        )
+        ticket_without_record = LotteryTicket(
+            source_file_id=uploaded_file.id,
+            line_number=2,
+            raw_content="SPF|62=3|1*1|1",
+            status="completed",
+            is_winning=True,
+            winning_amount=8,
+            winning_gross=10,
+            winning_tax=2,
+            deadline_time=beijing_now() + timedelta(hours=1),
+            assigned_at=beijing_now(),
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([ticket_with_record, ticket_without_record])
+        db.session.flush()
+
+        db.session.add(
+            WinningRecord(
+                ticket_id=ticket_with_record.id,
+                source_file_id=uploaded_file.id,
+                detail_period="26034",
+                lottery_type="胜平负",
+                winning_amount=10,
+                winning_image_url=None,
+                uploaded_by=admin.id,
+                is_checked=False,
+            )
+        )
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_winning_optional", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    item_types = {item["type"] for item in health["items"]}
+    assert "winning_ticket_missing_record" not in item_types
+    assert "winning_record_missing_image" not in item_types
+    assert health["status"] == "normal"
+
+
+def test_admin_dashboard_data_health_summary_fallback_does_not_break_core_payload(app, client, monkeypatch):
+    def _raise_summary_error(*_args, **_kwargs):
+        raise RuntimeError("summary unavailable")
+
+    monkeypatch.setattr("routes.admin._build_health_summary", _raise_summary_error)
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_health_fallback", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_fallback", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "pool" in data
+    assert "online_users" in data
+    health = data["health_summary"]
+    assert health["status"] == "warning"
+    assert health["items"][0]["type"] == "summary_unavailable"
+
+
+def test_admin_settings_includes_scheduler_status_normal(app, client, monkeypatch):
+    expected_job_ids = [
+        "expire_tickets",
+        "clean_sessions",
+        "daily_reset",
+        "db_keepalive",
+        "archive_tickets",
+        "archive_uploaded_txt_files",
+        "purge_old_auxiliary_records",
+    ]
+
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        running = True
+
+        def get_jobs(self):
+            return [FakeJob(job_id) for job_id in expected_job_ids]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_settings_scheduler_normal", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_scheduler_normal", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/settings")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scheduler_status = data["scheduler_status"]
+    assert scheduler_status["status"] == "normal"
+    assert scheduler_status["scheduler_present"] is True
+    assert scheduler_status["scheduler_running"] is True
+    assert scheduler_status["job_count"] == len(expected_job_ids)
+    assert scheduler_status["missing_job_ids"] == []
+
+
+def test_admin_settings_marks_scheduler_none_as_critical(app, client, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+
+    with app.app_context():
+        admin = User(username="admin_settings_scheduler_none", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_scheduler_none", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/settings")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scheduler_status = data["scheduler_status"]
+    assert scheduler_status["status"] == "critical"
+    assert scheduler_status["scheduler_present"] is False
+    assert scheduler_status["scheduler_running"] is False
+    assert "daily_reset" in scheduler_status["missing_job_ids"]
+
+
+def test_admin_settings_lists_missing_scheduler_jobs(app, client, monkeypatch):
+    class FakeJob:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    class FakeScheduler:
+        running = True
+
+        def get_jobs(self):
+            return [FakeJob("expire_tickets"), FakeJob("clean_sessions")]
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FakeScheduler())
+
+    with app.app_context():
+        admin = User(username="admin_settings_scheduler_missing", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_scheduler_missing", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/settings")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scheduler_status = data["scheduler_status"]
+    assert scheduler_status["status"] == "critical"
+    assert "daily_reset" in scheduler_status["missing_job_ids"]
+    assert scheduler_status["job_count"] == 2
+
+
+def test_admin_settings_scheduler_status_fallback_when_status_builder_errors(app, client, monkeypatch):
+    def _raise_scheduler_error(*_args, **_kwargs):
+        raise RuntimeError("scheduler status unavailable")
+
+    monkeypatch.setattr("routes.admin._build_scheduler_status", _raise_scheduler_error)
+
+    with app.app_context():
+        admin = User(username="admin_settings_scheduler_fallback", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_scheduler_fallback", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/settings")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scheduler_status = data["scheduler_status"]
+    assert scheduler_status["status"] == "warning"
+    assert "暂不可用" in scheduler_status["message"]
+
+
 def test_admin_winning_template_uses_readable_chinese_labels():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")
@@ -5360,7 +5821,8 @@ def test_admin_winning_template_uses_readable_chinese_labels():
     assert "税后合计：" in content
     assert "确认将这条中奖记录标记为已检查吗？" in content
     assert "上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列" in content
-    assert "showToast(data.success ? '已提交重算' : (data.error || '提交失败')" in content
+    assert "showToast('已提交重算', 'success');" in content
+    assert "showToast(e.message || '提交失败', 'danger');" in content
 
 
 def test_admin_winning_template_declares_match_results_and_uploading_state():
@@ -5407,8 +5869,8 @@ def test_client_dashboard_handles_mode_a_stop_failures_and_localizes_next_ticket
     assert "showToast('请等待 ' + remaining + ' 秒后再获取下一张', 'warning');" in content
     assert "showToast(data.error || '暂无可用票', 'warning');" in content
     assert "showToast('获取下一张失败，请稍后重试', 'danger');" in content
-    assert "if (!data.success) {" in content
-    assert "showToast(data.error || '停止接单失败', 'danger');" in content
+    assert "if (!res.ok || data.success === false) {" in content
+    assert "showToast(e.message || '停止接单失败', 'danger');" in content
     assert "showToast(data.message || '已停止接单', 'success');" in content
     assert "this.countdown = '已截止';" in content
 
@@ -5547,7 +6009,7 @@ def test_admin_winning_record_creates_winning_record(app, client):
 
     resp = client.post(
         "/admin/api/winning/record",
-        json={"ticket_id": ticket_id, "oss_key": "winning/test/admin-001.jpg"},
+        json={"ticket_id": ticket_id, "oss_key": f"winning/2026/04/07/{ticket_id}.jpg"},
     )
     assert resp.status_code == 200
     data = resp.get_json()
@@ -5560,7 +6022,7 @@ def test_admin_winning_record_creates_winning_record(app, client):
         assert ticket.is_winning is True
         assert ticket.winning_image_url
         assert record is not None
-        assert record.image_oss_key == "winning/test/admin-001.jpg"
+        assert record.image_oss_key == f"winning/2026/04/07/{ticket_id}.jpg"
 
 
 def test_record_winning_does_not_delete_reuploaded_same_oss_key(app, client, monkeypatch):
@@ -5713,17 +6175,19 @@ def test_admin_winning_record_does_not_delete_reuploaded_same_oss_key(app, clien
             assigned_username=user.username,
             completed_at=beijing_now(),
             is_winning=True,
-            winning_image_url="https://oss.example.com/winning/2026/04/07/2.jpg",
+            winning_image_url="",
         )
         db.session.add(ticket)
         db.session.commit()
+        current_key = f"winning/2026/04/07/{ticket.id}.jpg"
+        ticket.winning_image_url = f"https://oss.example.com/{current_key}"
         db.session.add(WinningRecord(
             ticket_id=ticket.id,
             source_file_id=ticket.source_file_id,
             detail_period=ticket.detail_period,
             lottery_type=ticket.lottery_type,
             winning_image_url=ticket.winning_image_url,
-            image_oss_key="winning/2026/04/07/2.jpg",
+            image_oss_key=current_key,
             uploaded_by=admin.id,
         ))
         db.session.commit()
@@ -5734,7 +6198,7 @@ def test_admin_winning_record_does_not_delete_reuploaded_same_oss_key(app, clien
 
     resp = client.post(
         "/admin/api/winning/record",
-        json={"ticket_id": ticket_id, "oss_key": "winning/2026/04/07/2.jpg"},
+        json={"ticket_id": ticket_id, "oss_key": f"winning/2026/04/07/{ticket_id}.jpg"},
     )
     assert resp.status_code == 200
     assert deleted == []
@@ -5814,7 +6278,7 @@ def test_admin_winning_record_checked_error_uses_readable_chinese(app, client):
 
     resp = client.post(
         "/admin/api/winning/record",
-        json={"ticket_id": ticket_id, "oss_key": "winning/test/admin-checked.jpg"},
+        json={"ticket_id": ticket_id, "oss_key": f"winning/2026/04/07/{ticket_id}.jpg"},
     )
     assert resp.status_code == 403
     data = resp.get_json()
@@ -6885,9 +7349,12 @@ def test_client_dashboard_reloads_processing_batches_after_download():
 def test_client_dashboard_resets_matching_state_on_load_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "} catch(e) {\n        this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };\n      }\n    }," in content
+    assert "} catch(e) {" in content
+    assert "if (requestSeq !== dailyStatsRequestSeq) return;" in content
+    assert "this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };" in content
     assert "throw new Error(data.error || '加载处理中批次失败');" in content
-    assert "} catch(e) {\n        this.bPendingBatches = [];\n      }\n    },\n    async loadPoolStatus()" in content
+    assert "if (requestSeq !== modeBProcessingRequestSeq) return;" in content
+    assert "this.bPendingBatches = [];" in content
     assert "throw new Error(data.error || '加载票池状态失败');" in content
 
 
@@ -6898,7 +7365,7 @@ def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
     assert "if (!this.isModeB) {\n      this.loadCurrentModeATicket();\n    }" in content
     assert "if (this.isModeB) {\n      this.loadPoolStatus();\n      this.loadProcessingBatches();\n    }" in content
     assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    }" in content
-    assert "if (this.isModeB) {\n        this.loadPoolStatus();\n      }\n      this.loadStats();" in content
+    assert "if (this.isModeB) {\n        this.loadProcessingBatches();\n        this.loadPoolStatus();\n      }\n      this.loadStats();" in content
 
 
 def test_client_dashboard_restores_mode_a_current_ticket_on_mount():
@@ -6918,7 +7385,7 @@ def test_client_dashboard_fully_resets_mode_a_state_when_current_ticket_missing(
     assert "this.showStopConfirm = false;" in content
     assert "this.nextCooldownUntil = 0;" in content
     assert "document.body.classList.remove('mode-a-active');" in content
-    assert "if (!res.ok || data.success === false || !data.ticket) {\n          this.resetModeAState();" in content
+    assert "if (!res.ok || data.success === false || !data.ticket) {\n          if (requestSeq !== modeACurrentTicketRequestSeq) return;\n          this.resetModeAState();" in content
 
 
 def test_client_dashboard_stop_reanchors_from_history_to_latest_ticket():
@@ -6997,7 +7464,7 @@ def test_client_dashboard_handles_mode_b_preview_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "this.bPreview = null;" in content
-    assert "showToast(data.error || '预览失败', 'danger');" in content
+    assert "showToast(e.message || '预览失败，请稍后重试', 'danger');" in content
 
 
 def test_client_dashboard_handles_export_daily_network_failure():
@@ -7426,6 +7893,24 @@ def test_admin_dashboard_contains_announcement_panel():
     assert "loadAnnouncementSettings();" in content
 
 
+def test_admin_dashboard_renders_health_summary_panel():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "id=\"health-summary-badge\"" in content
+    assert "id=\"health-summary-items\"" in content
+    assert "function renderHealthSummary(summary)" in content
+    assert "renderHealthSummary(data.health_summary);" in content
+
+
+def test_admin_dashboard_removes_device_speed_detail_table_but_keeps_speed_overview():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "设备处理速度统计" not in content
+    assert "id=\"device-speed-tbody\"" not in content
+    assert "id=\"stat-speed\"" in content
+    assert "id=\"stat-eta\"" in content
+
+
 def test_admin_settings_no_longer_renders_announcement_editor():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     content = settings_template.read_text(encoding="utf-8")
@@ -7456,6 +7941,15 @@ def test_admin_settings_template_checks_http_status_on_load():
     assert "if (!res.ok || data.success === false) {" in content
     assert "throw new Error(data.error ||" in content
     assert "this.saved = true;" in content
+
+
+def test_admin_settings_template_renders_scheduler_status_panel():
+    settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
+    content = settings_template.read_text(encoding="utf-8")
+    assert "调度器状态" in content
+    assert "scheduler_status" in content
+    assert "schedulerStatusLabel(status)" in content
+    assert "schedulerStatusBadgeClass(status)" in content
 
 
 def test_admin_settings_template_ignores_stale_load_and_save_responses():
