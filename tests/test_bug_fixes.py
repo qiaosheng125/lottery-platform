@@ -7902,11 +7902,12 @@ def test_admin_dashboard_renders_health_summary_panel():
     assert "renderHealthSummary(data.health_summary);" in content
 
 
-def test_admin_dashboard_removes_device_speed_detail_table_but_keeps_speed_overview():
+def test_admin_dashboard_renders_device_speed_detail_table_and_speed_overview():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "设备处理速度统计" not in content
-    assert "id=\"device-speed-tbody\"" not in content
+    assert "设备处理速度统计" in content
+    assert "id=\"device-speed-tbody\"" in content
+    assert "data.device_speed_stats" in content
     assert "id=\"stat-speed\"" in content
     assert "id=\"stat-eta\"" in content
 
