@@ -95,6 +95,31 @@ def _token_matches(token_meta, result_file_id, uploaded_at):
     return True
 
 
+def _select_active_winning_outcome(
+    has_predicted_results: bool,
+    has_final_results: bool,
+    predicted_is_win: bool,
+    predicted_net: Decimal,
+    final_is_win: bool,
+    final_net: Decimal,
+    has_predicted_ticket_data: bool,
+    has_final_ticket_data: bool,
+):
+    if has_final_results:
+        if final_is_win:
+            return True, final_net
+        if has_final_ticket_data:
+            return False, Decimal('0')
+
+    if has_predicted_results:
+        if predicted_is_win:
+            return True, predicted_net
+        if has_predicted_ticket_data:
+            return False, Decimal('0')
+
+    return False, Decimal('0')
+
+
 def process_match_result(match_result_id: int, expected_calc_token=None, expected_uploaded_at=None, app=None):
     from app import create_app
 
@@ -186,15 +211,16 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
                     else:
                         _clear_ticket_amounts(ticket, clear_predicted=False, clear_final=True)
 
-                    if has_final_results and has_final_ticket_data:
-                        active_is_win = final_is_win
-                        active_net_amount = final_net
-                    elif has_predicted_results and has_predicted_ticket_data:
-                        active_is_win = predicted_is_win
-                        active_net_amount = predicted_net
-                    else:
-                        active_is_win = False
-                        active_net_amount = Decimal('0')
+                    active_is_win, active_net_amount = _select_active_winning_outcome(
+                        has_predicted_results=has_predicted_results,
+                        has_final_results=has_final_results,
+                        predicted_is_win=predicted_is_win,
+                        predicted_net=predicted_net,
+                        final_is_win=final_is_win,
+                        final_net=final_net,
+                        has_predicted_ticket_data=has_predicted_ticket_data,
+                        has_final_ticket_data=has_final_ticket_data,
+                    )
 
                     ticket.is_winning = active_is_win
                     if active_is_win:
