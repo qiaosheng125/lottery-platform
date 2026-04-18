@@ -116,7 +116,7 @@ body {
 .mode-a-fullscreen-container {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 260px);
+  height: calc(100dvh - 280px);
   min-height: 360px;
   background: #fff;
   border-radius: 8px;
@@ -175,28 +175,46 @@ body {
   margin-top: 0.1rem;
 }
 
+.mode-a-label {
+  font-size: 0.72rem;
+  margin-right: 0.2rem;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+}
+
 
 .mode-a-main-area {
   flex: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   min-height: 0;
   background: #f8f9fa;
+  gap: 0.4rem;
+  padding: 0.35rem;
+  overflow: hidden;
 }
 
 /* 宸﹀彸涓や晶鎸夐挳 */
 .mode-a-side-btn {
   flex-shrink: 0;
-  width: 50px;
+  width: 44px;
+  min-width: 44px;
+  height: auto;
   background: rgba(102, 126, 234, 0.1);
-  border: none;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
   color: #667eea;
   font-size: 1.8rem;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   align-items: center;
   justify-content: center;
+  align-self: stretch;
+  padding: 0;
 }
 
 .mode-a-side-btn:hover:not(:disabled) {
@@ -213,20 +231,34 @@ body {
 }
 
 .mode-a-side-btn-left {
-  border-right: 1px solid #e9ecef;
+  border-right-color: #dee2e6;
 }
 
 .mode-a-side-btn-right {
-  border-left: 1px solid #e9ecef;
+  border-left-color: #dee2e6;
 }
 
 /* 绁ㄩ潰婊氬姩鍖哄煙 - 鍗犳嵁鍓╀綑绌洪棿 */
 .mode-a-ticket-scroll {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 0.5rem;
+}
+
+.mode-a-side-hint {
+  font-size: 0.72rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #4f63c4;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  user-select: none;
 }
 
 
@@ -249,6 +281,20 @@ body {
   width: 8px;
   height: 8px;
   transition: all 0.2s;
+}
+
+.history-dot-active {
+  background: #0d6efd;
+  transform: scale(1.12);
+}
+
+.history-dot-filled {
+  background: #6c757d;
+}
+
+.history-dot-empty {
+  background: #e9ecef;
+  border: 1px solid #ced4da;
 }
 
 
@@ -299,7 +345,7 @@ body {
 
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
-    height: calc(100vh - 250px);
+    height: calc(100dvh - 250px);
     min-height: 350px;
   }
 
@@ -312,8 +358,10 @@ body {
   }
 
   .mode-a-side-btn {
-    width: 42px;
-    font-size: 1.5rem;
+    width: 38px;
+    min-width: 38px;
+    height: auto;
+    font-size: 1.35rem;
   }
 
   .mode-a-ticket-scroll {
@@ -344,7 +392,7 @@ body {
 /* 灏忓睆鎵嬫満锛?375px锛?*/
 @media (max-width: 375px) {
   .mode-a-fullscreen-container {
-    height: calc(100vh - 230px);
+    height: calc(100dvh - 220px);
     min-height: 320px;
   }
 
@@ -353,8 +401,10 @@ body {
   }
 
   .mode-a-side-btn {
-    width: 36px;
-    font-size: 1.3rem;
+    width: 34px;
+    min-width: 34px;
+    height: auto;
+    font-size: 1.2rem;
   }
 
   .ticket-render .match-header {
@@ -379,28 +429,60 @@ body.mode-a-active .client-quick-links {
   display: none !important;
 }
 
-body.mode-a-active .mode-a-fullscreen-container {
-  height: calc(100dvh - 88px);
-  max-height: calc(100dvh - 88px);
+body.mode-a-active #mode-a {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1030;
+  margin: 0;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+body.mode-a-active #mode-a .card-header {
+  flex-shrink: 0;
+  border-radius: 0;
+}
+
+body.mode-a-active #mode-a .card-body {
+  flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem;
+}
+
+body.mode-a-active .mode-a-fullscreen-container {
+  flex: 1;
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  border-radius: 0;
 }
 
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
-    height: calc(100dvh - 210px);
+    height: calc(100dvh - 220px);
     min-height: 280px;
   }
 
-  body.mode-a-active .mode-a-fullscreen-container {
-    height: calc(100dvh - 72px);
-    max-height: calc(100dvh - 72px);
+  body.mode-a-active #mode-a {
+    top: 52px;
+  }
+
+  body.mode-a-active #mode-a .card-body {
+    padding: 0.25rem;
   }
 }
 
 @media (max-width: 375px) {
-  body.mode-a-active .mode-a-fullscreen-container {
-    height: calc(100vh - 100px);
-    min-height: 260px;
+  body.mode-a-active #mode-a {
+    top: 50px;
   }
 }
 

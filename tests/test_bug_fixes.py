@@ -7838,9 +7838,13 @@ def test_mode_a_mobile_layout_keeps_stop_action_visible():
     assert "overflow: hidden;" in content
     assert "body.mode-a-active .client-device-stats," in content
     assert "body.mode-a-active .client-quick-links {" in content
+    assert "body.mode-a-active #mode-a {" in content
+    assert "position: fixed;" in content
+    assert "body.mode-a-active #mode-a .card-body {" in content
     assert ".mode-a-bottom-bar {" in content
     assert "env(safe-area-inset-bottom)" in content
-    assert "height: calc(100dvh - 88px);" in content
+    assert "body.mode-a-active .mode-a-fullscreen-container {" in content
+    assert "flex: 1;" in content
 
 
 def test_client_dashboard_fully_resets_mode_a_state_when_current_ticket_missing():
@@ -7917,12 +7921,33 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     assert "window.addEventListener('pool_disabled', this._onPoolDisabled);" in content
     assert "window.addEventListener('pool_enabled', this._onPoolEnabled);" in content
     assert "window.addEventListener('file_revoked', this._onFileRevoked);" in content
+    assert "window.addEventListener('keydown', this._onModeAArrowKey);" in content
+    assert "window.removeEventListener('keydown', this._onModeAArrowKey);" in content
+    assert "if (event.key === 'ArrowLeft') {" in content
+    assert "if (event.key === 'ArrowRight') {" in content
     assert "this._onPoolUpdated = () => {" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
     assert "this._onPoolUpdated = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
     assert "this._onPoolDisabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
     assert "this._onPoolEnabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
+
+
+def test_client_dashboard_mode_a_flip_buttons_show_text_hints():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "mode-a-side-hint\">上一张</span>" in content
+    assert "mode-a-side-hint\">下一张</span>" in content
+
+
+def test_client_dashboard_mode_a_history_indicator_uses_two_fixed_slots():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "v-for=\"slot in 2\"" in content
+    assert ":class=\"historyDotClass(slot - 1)\"" in content
+    assert "if (this.ticketHistory.length > 2) this.ticketHistory.pop();" in content
+    assert "const start = totalSlots - count;" in content
+    assert "const historyIndex = count - 1 - fromLeft;" in content
 
 
 def test_client_dashboard_handles_mode_b_preview_failure():

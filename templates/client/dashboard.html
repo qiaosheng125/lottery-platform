@@ -106,15 +106,16 @@
                 <div class="info-amount">¥{{ currentTicket.ticket_amount || calculateTicketAmount(currentTicket.raw_content) }}</div>
               </div>
               <div class="info-right">
-                <div class="countdown-text">{{ countdown }}</div>
-                <div class="deadline-text">{{ deadlineStr }}</div>
+                <div class="countdown-text"><span class="mode-a-label">倒计时</span>{{ countdown }}</div>
+                <div class="deadline-text"><span class="mode-a-label">截止时间</span>{{ deadlineStr || '--:--' }}</div>
               </div>
             </div>
           </div>
 
           <div class="mode-a-main-area">
-            <button class="mode-a-side-btn mode-a-side-btn-left" @click="previousTicket" :disabled="historyOffset >= ticketHistory.length - 1">
+            <button class="mode-a-side-btn mode-a-side-btn-left" @click="previousTicket" :disabled="historyOffset >= ticketHistory.length - 1" title="上一张">
               <i class="bi bi-arrow-left"></i>
+              <span class="mode-a-side-hint">上一张</span>
             </button>
 
             <div class="mode-a-ticket-scroll">
@@ -132,16 +133,17 @@
                 <span class="mode-a-cooldown-sec">{{ nextCooldownSec }}</span>
               </template>
               <i v-else class="bi bi-arrow-right"></i>
+              <span class="mode-a-side-hint">下一张</span>
             </button>
           </div>
 
           <div class="mode-a-bottom-bar">
-            <div v-if="ticketHistory.length > 1" class="text-center mb-2">
+            <div class="text-center mb-2">
               <span
-                v-for="(t, i) in ticketHistory"
-                :key="i"
+                v-for="slot in 2"
+                :key="'history-dot-' + slot"
                 class="d-inline-block rounded-circle me-1 history-dot"
-                :class="i === historyOffset ? 'bg-primary' : 'bg-secondary'"
+                :class="historyDotClass(slot - 1)"
               ></span>
             </div>
             <button class="btn btn-danger w-100 mode-a-stop-btn" @click="confirmStop">
@@ -530,11 +532,36 @@ createApp({
       }
       this.loadStats();
     };
+    this._onModeAArrowKey = (event) => {
+      if (this.isModeB || !this.modeAActive || !this.currentTicket || this.showStopConfirm || this.winningVisible || this.pwdModalVisible) {
+        return;
+      }
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      const activeEl = document.activeElement;
+      if (activeEl) {
+        const tag = (activeEl.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button' || activeEl.isContentEditable) {
+          return;
+        }
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        this.previousTicket();
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        this.nextTicket();
+      }
+    };
     window.addEventListener('pool_updated', this._onPoolUpdated);
     window.addEventListener('announcement', this._onAnnouncement);
     window.addEventListener('pool_disabled', this._onPoolDisabled);
     window.addEventListener('pool_enabled', this._onPoolEnabled);
     window.addEventListener('file_revoked', this._onFileRevoked);
+    window.addEventListener('keydown', this._onModeAArrowKey);
 
     // 每 30 秒上报一次心跳，保持设备在线状态
     setInterval(() => {
@@ -657,7 +684,7 @@ createApp({
           this.modeAActive = true;
           this.ticketHistory = this.ticketHistory.filter(t => t && t.id !== data.ticket.id);
           this.ticketHistory.unshift(data.ticket);
-          if (this.ticketHistory.length > 3) this.ticketHistory.pop();
+          if (this.ticketHistory.length > 2) this.ticketHistory.pop();
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
@@ -702,6 +729,20 @@ createApp({
       this.historyOffset += 1;
       this.currentTicket = this.ticketHistory[this.historyOffset];
       this.startCountdown(this.currentTicket.deadline_time);
+    },
+    historyDotClass(slotIndex) {
+      const totalSlots = 2;
+      const count = Math.min(this.ticketHistory.length, totalSlots);
+      const start = totalSlots - count;
+      if (slotIndex < start) {
+        return 'history-dot-empty';
+      }
+      const fromLeft = slotIndex - start; // 0..count-1 (oldest -> newest)
+      const historyIndex = count - 1 - fromLeft; // ticketHistory index (newest=0)
+      if (historyIndex === this.historyOffset) {
+        return 'history-dot-active';
+      }
+      return 'history-dot-filled';
     },
     confirmStop() {
       if (this.historyOffset > 0 && this.ticketHistory.length > 0) {
@@ -1130,6 +1171,9 @@ createApp({
     }
     if (this._onFileRevoked) {
       window.removeEventListener('file_revoked', this._onFileRevoked);
+    }
+    if (this._onModeAArrowKey) {
+      window.removeEventListener('keydown', this._onModeAArrowKey);
     }
   }
 }).mount('#client-dashboard');
