@@ -7632,6 +7632,52 @@ def test_winning_calc_falls_back_to_predicted_when_final_is_incomplete(app):
     assert float(refreshed_match_result.total_winning_amount) == 6.5
 
 
+def test_winning_calc_uses_win_result_when_completeness_helper_disagrees(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier, sp_field='sp'):
+        if sp_field == 'sp':
+            return True, 13, 13, 0
+        return False, 0, 0, 0
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+    monkeypatch.setattr("services.winning_calc_service.has_complete_result_data", lambda *args, **kwargs: False)
+
+    with app.app_context():
+        user = create_user("calc_vs_complete_guard_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26194",
+            result_data={"1": {"SPF": {"result": "3", "sp": 10.0}}},
+            uploaded_by=user.id,
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26194",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_match_result = db.session.get(MatchResult, match_result_id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+
+    assert refreshed_ticket.is_winning is True
+    assert float(refreshed_ticket.winning_amount) == 13.0
+    assert refreshed_match_result.tickets_winning == 1
+    assert float(refreshed_match_result.total_winning_amount) == 13.0
+
+
 def test_winning_calc_stale_commit_does_not_delete_winning_image(app, monkeypatch):
     from services.winning_calc_service import process_match_result
 
