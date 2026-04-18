@@ -161,7 +161,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         if not _enter_sqlite_duplicate_guard(filename, business_date):
             return {
                 'success': False,
-                'message': f'褰撳墠涓氬姟鏃ュ唴宸蹭笂浼犲悓鍚嶆枃浠? {filename}',
+                'message': f'当前业务日内已上传同名文件: {filename}',
                 'file_id': None,
                 'filename': filename,
             }

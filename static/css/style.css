@@ -102,7 +102,7 @@ body {
   letter-spacing: 0.05em;
 }
 
-/* ticket-render 琛ㄦ牸 */
+/* ticket-render 表格 */
 .ticket-render .table td {
   padding: 0.2rem 0.4rem;
   vertical-align: middle;
@@ -112,7 +112,7 @@ body {
 
 
 
-/* 鍏ㄥ睆瀹瑰櫒 - 閾烘弧鏁翠釜鍗＄墖鍖哄煙 */
+/* 全屏容器 - 铺满整个卡片区域 */
 .mode-a-fullscreen-container {
   display: flex;
   flex-direction: column;

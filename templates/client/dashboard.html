@@ -446,9 +446,9 @@ createApp({
       bDownloadCooldownUntil: 0,
       isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %},
       // 待处理批次：[{filename, ticket_ids, count, amount, downloaded_at}]
-      // 鍑虹エ涓堣〖[{filename, ticket_ids, count, amount, downloaded_at}]
+      // 出票记录：[{filename, ticket_ids, count, amount, downloaded_at}]
       bPendingBatches: [],
-      // 璁板綍寮圭獥
+      // 中奖记录弹窗
       winningVisible: false, winningLoading: false, winningGrouped: {},
       winningPreviewUrl: null, uploadingWinningId: null,
       winningGroupBy: 'date', // 'date' | 'type'
@@ -536,7 +536,7 @@ createApp({
     window.addEventListener('pool_enabled', this._onPoolEnabled);
     window.addEventListener('file_revoked', this._onFileRevoked);
 
-    // ?30??????????????
+    // 每 30 秒上报一次心跳，保持设备在线状态
     setInterval(() => {
       fetch('/auth/heartbeat', {
         method: 'POST',
@@ -545,6 +545,7 @@ createApp({
       }).catch(() => {});
     }, 30000);
   },
+  methods: {
     resetModeAState() {
       this.currentTicket = null;
       this.modeAActive = false;
@@ -618,8 +619,9 @@ createApp({
       }
     },
     async nextTicket() {
-      // 濡傛灉鍦ㄧ湅鍘嗗彶绁尖€滀笅寮犲彧鏄滄湝鏁扮粍鍓嶈繘锛屼笉?API锛堜笉鍙楀喎鍗撮檺鍒讹級
+      // 如果正在浏览历史记录，“下一张”只在本地历史中前进，不请求 API（不受冷却限制）
       // 浏览历史记录时不请求 API，只有停留在最新一张时才请求下一张
+      if (this.historyOffset > 0) {
         this.historyOffset -= 1;
         this.currentTicket = this.ticketHistory[this.historyOffset];
         this.startCountdown(this.currentTicket.deadline_time);
@@ -1097,12 +1099,12 @@ createApp({
         const data = await res.json();
         if (res.ok && data.success) {
           Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
-          showToast('鍥剧墖涓婁紶鎴愬姛', 'success');
+          showToast('图片上传成功', 'success');
         } else {
-          showToast(data.error || '涓婁紶澶辫触', 'danger');
+          showToast(data.error || '上传失败', 'danger');
         }
       } catch(e) {
-        showToast('涓婁紶澶辫触', 'danger');
+        showToast('上传失败', 'danger');
       } finally {
         this.uploadingWinningId = null;
         event.target.value = '';
@@ -1142,7 +1144,7 @@ createApp({
   position: fixed; inset: 0; background: rgba(0,0,0,.5);
   z-index: 1050; display: flex; align-items: center; justify-content: center;
 }
-/* 鍏ㄥ睆璁板綍闈㈡澘 */
+/* 全屏记录面板 */
 .winning-panel {
   position: fixed; inset: 0; z-index: 1040;
   background: #f8f9fa; display: flex; flex-direction: column;
