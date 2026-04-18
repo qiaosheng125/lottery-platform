@@ -114,7 +114,7 @@ def _order_tickets_by_id_sequence(tickets: List[LotteryTicket], ordered_ids: Lis
     return [ticket_map[ticket_id] for ticket_id in ordered_ids if ticket_id in ticket_map]
 
 
-def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_name: str = None,
+def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                          daily_limit: int = None, blocked_lottery_types: List[str] = None) -> Optional[LotteryTicket]:
     """
     原子性地从票池分配一张票给用户。
@@ -174,7 +174,6 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                             assigned_user_id = :user_id,
                             assigned_username = :username,
                             assigned_device_id = :device_id,
-                            assigned_device_name = :device_name,
                             assigned_at = :now,
                             locked_until = :lock_until,
                             version = version + 1
@@ -182,7 +181,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     """),
                     {
                         'user_id': user_id, 'username': username,
-                        'device_id': device_id, 'device_name': device_name,
+                        'device_id': device_id,
                         'now': now, 'lock_until': lock_until, 'id': ticket_id,
                     }
                 ).rowcount
@@ -305,7 +304,6 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                             assigned_user_id = :user_id,
                             assigned_username = :username,
                             assigned_device_id = :device_id,
-                            assigned_device_name = :device_name,
                             assigned_at = :now,
                             locked_until = :lock_until,
                             version = version + 1
@@ -313,7 +311,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str, device_nam
                     """),
                     {
                         'user_id': user_id, 'username': username,
-                        'device_id': device_id, 'device_name': device_name,
+                        'device_id': device_id,
                         'now': now, 'lock_until': lock_until, 'id': ticket_id,
                     }
                 ).rowcount
@@ -398,7 +396,6 @@ def assign_tickets_batch(
     device_id: str,
     username: str,
     count: int,
-    device_name: str = None,
     max_processing: int = None,
     daily_limit: int = None,
     blocked_lottery_types: List[str] = None,
@@ -547,7 +544,6 @@ def assign_tickets_batch(
                         assigned_user_id = :user_id,
                         assigned_username = :username,
                         assigned_device_id = :device_id,
-                        assigned_device_name = :device_name,
                         assigned_at = :now,
                         locked_until = :lock_until,
                         version = version + 1
@@ -557,7 +553,7 @@ def assign_tickets_batch(
                 """),
                 {
                     'user_id': user_id, 'username': username,
-                    'device_id': device_id, 'device_name': device_name,
+                    'device_id': device_id,
                     'now': now, 'lock_until': lock_until,
                     **id_params,
                 }
@@ -699,7 +695,6 @@ def assign_tickets_batch(
                 assigned_user_id = :user_id,
                 assigned_username = :username,
                 assigned_device_id = :device_id,
-                assigned_device_name = :device_name,
                 assigned_at = :now,
                 locked_until = :lock_until,
                 version = version + 1
@@ -710,7 +705,7 @@ def assign_tickets_batch(
         """),
         {
             'user_id': user_id, 'username': username,
-            'device_id': device_id, 'device_name': device_name,
+            'device_id': device_id,
             'now': now, 'lock_until': lock_until, 'ids': ids,
         }
     ).fetchall()

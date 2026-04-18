@@ -157,7 +157,7 @@ def reset_test_account_tickets():
         ticket.assigned_user_id = None
         ticket.assigned_username = None
         ticket.assigned_device_id = None
-        ticket.assigned_device_name = None
+        ticket.assigned_device_id = None
         ticket.assigned_at = None
         ticket.completed_at = None
         ticket.locked_until = None
@@ -313,7 +313,6 @@ def stop_server_process(process: subprocess.Popen, log_file):
 def make_session(username: str, device_label: str):
     session = requests.Session()
     device_id = f"{device_label}-{uuid.uuid4().hex[:8]}"
-    device_name = f"{device_label}-{RUN_LABEL}"
 
     try:
         resp = session.post(
@@ -322,29 +321,28 @@ def make_session(username: str, device_label: str):
             timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
         )
         if resp.status_code != 200 or not resp.json().get("success"):
-            return None, device_id, device_name, f"login failed: status={resp.status_code} body={resp.text}"
+            return None, device_id, f"login failed: status={resp.status_code} body={resp.text}"
 
         register_resp = session.post(
             f"{BASE_URL}/api/device/register",
             json={
                 "device_id": device_id,
-                "device_name": device_name,
                 "client_info": {"test": True, "live_concurrency": True},
             },
             timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
         )
         if register_resp.status_code not in (200, 201):
-            return None, device_id, device_name, (
+            return None, device_id, (
                 f"register failed: status={register_resp.status_code} body={register_resp.text}"
             )
     except Exception as exc:
-        return None, device_id, device_name, f"{type(exc).__name__}: {exc}"
+        return None, device_id, f"{type(exc).__name__}: {exc}"
 
-    return session, device_id, device_name, None
+    return session, device_id, None
 
 
 def worker_mode_a(username: str, device_label: str, assigned_ids: list[int], errors: list[str]):
-    session, device_id, device_name, error = make_session(username, device_label)
+    session, device_id, error = make_session(username, device_label)
     if session is None:
         with LOCK:
             errors.append(f"{device_label}: login/register failed: {error}")
@@ -355,7 +353,7 @@ def worker_mode_a(username: str, device_label: str, assigned_ids: list[int], err
         try:
             resp = session.post(
                 f"{BASE_URL}/api/mode-a/next",
-                json={"device_id": device_id, "device_name": device_name},
+                json={"device_id": device_id},
                 timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
             )
             elapsed = time.time() - started
@@ -375,7 +373,6 @@ def worker_mode_a(username: str, device_label: str, assigned_ids: list[int], err
                     {
                         "device": device_label,
                         "device_id": device_id,
-                        "device_name": device_name,
                         "username": username,
                         "mode": "A",
                         "status_code": resp.status_code,
@@ -393,7 +390,7 @@ def worker_mode_a(username: str, device_label: str, assigned_ids: list[int], err
 
 
 def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], errors: list[str]):
-    session, device_id, device_name, error = make_session(username, device_label)
+    session, device_id, error = make_session(username, device_label)
     if session is None:
         with LOCK:
             errors.append(f"{device_label}: login/register failed: {error}")
@@ -406,7 +403,6 @@ def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], err
             json={
                 "count": MODE_B_BATCH_COUNT,
                 "device_id": device_id,
-                "device_name": device_name,
             },
             timeout=DEVICE_REQUEST_TIMEOUT_SECONDS,
         )
@@ -443,7 +439,6 @@ def worker_mode_b(username: str, device_label: str, assigned_ids: list[int], err
                 {
                     "device": device_label,
                     "device_id": device_id,
-                    "device_name": device_name,
                     "username": username,
                     "mode": "B",
                     "status_code": resp.status_code,
@@ -578,8 +573,8 @@ def validate_strict_invariants():
             assert ticket.assigned_device_id == result["device_id"], (
                 f"ticket {ticket_id} device mismatch: expected {result['device_id']}, got {ticket.assigned_device_id}"
             )
-            assert ticket.assigned_device_name == result["device_name"], (
-                f"ticket {ticket_id} device_name mismatch: expected {result['device_name']}, got {ticket.assigned_device_name}"
+            assert ticket.assigned_device_id == result["device_id"], (
+                f"ticket {ticket_id} device mismatch: expected {result['device_id']}, got {ticket.assigned_device_id}"
             )
             assert ticket.completed_at is not None, f"ticket {ticket_id} completed_at missing"
             per_user_completed[result["username"]] += 1

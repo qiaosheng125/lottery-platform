@@ -14,6 +14,7 @@ class ResultFile(db.Model):
     stored_filename = db.Column(db.String(512), nullable=False)
     uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     uploaded_at = db.Column(db.DateTime, default=beijing_now, nullable=False)
+    upload_kind = db.Column(db.String(20), default='final', nullable=False)
     periods_count = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(20), default='parsed', nullable=False)  # parsed | error
     parse_error = db.Column(db.Text, nullable=True)
@@ -26,6 +27,7 @@ class ResultFile(db.Model):
             'id': self.id,
             'original_filename': self.original_filename,
             'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'upload_kind': self.upload_kind,
             'periods_count': self.periods_count,
             'status': self.status,
             'parse_error': self.parse_error,
@@ -52,11 +54,26 @@ class MatchResult(db.Model):
 
     tickets_total = db.Column(db.Integer, default=0, nullable=False)
     tickets_winning = db.Column(db.Integer, default=0, nullable=False)
+    predicted_total_winning_amount = db.Column(db.Numeric(14, 2), default=0, nullable=False)
     total_winning_amount = db.Column(db.Numeric(14, 2), default=0, nullable=False)
 
     uploader = db.relationship('User', foreign_keys=[uploaded_by])
 
     # No unique constraint on detail_period — multiple uploads allowed, latest wins
+
+    def has_predicted_results(self):
+        for field_map in (self.result_data or {}).values():
+            for play_data in (field_map or {}).values():
+                if play_data.get('predicted_sp') is not None:
+                    return True
+        return False
+
+    def has_final_results(self):
+        for field_map in (self.result_data or {}).values():
+            for play_data in (field_map or {}).values():
+                if play_data.get('sp') is not None:
+                    return True
+        return False
 
     def to_dict(self):
         return {
@@ -67,5 +84,8 @@ class MatchResult(db.Model):
             'calc_status': self.calc_status,
             'tickets_total': self.tickets_total,
             'tickets_winning': self.tickets_winning,
+            'predicted_total_winning_amount': float(self.predicted_total_winning_amount) if self.predicted_total_winning_amount else 0,
             'total_winning_amount': float(self.total_winning_amount) if self.total_winning_amount else 0,
+            'has_predicted_results': self.has_predicted_results(),
+            'has_final_results': self.has_final_results(),
         }

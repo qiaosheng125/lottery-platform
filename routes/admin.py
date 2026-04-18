@@ -105,6 +105,16 @@ def _parse_bool_flag(value):
     return None
 
 
+def _decimal_to_float(value):
+    return float(value) if value is not None else None
+
+
+def _winning_change_percent(predicted_amount, final_amount):
+    if predicted_amount in (None, 0) or final_amount is None:
+        return None
+    return round(((final_amount - predicted_amount) / predicted_amount) * 100, 2)
+
+
 def _database_display_info():
     db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if db_uri.startswith('sqlite:///'):
@@ -434,11 +444,10 @@ def dashboard_data():
                     speed_per_minute = len(valid_tickets) / time_span_minutes
                     total_speed += speed_per_minute
 
-                    device_name = valid_tickets[0].assigned_device_name or device_id
+                    resolved_device_id = valid_tickets[0].assigned_device_id or device_id
                     device_speed_stats.append({
                         'username': ou.username,
-                        'device_id': device_id,
-                        'device_name': device_name,
+                        'device_id': resolved_device_id,
                         'speed_per_minute': round(speed_per_minute, 2),
                         'recent_count': len(valid_tickets),
                         'time_span_minutes': round(time_span_minutes, 1),
@@ -690,13 +699,13 @@ def export_tickets():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['票ID', '行号', '原始内容', '彩种', '倍投', '截止时间', '期号',
-                     '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件'])
+                     '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件'])
     for t in tickets_q:
         f = db.session.get(UF, t.source_file_id)
         writer.writerow([
             t.id, t.line_number, t.raw_content, t.lottery_type, t.multiplier,
             t.deadline_time, t.detail_period, t.ticket_amount, t.status,
-            t.assigned_username, t.assigned_device_id, t.assigned_device_name,
+            t.assigned_username, t.assigned_device_id,
             t.assigned_at, t.completed_at, f.original_filename if f else '',
         ])
 
@@ -734,7 +743,6 @@ def export_tickets_by_date():
         LotteryTicket.status.label('status'),
         LotteryTicket.assigned_username.label('assigned_username'),
         LotteryTicket.assigned_device_id.label('assigned_device_id'),
-        LotteryTicket.assigned_device_name.label('assigned_device_name'),
         LotteryTicket.assigned_at.label('assigned_at'),
         LotteryTicket.completed_at.label('completed_at'),
         LotteryTicket.source_file_id.label('source_file_id'),
@@ -753,7 +761,7 @@ def export_tickets_by_date():
         if not file_exists:
             wb = Workbook()
             ws = wb.active
-            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名'])
+            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名'])
             buf = _io.BytesIO()
             wb.save(buf)
             buf.seek(0)
@@ -772,7 +780,7 @@ def export_tickets_by_date():
 
     wb = Workbook()
     ws = wb.active
-    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名'])
+    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名'])
     status_map = {'pending': '待出票', 'assigned': '出票中', 'completed': '已完成',
                   'revoked': '已撤回', 'expired': '已过期'}
     for t in tickets:
@@ -787,7 +795,6 @@ def export_tickets_by_date():
             status_map.get(t.status, t.status),
             t.assigned_username or '',
             t.assigned_device_id or '',
-            t.assigned_device_name or '',
             t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
             t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
             t.original_filename or '',
@@ -1320,6 +1327,7 @@ def api_winning_list():
     # 汇总（全量，不分页）
     all_items = q.all()
     summary_amount = sum(float(t.winning_amount or 0) for t in all_items)
+    summary_predicted_amount = sum(float(t.predicted_winning_amount or 0) for t in all_items)
     summary_gross  = sum(float(t.winning_gross  or 0) for t in all_items)
     summary_tax    = sum(float(t.winning_tax    or 0) for t in all_items)
     summary_missing = sum(1 for t in all_items if not t.winning_image_url)
@@ -1342,16 +1350,21 @@ def api_winning_list():
     for t in page_items:
         winning_record = winning_records_map.get(t.id)
         terminal_at = _winning_terminal_at(t)
+        predicted_amount = _decimal_to_float(t.predicted_winning_amount)
+        final_amount = _decimal_to_float(t.winning_amount)
         records.append({
             'ticket_id': t.id,
             'username': t.assigned_username or '-',
             'device_id': t.assigned_device_id or '-',
-            'device_name': t.assigned_device_name or '-',
             'lottery_type': t.lottery_type,
             'detail_period': t.detail_period,
-            'winning_gross': float(t.winning_gross) if t.winning_gross else 0,
-            'winning_amount': float(t.winning_amount) if t.winning_amount else 0,
-            'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
+            'predicted_winning_gross': _decimal_to_float(t.predicted_winning_gross),
+            'predicted_winning_amount': predicted_amount,
+            'predicted_winning_tax': _decimal_to_float(t.predicted_winning_tax),
+            'winning_gross': _decimal_to_float(t.winning_gross),
+            'winning_amount': final_amount,
+            'winning_tax': _decimal_to_float(t.winning_tax),
+            'winning_change_percent': _winning_change_percent(predicted_amount, final_amount),
             'winning_image_url': t.winning_image_url or '',
             'raw_content': t.raw_content or '',
             'ticket_amount': float(t.ticket_amount) if t.ticket_amount else 0,
@@ -1371,6 +1384,7 @@ def api_winning_list():
         'pages': pages,
         'summary': {
             'amount': round(summary_amount, 2),
+            'predicted_amount': round(summary_predicted_amount, 2),
             'gross':  round(summary_gross,  2),
             'tax':    round(summary_tax,    2),
             'count':  total,
@@ -1449,7 +1463,7 @@ def api_winning_export():
 
     wb = Workbook()
     ws = wb.active
-    ws.append(['票ID', '投注内容', '票面金额', '用户名', '设备名', '彩种', '期号',
+    ws.append(['票ID', '投注内容', '票面金额', '用户名', '设备ID', '彩种', '期号',
                '状态', '税前金额', '税后金额', '税金', '图片状态', '终态时间'])
     for t in items:
         terminal_at = _winning_terminal_at(t)
@@ -1458,7 +1472,7 @@ def api_winning_export():
             t.raw_content or '',
             float(t.ticket_amount or 0),
             t.assigned_username or '',
-            t.assigned_device_name or '',
+            t.assigned_device_id or '',
             t.lottery_type or '',
             t.detail_period or '',
             _winning_status_label(t.status),
@@ -1528,7 +1542,7 @@ def admin_winning_record():
     if error_response:
         return error_response
     if not _winning_key_matches_ticket(ticket.id, oss_key):
-        return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
+        return jsonify({'success': False, 'error': 'oss_key 与票据不匹配'}), 400
 
     from services.oss_service import delete_stored_image, get_public_url
     image_url = get_public_url(oss_key) if oss_key else ''
@@ -1646,11 +1660,15 @@ def upload_match_result():
     if not file.filename:
         return jsonify({'success': False, 'error': '文件名不能为空'}), 400
     detail_period = (request.form.get('detail_period') or '').strip()
+    upload_kind = (request.form.get('upload_kind') or 'final').strip().lower()
     if not detail_period:
         return jsonify({'success': False, 'error': '请输入期号'}), 400
 
+    if upload_kind not in {'predicted', 'final'}:
+        return jsonify({'success': False, 'error': '上传类型无效'}), 400
+
     upload_folder = current_app.config['UPLOAD_FOLDER']
-    stored = f"result_{uuid.uuid4().hex[:8]}_{file.filename}"
+    stored = f"result_{upload_kind}_{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = os.path.join(upload_folder, stored)
     file.save(file_path)
 
@@ -1658,12 +1676,19 @@ def upload_match_result():
         original_filename=file.filename,
         stored_filename=stored,
         uploaded_by=current_user.id,
+        upload_kind=upload_kind,
     )
     db.session.add(result_file)
     db.session.flush()
 
     from services.result_parser import parse_result_file
-    result = parse_result_file(file_path, detail_period, current_user.id, result_file.id)
+    result = parse_result_file(
+        file_path,
+        detail_period,
+        current_user.id,
+        result_file.id,
+        upload_kind=upload_kind,
+    )
 
     if not result['success']:
         result_file.status = 'error'
@@ -1752,6 +1777,7 @@ def api_recalc(result_id):
     match_result.calc_finished_at = None
     match_result.tickets_total = 0
     match_result.tickets_winning = 0
+    match_result.predicted_total_winning_amount = 0
     match_result.total_winning_amount = 0
     db.session.commit()
 

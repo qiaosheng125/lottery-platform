@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from config import config
 from config import _engine_options
@@ -34,6 +34,12 @@ def normalize_sqlite_db_uri(app):
     app.logger.warning('Using SQLite database at %s', resolved_path)
 
 
+def ensure_model_metadata_loaded():
+    # Import every model module before create_all(), otherwise fresh databases
+    # can miss tables that have not been imported into db.metadata yet.
+    import models  # noqa: F401
+
+
 def ensure_sqlite_bootstrap(app):
     db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if not db_uri.startswith('sqlite'):
@@ -41,14 +47,19 @@ def ensure_sqlite_bootstrap(app):
 
     from models import User, SystemSettings
 
+    ensure_model_metadata_loaded()
     inspector = inspect(db.engine)
     existing_tables = set(inspector.get_table_names())
-    required_tables = {'users', 'system_settings'}
+    required_tables = set(db.metadata.tables.keys())
 
     if required_tables.issubset(existing_tables):
         return
 
-    app.logger.warning('SQLite database missing core tables; bootstrapping schema automatically')
+    missing_tables = sorted(required_tables - existing_tables)
+    app.logger.warning(
+        'SQLite database missing tables %s; bootstrapping schema automatically',
+        ', '.join(missing_tables),
+    )
     try:
         db.create_all()
     except OperationalError as exc:
@@ -67,14 +78,42 @@ def ensure_sqlite_bootstrap(app):
 
 
 def ensure_runtime_aux_tables(app):
-    from models.archive import ArchivedLotteryTicket
-
+    ensure_model_metadata_loaded()
     inspector = inspect(db.engine)
     existing_tables = set(inspector.get_table_names())
 
-    if ArchivedLotteryTicket.__tablename__ not in existing_tables:
-        app.logger.warning('Creating missing auxiliary table: %s', ArchivedLotteryTicket.__tablename__)
-        ArchivedLotteryTicket.__table__.create(bind=db.engine, checkfirst=True)
+    for table_name, table in db.metadata.tables.items():
+        if table_name in existing_tables:
+            continue
+        app.logger.warning('Creating missing runtime table: %s', table_name)
+        table.create(bind=db.engine, checkfirst=True)
+
+
+def ensure_runtime_columns(app):
+    ensure_model_metadata_loaded()
+    inspector = inspect(db.engine)
+    column_specs = {
+        'result_files': {
+            'upload_kind': "VARCHAR(20) NOT NULL DEFAULT 'final'",
+        },
+        'match_results': {
+            'predicted_total_winning_amount': "NUMERIC(14, 2) NOT NULL DEFAULT 0",
+        },
+        'lottery_tickets': {
+            'predicted_winning_gross': 'NUMERIC(12, 2)',
+            'predicted_winning_amount': 'NUMERIC(12, 2)',
+            'predicted_winning_tax': 'NUMERIC(12, 2)',
+        },
+    }
+
+    with db.engine.begin() as conn:
+        for table_name, specs in column_specs.items():
+            existing = {column['name'] for column in inspector.get_columns(table_name)}
+            for column_name, ddl in specs.items():
+                if column_name in existing:
+                    continue
+                app.logger.warning('Adding missing runtime column %s.%s', table_name, column_name)
+                conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}'))
 
 
 def should_start_scheduler() -> bool:
@@ -120,6 +159,7 @@ def create_app(config_name=None):
     with app.app_context():
         ensure_sqlite_bootstrap(app)
         ensure_runtime_aux_tables(app)
+        ensure_runtime_columns(app)
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message = '请先登录'

@@ -44,7 +44,6 @@ def download_batch(
     device_id: str,
     username: str,
     count: int,
-    device_name: str = None,
 ) -> dict:
     """
     服务器自动按截止时间升序分配指定张数的票，每次只返回一个彩种的一个TXT文件。
@@ -68,7 +67,6 @@ def download_batch(
         device_id=device_id,
         username=username,
         count=count,
-        device_name=device_name,
         max_processing=max_processing,
         daily_limit=daily_limit,
         blocked_lottery_types=blocked_lottery_types,

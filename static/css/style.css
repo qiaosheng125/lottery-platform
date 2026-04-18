@@ -1,4 +1,4 @@
-/* Lottery Platform CSS */
+﻿/* Lottery Platform CSS */
 
 body {
   background-color: #f8f9fa;
@@ -61,7 +61,7 @@ body {
   transform: translateY(-2px);
 }
 
-/* ── 手机端适配 ── */
+/* 手机端适配 */
 @media (max-width: 768px) {
   .container-fluid {
     padding: 8px;
@@ -69,30 +69,30 @@ body {
   .card-body {
     padding: 0.75rem;
   }
-  /* 导航栏在手机端收起多余项 */
+
   .navbar .nav-link {
     font-size: 0.85rem;
     padding: 0.25rem 0.4rem;
   }
-  /* 表格横向滚动 */
+
   .table-responsive {
     -webkit-overflow-scrolling: touch;
   }
-  /* 票面渲染适配 */
+  /* 绁ㄩ潰娓叉煋閫傞厤 */
   .ticket-render table {
     font-size: 0.85rem;
   }
-  /* 按钮在手机端更大，易于点击 */
+
   .btn-mobile-lg {
     font-size: 1.1rem;
     padding: 0.6rem 1.5rem;
     min-height: 48px;
   }
-  /* 统计卡片字体缩小 */
+
   .fs-4 { font-size: 1.1rem !important; }
 }
 
-/* 接单主按钮 — 大尺寸 */
+/* 鎺ュ崟涓绘寜閽?鈥?澶у昂瀵?*/
 .btn-start-receiving {
   font-size: 1.3rem;
   font-weight: bold;
@@ -102,31 +102,31 @@ body {
   letter-spacing: 0.05em;
 }
 
-/* ticket-render 表格 */
+/* ticket-render 琛ㄦ牸 */
 .ticket-render .table td {
   padding: 0.2rem 0.4rem;
   vertical-align: middle;
 }
 
-/* ── A模式手机端完整显示优化 ── */
-/* 确保整个票面（包括按钮、倒计时）在手机屏幕内完整显示，无需滚动 */
-/* 全屏铺满、大字体、防误触 */
 
-/* 全屏容器 - 铺满整个卡片区域 */
+
+
+
+/* 鍏ㄥ睆瀹瑰櫒 - 閾烘弧鏁翠釜鍗＄墖鍖哄煙 */
 .mode-a-fullscreen-container {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 300px);
-  min-height: 400px;
+  height: calc(100dvh - 260px);
+  min-height: 360px;
   background: #fff;
   border-radius: 8px;
   overflow: hidden;
 }
 
-/* 信息栏 - 固定顶部（包含编号、玩法类型、倒计时、截止时间） */
+
 .mode-a-info-bar {
   flex-shrink: 0;
-  padding: 0.6rem 1rem;
+  padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: #fff;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -175,7 +175,7 @@ body {
   margin-top: 0.1rem;
 }
 
-/* 主内容区 - 左右按钮 + 中间票面 */
+
 .mode-a-main-area {
   flex: 1;
   display: flex;
@@ -184,7 +184,7 @@ body {
   background: #f8f9fa;
 }
 
-/* 左右两侧按钮 */
+/* 宸﹀彸涓や晶鎸夐挳 */
 .mode-a-side-btn {
   flex-shrink: 0;
   width: 50px;
@@ -220,7 +220,7 @@ body {
   border-left: 1px solid #e9ecef;
 }
 
-/* 票面滚动区域 - 占据剩余空间 */
+/* 绁ㄩ潰婊氬姩鍖哄煙 - 鍗犳嵁鍓╀綑绌洪棿 */
 .mode-a-ticket-scroll {
   flex: 1;
   overflow-y: auto;
@@ -229,10 +229,10 @@ body {
   padding: 0.5rem;
 }
 
-/* 底部操作栏 - 停止按钮 */
+
 .mode-a-bottom-bar {
   flex-shrink: 0;
-  padding: 0.6rem 1rem;
+  padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
   background: #fff;
   border-top: 2px solid #e9ecef;
   box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
@@ -251,8 +251,8 @@ body {
   transition: all 0.2s;
 }
 
-/* ── 紧凑场次样式 - 减小行高和间距 ── */
-/* 场次卡片（match-card）减小内边距和外边距 */
+
+
 .ticket-render .match-card {
   margin-bottom: 0.35rem !important;
 }
@@ -266,19 +266,19 @@ body {
   padding: 0.3rem 0.5rem !important;
 }
 
-/* 场次标题字体缩小 */
+
 .ticket-render .match-number {
   font-size: 0.9rem !important;
 }
 
-/* 场次内容 badge 间距减小 */
+
 .ticket-render .ticket-badge {
   padding: 0.2em 0.45em !important;
   margin: 0.1rem !important;
   font-size: 0.85rem !important;
 }
 
-/* 票面头尾区域紧凑化 */
+/* 绁ㄩ潰澶村熬鍖哄煙绱у噾鍖?*/
 .ticket-render .ticket-header {
   padding: 0.4rem 0.6rem !important;
 }
@@ -288,7 +288,7 @@ body {
   font-size: 0.95rem !important;
 }
 
-/* 表格行高压缩 */
+/* 琛ㄦ牸琛岄珮鍘嬬缉 */
 .ticket-render .table td,
 .ticket-render .table th {
   padding: 0.15rem 0.35rem !important;
@@ -296,7 +296,7 @@ body {
   line-height: 1.3 !important;
 }
 
-/* 手机端优化（<768px） */
+
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
     height: calc(100vh - 250px);
@@ -320,12 +320,12 @@ body {
     padding: 0.4rem;
   }
 
-  /* 票面内容字体适中 */
+
   .mode-a-ticket-scroll .ticket-render {
     font-size: 0.9rem;
   }
 
-  /* 手机端场次更紧凑 */
+
   .ticket-render .match-card {
     margin-bottom: 0.25rem !important;
   }
@@ -341,7 +341,7 @@ body {
   }
 }
 
-/* 小屏手机（<375px） */
+/* 灏忓睆鎵嬫満锛?375px锛?*/
 @media (max-width: 375px) {
   .mode-a-fullscreen-container {
     height: calc(100vh - 230px);
@@ -366,28 +366,34 @@ body {
   }
 }
 
-/* 防止误触 - 接单时禁用页面滚动 */
+
 body.mode-a-active {
   overflow: hidden;
-  position: fixed;
-  width: 100%;
-  height: 100%;
 }
 
-/* 统计栏在接单时缩小 */
-body.mode-a-active .row.g-3 {
-  display: none;
+
+body.mode-a-active .row.g-3,
+body.mode-a-active .client-announcement-card,
+body.mode-a-active .client-device-stats,
+body.mode-a-active .client-quick-links {
+  display: none !important;
 }
 
 body.mode-a-active .mode-a-fullscreen-container {
-  height: calc(100vh - 150px);
-  min-height: 300px;
+  height: calc(100dvh - 88px);
+  max-height: calc(100dvh - 88px);
+  min-height: 0;
 }
 
 @media (max-width: 768px) {
-  body.mode-a-active .mode-a-fullscreen-container {
-    height: calc(100vh - 120px);
+  .mode-a-fullscreen-container {
+    height: calc(100dvh - 210px);
     min-height: 280px;
+  }
+
+  body.mode-a-active .mode-a-fullscreen-container {
+    height: calc(100dvh - 72px);
+    max-height: calc(100dvh - 72px);
   }
 }
 
@@ -398,8 +404,8 @@ body.mode-a-active .mode-a-fullscreen-container {
   }
 }
 
-/* ── 票面渲染响应式优化 ── */
-/* 默认样式（桌面端） */
+/* 鈹€鈹€ 绁ㄩ潰娓叉煋鍝嶅簲寮忎紭鍖?鈹€鈹€ */
+
 .ticket-render .ticket-type {
   font-size: 1.3rem;
   font-weight: bold;
@@ -429,7 +435,7 @@ body.mode-a-active .mode-a-fullscreen-container {
   margin-bottom: 0.75rem !important;
 }
 
-/* 手机端（<768px）- 大字体，易读 */
+
 @media (max-width: 768px) {
   .ticket-render .ticket-type {
     font-size: 1.2rem;
@@ -467,7 +473,7 @@ body.mode-a-active .mode-a-fullscreen-container {
   }
 }
 
-/* 小屏手机（<375px）- 保持清晰 */
+/* 灏忓睆鎵嬫満锛?375px锛? 淇濇寔娓呮櫚 */
 @media (max-width: 375px) {
   .ticket-render .ticket-type {
     font-size: 1.1rem;

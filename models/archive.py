@@ -28,7 +28,6 @@ class ArchivedLotteryTicket(db.Model):
     assigned_user_id = db.Column(db.Integer, nullable=True, index=True)
     assigned_username = db.Column(db.String(64), nullable=True)
     assigned_device_id = db.Column(db.String(64), nullable=True)
-    assigned_device_name = db.Column(db.String(128), nullable=True)
 
     admin_upload_time = db.Column(db.DateTime, nullable=True)
     assigned_at = db.Column(db.DateTime, nullable=True)
@@ -62,7 +61,6 @@ class ArchivedLotteryTicket(db.Model):
             'assigned_user_id': self.assigned_user_id,
             'assigned_username': self.assigned_username,
             'assigned_device_id': self.assigned_device_id,
-            'assigned_device_name': self.assigned_device_name,
             'admin_upload_time': self.admin_upload_time.isoformat() if self.admin_upload_time else None,
             'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,

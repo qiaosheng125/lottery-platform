@@ -57,6 +57,14 @@
       <div class="alert alert-info py-2 px-3 mb-2 d-flex gap-4 align-items-center" style="font-size:.9rem">
         <span>当前筛选：<strong>{{ total }}</strong> 条</span>
         <span>税后合计：<strong class="text-success">¥{{ summaryAmount.toFixed(2) }}</strong></span>
+        <span>&#39044;&#27979;&#31246;&#21518;&#21512;&#35745;: <strong class="text-primary">&yen;{{ summaryPredictedAmount.toFixed(2) }}</strong></span>
+        <span>
+          &#27719;&#24635;&#28072;&#36300;&#24133;:
+          <strong v-if="summaryChangeDisplay() === null" class="text-muted">--</strong>
+          <strong v-else-if="summaryChangeDisplay() > 0" class="text-danger">+{{ summaryChangeDisplay().toFixed(2) }}%</strong>
+          <strong v-else-if="summaryChangeDisplay() < 0" class="text-success">{{ summaryChangeDisplay().toFixed(2) }}%</strong>
+          <strong v-else class="text-secondary">0.00%</strong>
+        </span>
         <span v-if="summaryTax > 0">税金合计：<strong class="text-warning">¥{{ summaryTax.toFixed(2) }}</strong></span>
         <span>未上传图片：<strong class="text-danger">{{ summaryMissing }}</strong> 条</span>
       </div>
@@ -71,15 +79,17 @@
               <th>用户名</th>
               <th>类型</th>
               <th>编号</th>
+              <th>&#39044;&#27979;&#37329;&#39069;</th>
               <th>中签金额</th>
+              <th>&#28072;&#36300;&#24133;</th>
               <th>图片</th>
               <th>审核状态</th>
               <th>完成时间</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="10" class="text-center py-3">加载中...</td></tr>
-            <tr v-else-if="records.length === 0"><td colspan="10" class="text-center py-3 text-muted">暂无记录</td></tr>
+            <tr v-if="loading"><td colspan="12" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="records.length === 0"><td colspan="12" class="text-center py-3 text-muted">暂无记录</td></tr>
             <tr v-for="r in records" :key="r.ticket_id">
               <td class="fw-bold text-nowrap">#{{ r.ticket_id }}</td>
               <td>
@@ -93,10 +103,24 @@
               <td>{{ r.lottery_type }}</td>
               <td>{{ r.detail_period }}</td>
               <td class="text-nowrap">
-                <div class="fw-bold text-success">
-                  <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税 ¥{{ r.winning_tax }}）</span>
-                  <span v-else>¥{{ r.winning_amount }}</span>
+                <div v-if="r.predicted_winning_amount !== null" class="fw-bold text-primary">
+                  <span v-if="r.predicted_winning_tax > 0">&#31246;&#21518; &yen;{{ r.predicted_winning_amount }}&#65288;&#31246; &yen;{{ r.predicted_winning_tax }}&#65289;</span>
+                  <span v-else>&yen;{{ r.predicted_winning_amount }}</span>
                 </div>
+                <span v-else class="text-muted">-</span>
+              </td>
+              <td class="text-nowrap">
+                <div v-if="r.winning_amount !== null" class="fw-bold text-success">
+                  <span v-if="r.winning_tax > 0">&#31246;&#21518; &yen;{{ r.winning_amount }}&#65288;&#31246; &yen;{{ r.winning_tax }}&#65289;</span>
+                  <span v-else>&yen;{{ r.winning_amount }}</span>
+                </div>
+                <span v-else class="text-muted">-</span>
+              </td>
+              <td class="text-nowrap">
+                <span v-if="displayWinningChangePercent(r) === null" class="text-muted">--</span>
+                <span v-else-if="displayWinningChangePercent(r) > 0" class="fw-bold text-danger">+{{ displayWinningChangePercent(r).toFixed(2) }}%</span>
+                <span v-else-if="displayWinningChangePercent(r) < 0" class="fw-bold text-success">{{ displayWinningChangePercent(r).toFixed(2) }}%</span>
+                <span v-else class="fw-bold text-secondary">0.00%</span>
               </td>
               <td style="white-space:nowrap">
                 <span v-if="r.winning_image_url" class="badge bg-success me-1">已上传</span>
@@ -147,6 +171,13 @@
           <input type="text" class="form-control form-control-sm" v-model="uploadPeriod" placeholder="输入编号">
         </div>
         <div class="col-md-2">
+          <label class="form-label small mb-1">&#19978;&#20256;&#31867;&#22411;</label>
+          <select class="form-select form-select-sm" v-model="uploadKind">
+            <option value="final">&#26368;&#32456;</option>
+            <option value="predicted">&#39044;&#27979;</option>
+          </select>
+        </div>
+        <div class="col-md-2">
           <button class="btn btn-sm btn-success w-100" @click="uploadResultFile" :disabled="uploading || !resultFile || !uploadPeriod">
             <span v-if="uploading" class="spinner-border spinner-border-sm me-1"></span>
             {{ uploading ? '上传中...' : '上传并计算' }}
@@ -169,10 +200,10 @@
     <div class="card-body p-0">
       <table class="table table-sm mb-0">
         <thead class="table-dark">
-          <tr><th>编号</th><th>上传时间</th><th>计算状态</th><th>总数</th><th>中签数</th><th>总中签金额</th><th>操作</th></tr>
+          <tr><th>编号</th><th>上传时间</th><th>计算状态</th><th>总数</th><th>中奖数</th><th>预测总金额</th><th>最终总金额</th><th>涨跌幅</th><th>操作</th></tr>
         </thead>
         <tbody>
-          <tr v-if="matchResults.length === 0"><td colspan="7" class="text-center py-3 text-muted">暂无结果</td></tr>
+          <tr v-if="matchResults.length === 0"><td colspan="9" class="text-center py-3 text-muted">暂无结果</td></tr>
           <tr v-for="r in matchResults" :key="r.id">
             <td>{{ r.detail_period }}</td>
             <td class="small">{{ r.uploaded_at ? r.uploaded_at.substring(0,16) : '-' }}</td>
@@ -182,11 +213,18 @@
                 'bg-warning text-dark': r.calc_status === 'processing',
                 'bg-success': r.calc_status === 'done',
                 'bg-danger': r.calc_status === 'error',
-              }">{{ {'pending':'待计算','processing':'计算中','done':'已完成','error':'出错'}[r.calc_status] || r.calc_status }}</span>
+              }">{{ calcStatusLabel(r.calc_status) }}</span>
             </td>
             <td>{{ r.tickets_total }}</td>
             <td>{{ r.tickets_winning }}</td>
+            <td class="text-primary fw-bold">&yen;{{ r.predicted_total_winning_amount }}</td>
             <td class="text-success fw-bold">¥{{ r.total_winning_amount }}</td>
+            <td class="text-nowrap">
+              <span v-if="displayMatchResultChangePercent(r) === null" class="text-muted">--</span>
+              <span v-else-if="displayMatchResultChangePercent(r) > 0" class="fw-bold text-danger">+{{ displayMatchResultChangePercent(r).toFixed(2) }}%</span>
+              <span v-else-if="displayMatchResultChangePercent(r) < 0" class="fw-bold text-success">{{ displayMatchResultChangePercent(r).toFixed(2) }}%</span>
+              <span v-else class="fw-bold text-secondary">0.00%</span>
+            </td>
             <td>
               <button class="btn btn-xs btn-outline-primary me-1" @click="viewResultDetail(r)">查看</button>
               <button class="btn btn-xs btn-outline-secondary" @click="recalc(r.id)">重算</button>
@@ -210,24 +248,24 @@
           <thead class="table-dark sticky-top">
             <tr>
               <th>场次</th>
-              <th>胜平负结果</th><th>胜平负SP</th>
-              <th>比分结果</th><th>比分SP</th>
-              <th>总进球结果</th><th>总进球SP</th>
-              <th>半全场结果</th><th>半全场SP</th>
-              <th>上下单双结果</th><th>上下单双SP</th>
-              <th>胜负序号</th><th>胜负结果</th><th>胜负SP</th>
+              <th>SPF&#32467;&#26524;</th><th>SPF SP(&#39044;/&#32456;)</th>
+              <th>CBF&#32467;&#26524;</th><th>CBF SP(&#39044;/&#32456;)</th>
+              <th>JQS&#32467;&#26524;</th><th>JQS SP(&#39044;/&#32456;)</th>
+              <th>BQC&#32467;&#26524;</th><th>BQC SP(&#39044;/&#32456;)</th>
+              <th>SXP&#32467;&#26524;</th><th>SXP SP(&#39044;/&#32456;)</th>
+              <th>SF&#24207;&#21495;</th><th>SF&#32467;&#26524;</th><th>SF SP(&#39044;/&#32456;)</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, seq) in detailRows" :key="seq">
               <td class="fw-bold">{{ seq }}</td>
-              <td>{{ row.SPF ? row.SPF.result : '-' }}</td><td>{{ row.SPF ? row.SPF.sp : '-' }}</td>
-              <td>{{ row.CBF ? row.CBF.result : '-' }}</td><td>{{ row.CBF ? row.CBF.sp : '-' }}</td>
-              <td>{{ row.JQS ? row.JQS.result : '-' }}</td><td>{{ row.JQS ? row.JQS.sp : '-' }}</td>
-              <td>{{ row.BQC ? row.BQC.result : '-' }}</td><td>{{ row.BQC ? row.BQC.sp : '-' }}</td>
-              <td>{{ row.SXP ? row.SXP.result : '-' }}</td><td>{{ row.SXP ? row.SXP.sp : '-' }}</td>
+              <td>{{ row.SPF ? row.SPF.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.SPF) }}</td>
+              <td>{{ row.CBF ? row.CBF.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.CBF) }}</td>
+              <td>{{ row.JQS ? row.JQS.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.JQS) }}</td>
+              <td>{{ row.BQC ? row.BQC.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.BQC) }}</td>
+              <td>{{ row.SXP ? row.SXP.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.SXP) }}</td>
               <td>{{ row.SF ? (row.SF.seq || seq) : '-' }}</td>
-              <td>{{ row.SF ? row.SF.result : '-' }}</td><td>{{ row.SF ? row.SF.sp : '-' }}</td>
+              <td>{{ row.SF ? row.SF.result : '-' }}</td><td>{{ formatPredictedFinalSp(row.SF) }}</td>
             </tr>
           </tbody>
         </table>
@@ -273,11 +311,11 @@ createApp({
       filterUsername: '', filterDate: '', filterLotteryType: '', filterImage: '', filterChecked: '',
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
       currentBusinessDate: '',
-      summaryAmount: 0, summaryCount: 0, summaryTax: 0, summaryMissing: 0,
+      summaryAmount: 0, summaryPredictedAmount: 0, summaryCount: 0, summaryTax: 0, summaryMissing: 0,
       markingCheckedId: null,
       // 上传赛果
-      resultFile: null, uploadPeriod: '', uploading: false, uploadMsg: '', uploadSuccess: false,
-      // 赛果计算状态
+      resultFile: null, uploadPeriod: '', uploadKind: 'final', uploading: false, uploadMsg: '', uploadSuccess: false,
+      // 结果计算状态
       matchResults: [], mrFilterDate: '', mrDateOptions: [],
       // 赛果详情弹窗
       detailVisible: false, detailLoading: false,
@@ -294,6 +332,43 @@ createApp({
     this.loadMatchResults();
   },
   methods: {
+    summaryChangePercent() {
+      if (!Number.isFinite(this.summaryPredictedAmount) || this.summaryPredictedAmount === 0 || !Number.isFinite(this.summaryAmount)) {
+        return null;
+      }
+      return ((this.summaryAmount - this.summaryPredictedAmount) / this.summaryPredictedAmount) * 100;
+    },
+    summaryChangeDisplay() {
+      return this.summaryChangePercent();
+    },
+    matchResultChangePercent(row) {
+      const predicted = Number(row && row.predicted_total_winning_amount);
+      const finalAmount = Number(row && row.total_winning_amount);
+      if (!Number.isFinite(predicted) || predicted === 0 || !Number.isFinite(finalAmount)) return null;
+      return ((finalAmount - predicted) / predicted) * 100;
+    },
+    displayMatchResultChangePercent(row) {
+      return this.matchResultChangePercent(row);
+    },
+    displayWinningChangePercent(row) {
+      const value = row && row.winning_change_percent;
+      return Number.isFinite(Number(value)) ? Number(value) : null;
+    },
+    calcStatusLabel(status) {
+      const labels = {
+        pending: '待计算',
+        processing: '计算中',
+        done: '已完成',
+        error: '出错',
+      };
+      return labels[status] || status;
+    },
+    formatPredictedFinalSp(play) {
+      if (!play) return '-';
+      const predicted = play.predicted_sp === null || play.predicted_sp === undefined || play.predicted_sp === '' ? '-' : play.predicted_sp;
+      const finalSp = play.sp === null || play.sp === undefined || play.sp === '' ? '-' : play.sp;
+      return `${predicted} / ${finalSp}`;
+    },
     async loadFilterOptions() {
       const requestSeq = ++winningFilterOptionsRequestSeq;
       try {
@@ -348,6 +423,7 @@ createApp({
         this.total = data.total || 0;
         this.totalPages = data.pages || 1;
         this.summaryAmount = (data.summary && data.summary.amount) || 0;
+        this.summaryPredictedAmount = (data.summary && data.summary.predicted_amount) || 0;
         this.summaryCount = (data.summary && data.summary.count) || 0;
         this.summaryTax = (data.summary && data.summary.tax) || 0;
         this.summaryMissing = (data.summary && data.summary.missing) || 0;
@@ -357,6 +433,7 @@ createApp({
         this.total = 0;
         this.totalPages = 1;
         this.summaryAmount = 0;
+        this.summaryPredictedAmount = 0;
         this.summaryCount = 0;
         this.summaryTax = 0;
         this.summaryMissing = 0;
@@ -400,6 +477,7 @@ createApp({
       const fd = new FormData();
       fd.append('file', this.resultFile);
       fd.append('detail_period', this.uploadPeriod);
+      fd.append('upload_kind', this.uploadKind);
       try {
         const res = await fetch('/admin/match-results/upload', { method: 'POST', body: fd });
         const data = await res.json();
@@ -407,8 +485,9 @@ createApp({
           throw new Error(data.error || '上传失败');
         }
         this.uploadSuccess = true;
-        this.uploadMsg = `上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列`;
+        this.uploadMsg = `${this.uploadKind === 'predicted' ? '预测' : '最终'}结果上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列`;
         this.uploadPeriod = '';
+        this.uploadKind = 'final';
         this.$refs.resultFileInput.value = '';
         this.resultFile = null;
         await this.loadMatchResults();
@@ -461,7 +540,8 @@ createApp({
         const blob = await res.blob();
         const disposition = res.headers.get('Content-Disposition') || '';
         const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
-        const filename = decodeURIComponent(match?.[1] || match?.[2] || '中签记录.xlsx');
+        const encodedFilename = (match && (match[1] || match[2])) || '中签记录.xlsx';
+        const filename = decodeURIComponent(encodedFilename);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

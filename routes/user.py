@@ -47,7 +47,6 @@ def daily_stats():
         if key not in device_stats:
             device_stats[key] = {
                 'device_id': t.assigned_device_id or '',
-                'device_name': t.assigned_device_name or t.assigned_device_id or '未知设备',
                 'count': 0,
                 'amount': 0.0,
             }
@@ -124,7 +123,7 @@ def export_daily():
 
     wb = Workbook()
     ws = wb.active
-    ws.append(['票ID', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备名', '分配时间', '完成时间'])
+    ws.append(['票ID', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间'])
     status_map = {
         'pending': '待出票',
         'assigned': '出票中',
@@ -143,7 +142,7 @@ def export_daily():
             float(t.ticket_amount or 0),
             status_map.get(t.status, t.status),
             t.assigned_username or '',
-            t.assigned_device_name or '',
+            t.assigned_device_id or '',
             t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
             t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
         ])

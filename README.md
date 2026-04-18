@@ -102,7 +102,7 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 3. 安装依赖
 4. 初始化 PostgreSQL 用户和数据库
 5. 更新 `.env`
-6. 用禁用 scheduler 的方式 bootstrap 数据库
+6. 基于当前 `DATABASE_URL` 初始化 PostgreSQL 数据库
 7. 创建并启动 `systemd` 服务
 
 ## 压测

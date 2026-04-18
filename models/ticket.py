@@ -29,17 +29,19 @@ class LotteryTicket(db.Model):
     assigned_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     assigned_username = db.Column(db.String(64), nullable=True)  # denormalized
     assigned_device_id = db.Column(db.String(64), nullable=True)
-    assigned_device_name = db.Column(db.String(128), nullable=True)  # denormalized
 
     admin_upload_time = db.Column(db.DateTime, nullable=True)
     assigned_at = db.Column(db.DateTime, nullable=True)
     completed_at = db.Column(db.DateTime, nullable=True)
 
     # Winning
-    is_winning = db.Column(db.Boolean, nullable=True)  # NULL=未计算, True=中奖, False=未中
-    winning_gross = db.Column(db.Numeric(12, 2), nullable=True)   # 税前金额
-    winning_amount = db.Column(db.Numeric(12, 2), nullable=True)  # 税后金额（实得）
-    winning_tax = db.Column(db.Numeric(12, 2), nullable=True)     # 扣税金额
+    is_winning = db.Column(db.Boolean, nullable=True)  # NULL=uncomputed, True=winning, False=not winning
+    predicted_winning_gross = db.Column(db.Numeric(12, 2), nullable=True)
+    predicted_winning_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    predicted_winning_tax = db.Column(db.Numeric(12, 2), nullable=True)
+    winning_gross = db.Column(db.Numeric(12, 2), nullable=True)
+    winning_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    winning_tax = db.Column(db.Numeric(12, 2), nullable=True)
     winning_image_url = db.Column(db.Text, nullable=True)
 
     # Concurrency control
@@ -66,10 +68,12 @@ class LotteryTicket(db.Model):
             'assigned_user_id': self.assigned_user_id,
             'assigned_username': self.assigned_username,
             'assigned_device_id': self.assigned_device_id,
-            'assigned_device_name': self.assigned_device_name,
             'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'is_winning': self.is_winning,
+            'predicted_winning_gross': float(self.predicted_winning_gross) if self.predicted_winning_gross else None,
+            'predicted_winning_amount': float(self.predicted_winning_amount) if self.predicted_winning_amount else None,
+            'predicted_winning_tax': float(self.predicted_winning_tax) if self.predicted_winning_tax else None,
             'winning_gross': float(self.winning_gross) if self.winning_gross else None,
             'winning_amount': float(self.winning_amount) if self.winning_amount else None,
             'winning_tax': float(self.winning_tax) if self.winning_tax else None,

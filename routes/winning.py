@@ -150,7 +150,7 @@ def record_winning():
         if record.is_checked:
             return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
         if not _winning_key_matches_ticket(ticket.id, oss_key):
-            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
+            return jsonify({'success': False, 'error': 'oss_key 与票据不匹配'}), 400
         old_key = record.image_oss_key
         old_url = record.winning_image_url
         if old_key != oss_key or old_url != image_url:
@@ -162,7 +162,7 @@ def record_winning():
         record.uploaded_at = beijing_now()
     else:
         if not _winning_key_matches_ticket(ticket.id, oss_key):
-            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
+            return jsonify({'success': False, 'error': 'oss_key 与票据不匹配'}), 400
         record = WinningRecord(
             ticket_id=ticket_id,
             source_file_id=ticket.source_file_id,
@@ -223,6 +223,13 @@ def my_winning():
     grouped = {}
     for t in tickets:
         business_date = str(get_business_date(t.completed_at)) if t.completed_at else 'unknown'
+        predicted_amount = float(t.predicted_winning_amount) if t.predicted_winning_amount is not None else None
+        predicted_tax = float(t.predicted_winning_tax) if t.predicted_winning_tax is not None else None
+        final_amount = float(t.winning_amount) if t.winning_amount is not None else None
+        final_tax = float(t.winning_tax) if t.winning_tax is not None else None
+        display_amount = final_amount if final_amount is not None else predicted_amount
+        display_tax = final_tax if final_amount is not None else predicted_tax
+        is_predicted_display = final_amount is None and predicted_amount is not None
         grouped.setdefault(business_date, []).append({
             'ticket_id': t.id,
             'business_date': business_date,
@@ -230,13 +237,18 @@ def my_winning():
             'lottery_type': t.lottery_type,
             'raw_content': t.raw_content or '',
             'ticket_amount': float(t.ticket_amount) if t.ticket_amount else None,
-            'winning_gross': float(t.winning_gross) if t.winning_gross else 0,
-            'winning_amount': float(t.winning_amount) if t.winning_amount else 0,
-            'winning_tax': float(t.winning_tax) if t.winning_tax else 0,
+            'predicted_winning_gross': float(t.predicted_winning_gross) if t.predicted_winning_gross is not None else None,
+            'predicted_winning_amount': predicted_amount,
+            'predicted_winning_tax': predicted_tax,
+            'winning_gross': float(t.winning_gross) if t.winning_gross is not None else None,
+            'winning_amount': final_amount,
+            'winning_tax': final_tax,
+            'display_winning_amount': display_amount,
+            'display_winning_tax': display_tax,
+            'is_predicted_display': is_predicted_display,
             'winning_image_url': t.winning_image_url,
             'completed_at': t.completed_at.isoformat() if t.completed_at else None,
             'assigned_device_id': t.assigned_device_id or '',
-            'assigned_device_name': t.assigned_device_name or '',
         })
 
     date_options = sorted(

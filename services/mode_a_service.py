@@ -83,7 +83,6 @@ def get_next_ticket(
     user_id: int,
     device_id: str,
     username: str,
-    device_name: str = None,
     complete_current_ticket_id: int = None,
     complete_current_ticket_action: str = 'completed',
 ) -> dict:
@@ -138,7 +137,6 @@ def get_next_ticket(
         user_id,
         device_id,
         username,
-        device_name,
         daily_limit=daily_limit,
         blocked_lottery_types=blocked_lottery_types,
     )

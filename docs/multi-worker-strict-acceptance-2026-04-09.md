@@ -43,7 +43,7 @@ GUNICORN_KEEPALIVE=5
 
 1. 同一张票被领取两次。
 2. 一张已领取的票在完整 A/B 流程结束后不是 `completed`。
-3. `assigned_user_id`、`assigned_username`、`assigned_device_id`、`assigned_device_name` 任一字段和实际领票设备不一致。
+3. `assigned_user_id`、`assigned_username`、`assigned_device_id`、`assigned_device_id` 任一字段和实际领票设备不一致。
 4. 任意测试账号在压测结束后仍残留 `assigned` 票。
 5. 任意用户穿透 `daily_ticket_limit`。
 6. 任意用户穿透 `max_processing_b_mode`。

@@ -101,7 +101,7 @@
             <table class="table table-sm table-hover mb-0">
               <thead class="table-light">
                 <tr>
-                  <th>用户名</th><th>设备名</th><th>速度(张/分)</th><th>最近票数</th><th>时间跨度</th>
+                  <th>用户名</th><th>设备ID</th><th>速度(张/分)</th><th>最近票数</th><th>时间跨度</th>
                 </tr>
               </thead>
               <tbody id="device-speed-tbody">
@@ -294,7 +294,7 @@ async function refreshDashboard() {
       speedTbody.innerHTML = sortedStats.map(d => `
         <tr>
           <td><strong>${d.username}</strong></td>
-          <td>${d.device_name}</td>
+          <td>${d.device_id}</td>
           <td><span class="badge bg-primary">${d.speed_per_minute}</span></td>
           <td>${d.recent_count}张</td>
           <td>${d.time_span_minutes.toFixed(1)}分钟</td>

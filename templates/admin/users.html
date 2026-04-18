@@ -21,11 +21,11 @@
         <thead class="table-dark">
           <tr>
             <th>用户名</th><th>接单模式</th><th>最大设备数</th><th>B模式同时处理上限</th><th>每日处理上限</th>
-            <th>禁彩</th><th>账号状?/th><th>接单?/th><th>B模式仅面</th><th>创建时间</th><th>操作</th>
+            <th>禁彩</th><th>账号状态</th><th>接单</th><th>B模式仅桌面</th><th>创建时间</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading"><td colspan="11" class="text-center py-3">加载?..</td></tr>
+          <tr v-if="loading"><td colspan="11" class="text-center py-3">加载中...</td></tr>
           <tr v-else-if="users.length === 0"><td colspan="11" class="text-center py-3 text-muted">暂无用户</td></tr>
           
           <!-- 活跃用户 -->
@@ -33,7 +33,7 @@
             <td><strong>{{ u.username }}</strong></td>
             <td>
               <select class="form-select form-select-sm" v-model="u.client_mode" @change="updateUser(u)">
-                <option value="mode_a">A模式（单?/option>
+                <option value="mode_a">A模式（单张）</option>
                 <option value="mode_b">B模式（批量）</option>
               </select>
             </td>
@@ -48,22 +48,23 @@
                      placeholder="不限"
                      @change="updateUser(u)"
                      :disabled="u.client_mode !== 'mode_b'"
-                     :title="u.client_mode === 'mode_b' ? 'B模式处理严数上? : '?B 模式?">
+                     :title="u.client_mode === 'mode_b' ? 'B模式处理条数上限' : '仅 B 模式生效'">
             </td>
             <td>
               <input type="number" class="form-control form-control-sm" style="width:80px"
                      v-model.number="u.daily_ticket_limit" min="1" max="100000"
                      placeholder="不限"
                      @change="updateUser(u)"
-                     title="每日理票数上限（A/B模式均生效）">
+                     title="每日处理上限（A/B模式均生效）">
             </td>
             <td>
               <div class="d-flex align-items-center gap-1">
                 <span v-if="u.blocked_lottery_types && u.blocked_lottery_types.length > 0"
                       class="badge bg-danger" style="cursor:pointer" @click="openBlockedTypesModal(u)"
                       :title="u.blocked_lottery_types.join(', ')">
-                  {{ u.blocked_lottery_types.length }} ?                </span>
-                <span v-else class="text-muted small">?/span>
+                  {{ u.blocked_lottery_types.length }} 种
+                </span>
+                <span v-else class="text-muted small">无</span>
                 <button class="btn btn-xs btn-outline-secondary" @click="openBlockedTypesModal(u)" title="设置禁彩">
                   <i class="bi bi-gear"></i>
                 </button>
@@ -83,7 +84,7 @@
               <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" v-model="u.desktop_only_b_mode" @change="updateUser(u)"
                        :disabled="u.client_mode !== 'mode_b'"
-                       :title="u.client_mode === 'mode_b' ? 'B模式昐仅限桌面竎? : '?B 模式?">
+                       :title="u.client_mode === 'mode_b' ? 'B模式仅限桌面端接单' : '仅 B 模式生效'">
               </div>
             </td>
             <td class="small">{{ u.created_at ? u.created_at.substring(0,10) : '' }}</td>
@@ -94,22 +95,22 @@
             </td>
           </tr>
 
-          <!-- 已用用户收?展开?-->
+          <!-- 已停用用户收起/展开 -->
           <tr v-if="disabledUsers.length > 0" class="table-light">
             <td colspan="11" class="py-2 text-center" style="cursor:pointer; background-color: #f8f9fa;" @click="showDisabled = !showDisabled">
               <span class="text-muted small">
                 <i :class="showDisabled ? 'bi bi-chevron-up' : 'bi bi-chevron-down'"></i>
-                {{ showDisabled ? '收起' : '展开' }}已用账?({{ disabledUsers.length }}?
+                {{ showDisabled ? '收起' : '展开' }}已停用账号 ({{ disabledUsers.length }})
               </span>
             </td>
           </tr>
 
-          <!-- 已用用户列?-->
+          <!-- 已停用用户列表 -->
           <tr v-if="showDisabled" v-for="u in disabledUsers" :key="'disabled-' + u.id" class="text-muted" style="background-color: #fafafa;">
             <td><strong>{{ u.username }}</strong></td>
             <td>
               <select class="form-select form-select-sm" v-model="u.client_mode" @change="updateUser(u)">
-                <option value="mode_a">A模式（单?/option>
+                <option value="mode_a">A模式（单张）</option>
                 <option value="mode_b">B模式（批量）</option>
               </select>
             </td>
@@ -135,8 +136,9 @@
               <div class="d-flex align-items-center gap-1">
                 <span v-if="u.blocked_lottery_types && u.blocked_lottery_types.length > 0"
                       class="badge bg-secondary" style="cursor:pointer" @click="openBlockedTypesModal(u)">
-                  {{ u.blocked_lottery_types.length }} ?                </span>
-                <span v-else class="text-muted small">?/span>
+                  {{ u.blocked_lottery_types.length }} 种
+                </span>
+                <span v-else class="text-muted small">无</span>
                 <button class="btn btn-xs btn-outline-secondary" @click="openBlockedTypesModal(u)">
                   <i class="bi bi-gear"></i>
                 </button>
@@ -180,7 +182,7 @@
         <div class="modal-body">
           <div v-if="createError" class="alert alert-danger">{{ createError }}</div>
           <div class="mb-3">
-            <label class="form-label">用户?/label>
+            <label class="form-label">用户名</label>
             <input v-model="newUser.username" type="text" class="form-control">
           </div>
           <div class="mb-3">
@@ -190,31 +192,31 @@
           <div class="mb-3">
             <label class="form-label">接单模式</label>
             <select v-model="newUser.client_mode" class="form-select">
-              <option value="mode_a">A模式（单?/option>
+              <option value="mode_a">A模式（单张）</option>
               <option value="mode_b">B模式（批量）</option>
             </select>
           </div>
           <div class="mb-3">
-            <label class="form-label">大备数</label>
+            <label class="form-label">最大设备数</label>
             <input v-model.number="newUser.max_devices" type="number" class="form-control" min="1" max="10">
           </div>
           <div class="mb-3" v-if="newUser.client_mode === 'mode_b'">
-            <label class="form-label">B模式同时处理上限 <small class="text-muted">(叉，留空表示不限)</small></label>
+            <label class="form-label">B模式同时处理上限 <small class="text-muted">（可选，留空表示不限）</small></label>
             <input v-model.number="newUser.max_processing_b_mode" type="number" class="form-control" min="1" max="10000" placeholder="不限">
           </div>
           <div class="mb-3">
-            <label class="form-label">每日处理上限 <small class="text-muted">(叉，留空表示不限，A/B模式均生?</small></label>
+            <label class="form-label">每日处理上限 <small class="text-muted">（可选，留空表示不限，A/B模式均生效）</small></label>
             <input v-model.number="newUser.daily_ticket_limit" type="number" class="form-control" min="1" max="100000" placeholder="不限">
           </div>
           <div class="mb-3" v-if="newUser.client_mode === 'mode_b'">
-            <label class="form-label">B模式仅面接单</label>
+            <label class="form-label">B模式仅桌面接单</label>
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="new-desktop-only" v-model="newUser.desktop_only_b_mode">
-              <label class="form-check-label" for="new-desktop-only">吐仅面収单，关闭后网页和面都可接单</label>
+              <label class="form-check-label" for="new-desktop-only">仅桌面端接单，关闭后网页和桌面端都可接单</label>
             </div>
           </div>
           <div class="mb-3">
-            <label class="form-label">禁彩 <small class="text-muted">(勾的彩不会分配给用户，可多?</small></label>
+            <label class="form-label">禁彩 <small class="text-muted">（勾选后这些彩种不会分配给用户，可多选）</small></label>
             <div class="d-flex flex-wrap gap-2">
               <div v-for="t in lotteryTypes" :key="t" class="form-check">
                 <input class="form-check-input" type="checkbox" :id="'new-' + t" :value="t" v-model="newUser.blocked_lottery_types">
@@ -239,7 +241,7 @@
           <button class="btn-close" @click="showBlockedTypes=false"></button>
         </div>
         <div class="modal-body">
-          <p class="text-muted small mb-2">勾的彩将不会分配给该用户（选）</p>
+          <p class="text-muted small mb-2">勾选后这些彩种将不会分配给该用户（可多选）</p>
           <div class="d-flex flex-wrap gap-2">
             <div v-for="t in lotteryTypes" :key="t" class="form-check">
               <input class="form-check-input" type="checkbox" :id="'edit-' + t" :value="t" v-model="editingBlockedTypes">
@@ -255,7 +257,7 @@
     </div>
   </div>
 
-  <!-- 导入用户模 -->
+  <!-- 导入用户模态框 -->
   <div v-if="showImport" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
     <div class="modal-dialog">
       <div class="modal-content">
@@ -266,8 +268,9 @@
         <div class="modal-body">
           <div v-if="importError" class="alert alert-danger">{{ importError }}</div>
           <div v-if="importSuccess" class="alert alert-success">
-            <strong>导入成功?/strong><br>
-            成功导入 {{ importResult.success_count }} 且?            <span v-if="importResult.error_count > 0">，失?{{ importResult.error_count }} ?/span>
+            <strong>导入成功</strong><br>
+            成功导入 {{ importResult.success_count }} 个用户
+            <span v-if="importResult.error_count > 0">，失败 {{ importResult.error_count }} 个</span>
           </div>
 
           <div v-if="!importSuccess">
@@ -276,27 +279,27 @@
               <input type="file" class="form-control" accept=".xlsx" ref="importFileInput" @change="handleFileSelect">
             </div>
             <div class="alert alert-info small">
-              <strong>文件格式说明?/strong><br>
-              ?必需列：用户名密码接单模式最大备数、账号状态接单开关B模式仅面<br>
-              ?密码：可以是明文密码（至?位）或加密后的哈希（导出的密码可直接导入?br>
-              ?接单模式：mode_a ?mode_b<br>
-              ?账号状：吔 ?禁用<br>
-              ?接单关：??关闭<br>
-              ?B模式仅面：是 ??br>
-              ?叉列：B模式处理上限、每日理上限止彩种（逗号分隔?br>
+              <strong>文件格式说明：</strong><br>
+              必需列：用户名、密码、接单模式、最大设备数、账号状态、接单开关、B模式仅桌面<br>
+              密码：可以是明文密码（至少 6 位）或加密后的哈希（导出的密码可直接导入）<br>
+              接单模式：mode_a 或 mode_b<br>
+              账号状态：启用 或 禁用<br>
+              接单开关：开启 或 关闭<br>
+              B模式仅桌面：是 或 否<br>
+              可选列：B模式处理上限、每日处理上限、禁彩种（逗号分隔）<br>
               <a href="/admin/api/users/export" class="text-decoration-none">点击导出当前用户作为模板</a>
             </div>
           </div>
 
           <div v-if="importResult && importResult.errors && importResult.errors.length > 0" class="mt-3">
-            <h6 class="text-danger">导入错详情?/h6>
+            <h6 class="text-danger">导入错误详情</h6>
             <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
               <table class="table table-sm table-bordered">
                 <thead class="table-light">
                   <tr>
                     <th>行号</th>
-                    <th>字</th>
-                    <th>错信息</th>
+                    <th>字段</th>
+                    <th>错误信息</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -312,14 +315,14 @@
 
           <div v-if="importing" class="text-center py-3">
             <div class="spinner-border text-primary" role="status">
-              <span class="visually-hidden">导入?..</span>
+              <span class="visually-hidden">导入中...</span>
             </div>
-            <p class="mt-2">正在导入用户，稍?..</p>
+            <p class="mt-2">正在导入用户，请稍候...</p>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="closeImportModal">{{ importSuccess ? '关闭' : '取消' }}</button>
-          <button v-if="!importSuccess && !importing" class="btn btn-primary" @click="uploadUsersFile" :disabled="!selectedFile">始?/button>
+          <button v-if="!importSuccess && !importing" class="btn btn-primary" @click="uploadUsersFile" :disabled="!selectedFile">开始导入</button>
         </div>
       </div>
     </div>
@@ -581,7 +584,7 @@ createApp({
     },
     async uploadUsersFile() {
       if (!this.selectedFile) {
-        this.importError = '请择文件';
+        this.importError = '请选择文件';
         return;
       }
 
@@ -608,12 +611,12 @@ createApp({
 
         if (data.success) {
           this.importSuccess = true;
-          showToast(`成功导入 ${data.success_count} 且户`, 'success');
+          showToast(`成功导入 ${data.success_count} 个用户`, 'success');
           this.loadUsers();
         } else {
           this.importError = data.error || '导入失败';
           if (data.error_count > 0) {
-            showToast(`导入完成，成?${data.success_count} 丼失败 ${data.error_count} 个`, 'warning');
+            showToast(`导入完成，成功 ${data.success_count} 个，失败 ${data.error_count} 个`, 'warning');
           }
         }
       } catch (e) {

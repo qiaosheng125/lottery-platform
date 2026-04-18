@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import io
 
 import pytest
+from sqlalchemy import inspect
 from werkzeug.datastructures import FileStorage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -21,6 +22,7 @@ from models.user import User
 from models.result import MatchResult, ResultFile
 from models.archive import ArchivedLotteryTicket
 from models.winning import WinningRecord
+from utils.filename_parser import parse_filename
 from utils.time_utils import beijing_now
 from routes.admin import _database_display_info
 
@@ -165,10 +167,24 @@ def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
     app.config.update(TESTING=True)
 
     with app.app_context():
-        admin = User.query.filter_by(username="zucaixu", is_admin=True).first()
+        admin = User.query.filter_by(username="zucaixu", is_admin=True).first(),
         settings = SystemSettings.get()
+        tables = set(inspect(db.engine).get_table_names())
         assert admin is not None
         assert settings is not None
+        assert {
+            "users",
+            "user_sessions",
+            "device_registry",
+            "uploaded_files",
+            "lottery_tickets",
+            "archived_lottery_tickets",
+            "winning_records",
+            "result_files",
+            "match_results",
+            "audit_logs",
+            "system_settings",
+        }.issubset(tables)
 
 
 def test_create_app_normalizes_relative_sqlite_path(monkeypatch):
@@ -180,6 +196,20 @@ def test_create_app_normalizes_relative_sqlite_path(monkeypatch):
     uri = app.config["SQLALCHEMY_DATABASE_URI"]
     assert uri.startswith("sqlite:///")
     assert uri.endswith("/instance/single.db")
+
+
+def test_parse_filename_accepts_optional_trailing_parameter():
+    parsed = parse_filename("\u81ea_P5\u80dc\u5e73\u8d1f3\u500d\u6295_\u91d1\u989d600\u5143_37\u5f20_01.40_26034_\u5c0f.txt")
+
+    assert parsed["identifier"] == "\u81ea"
+    assert parsed["internal_code"] == "P5"
+    assert parsed["lottery_type"] == "\u80dc\u5e73\u8d1f"
+    assert parsed["multiplier"] == 3
+    assert parsed["declared_amount"] == 600
+    assert parsed["declared_count"] == 37
+    assert parsed["deadline_hhmm"] == "01.40"
+    assert parsed["detail_period"] == "26034"
+    assert parsed["extra_param"] == "\u5c0f"
 
 
 def test_database_display_info_uses_runtime_sqlite_path(app):
@@ -1619,7 +1649,6 @@ def create_assigned_ticket(user: User, device_id: str, raw_content: str, line_nu
         assigned_user_id=user.id,
         assigned_username=user.username,
         assigned_device_id=device_id,
-        assigned_device_name=device_id,
         assigned_at=beijing_now(),
     )
     db.session.add(ticket)
@@ -1775,13 +1804,13 @@ def test_mode_a_routes_reject_invalid_device_id_and_name(app, client):
     resp = login(client, "mode_a_device_guard_user", "secret123")
     assert resp.status_code == 200
 
-    invalid_id_resp = client.post("/api/mode-a/next", json={"device_id": "bad id", "device_name": "Device A"})
+    invalid_id_resp = client.post("/api/mode-a/next", json={"device_id": "bad id"})
     assert invalid_id_resp.status_code == 400
     assert "无效的设备ID" in invalid_id_resp.get_json()["error"]
 
-    long_name_resp = client.post("/api/mode-a/next", json={"device_id": "device-a", "device_name": "x" * 129})
-    assert long_name_resp.status_code == 400
-    assert "设备名称过长" in long_name_resp.get_json()["error"]
+    too_long_id_resp = client.post("/api/mode-a/next", json={"device_id": "x" * 65})
+    assert too_long_id_resp.status_code == 400
+    assert "无效的设备ID" in too_long_id_resp.get_json()["error"]
 
 
 def test_mode_b_download_rejects_invalid_device_info(app, client):
@@ -1791,13 +1820,13 @@ def test_mode_b_download_rejects_invalid_device_info(app, client):
     resp = login(client, "mode_b_device_guard_user", "secret123")
     assert resp.status_code == 200
 
-    invalid_id_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "bad id", "device_name": "设备1"})
+    invalid_id_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "bad id"})
     assert invalid_id_resp.status_code == 400
     assert "无效的设备ID" in invalid_id_resp.get_json()["error"]
 
-    long_name_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "dev-1", "device_name": "x" * 129})
-    assert long_name_resp.status_code == 400
-    assert "设备名称过长" in long_name_resp.get_json()["error"]
+    too_long_id_resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "x" * 65})
+    assert too_long_id_resp.status_code == 400
+    assert "无效的设备ID" in too_long_id_resp.get_json()["error"]
 
 
 def test_mode_b_download_requires_device_id(app, client):
@@ -1823,7 +1852,7 @@ def test_mode_b_download_blocks_web_when_desktop_only_enabled(app, client):
 
     resp = client.post(
         "/api/mode-b/download",
-        json={"count": 1, "device_id": "web-1", "device_name": "网页浏览器"},
+        json={"count": 1, "device_id": "web-1", "client_type": "web"},
     )
     assert resp.status_code == 403
     data = resp.get_json()
@@ -1850,13 +1879,13 @@ def test_mode_b_download_allows_web_when_desktop_only_disabled(app, client, monk
 
     resp = client.post(
         "/api/mode-b/download",
-        json={"count": 1, "device_id": "web-1", "device_name": "网页浏览器"},
+        json={"count": 1, "device_id": "web-1", "client_type": "web"},
     )
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["success"] is True
     assert called
-    assert called[0]["device_name"] == "网页浏览器"
+    assert called[0]["device_id"] == "web-1"
 
 
 def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
@@ -1920,7 +1949,6 @@ def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
                 assigned_user_id=user.id,
                 assigned_username=user.username,
                 assigned_device_id="device-b",
-                assigned_device_name="device-b",
                 assigned_at=first_time,
                 deadline_time=deadline,
                 ticket_amount=2,
@@ -1934,7 +1962,6 @@ def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
                 assigned_user_id=user.id,
                 assigned_username=user.username,
                 assigned_device_id="device-b",
-                assigned_device_name="device-b",
                 assigned_at=second_time,
                 deadline_time=deadline,
                 ticket_amount=2,
@@ -1972,7 +1999,6 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-b",
-            assigned_device_name="device-b",
             assigned_at=fixed_now,
             deadline_time=datetime(2026, 4, 7, 18, 0, 0),
             ticket_amount=2,
@@ -1996,8 +2022,7 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
             user_id=user.id,
             device_id="device-b",
             username=user.username,
-            count=1,
-            device_name="device-b",
+            count=1
         )
 
         assert result["success"] is True
@@ -2022,7 +2047,6 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-b",
-            assigned_device_name="device-b",
             assigned_at=beijing_now(),
             deadline_time=beijing_now() + timedelta(hours=1),
             ticket_amount=2,
@@ -2033,8 +2057,7 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
             user_id=user.id,
             device_id="device-b",
             username=user.username,
-            count=1,
-            device_name="device-b",
+            count=1
         )
 
     assert result["success"] is False
@@ -2068,7 +2091,6 @@ def test_mode_b_download_rejects_when_pool_disabled(app):
             device_id="device-b",
             username=user.username,
             count=2,
-            device_name="设备B",
         )
 
     assert result["success"] is False
@@ -2236,8 +2258,7 @@ def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(ap
             user_id=user.id,
             device_id="device-b",
             username=user.username,
-            count=1,
-            device_name="device-b",
+            count=1
         )
 
     assert result["success"] is False
@@ -2304,8 +2325,7 @@ def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeyp
             user_id=1,
             device_id="device-b",
             username="tester",
-            count=1,
-            device_name="设备B",
+            count=1
         )
 
     assert adjustment_message is None
@@ -2387,7 +2407,6 @@ def test_mode_b_postgres_batch_assignment_updates_only_returned_ids(app, monkeyp
             device_id="device-b",
             username="tester",
             count=2,
-            device_name="设备B",
         )
 
     assert adjustment_message is None
@@ -2438,7 +2457,7 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
-        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
 
     assert result is not None
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
@@ -2489,7 +2508,7 @@ def test_mode_a_postgres_assignment_clamps_file_pending_count(app, monkeypatch):
     monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
-        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="璁惧A")
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
 
     assert result is not None
 
@@ -2549,7 +2568,7 @@ def test_mode_a_postgres_assignment_falls_back_when_redis_returns_stale_id(app, 
     monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
 
     with app.app_context():
-        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
 
     assert result is not None
     assert result.id == 321
@@ -2603,7 +2622,7 @@ def test_mode_a_postgres_assignment_expires_redis_ticket_at_exact_deadline(app, 
     monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
 
     with app.app_context():
-        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
 
     assert result is None
     assert not any("SET status = 'assigned'" in sql for sql, _ in calls)
@@ -2664,8 +2683,7 @@ def test_mode_a_postgres_blocked_fallback_ticket_does_not_duplicate_redis_queue(
             user_id=1,
             device_id="device-a",
             username="tester",
-            device_name="设备A",
-            blocked_lottery_types=["胜平负"],
+            blocked_lottery_types=["???"],
         )
 
     assert result is None
@@ -2716,7 +2734,7 @@ def test_mode_a_sqlite_assignment_retries_after_guarded_update_miss(app, monkeyp
     )
 
     with app.app_context():
-        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester", device_name="设备A")
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
 
     assert result is not None
     assert result.id == 102
@@ -2798,7 +2816,6 @@ def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(ap
             device_id="device-b",
             username="tester",
             count=2,
-            device_name="设备B",
         )
 
     assert adjustment_message is None
@@ -2869,7 +2886,6 @@ def test_mode_b_postgres_batch_assignment_enforces_max_processing_limit(app, mon
             device_id="device-b",
             username="tester",
             count=3,
-            device_name="设备B",
             max_processing=5,
         )
 
@@ -2917,7 +2933,7 @@ def test_mode_b_postgres_batch_assignment_clamps_file_pending_count(app, monkeyp
     def fake_execute(statement, params=None):
         sql = str(statement)
         if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
-            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="?????", deadline_time=deadline, cnt=25)])
+            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="??ID??", deadline_time=deadline, cnt=25)])
         if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
             return FakeResult(fetchall_data=[(123,), (124,)])
         if "UPDATE lottery_tickets" in sql and "RETURNING id" in sql:
@@ -2941,7 +2957,6 @@ def test_mode_b_postgres_batch_assignment_clamps_file_pending_count(app, monkeyp
             device_id="device-b",
             username="tester",
             count=2,
-            device_name="???B",
         )
 
     assert adjustment_message is None
@@ -3287,7 +3302,7 @@ def test_mode_a_next_does_not_complete_current_ticket_without_explicit_ticket_id
     resp = login(client, "modea_user", "secret123")
     assert resp.status_code == 200
 
-    resp = client.post("/api/mode-a/next", json={"device_id": "device-a", "device_name": "Device A"})
+    resp = client.post("/api/mode-a/next", json={"device_id": "device-a"})
     assert resp.status_code == 200
 
     data = resp.get_json()
@@ -3316,7 +3331,6 @@ def test_mode_a_next_ignores_stale_completion_ticket_id(app, client):
             "/api/mode-a/next",
             json={
                 "device_id": "device-a",
-                "device_name": "Device A",
                 "complete_current_ticket_id": first_ticket_id,
             },
         )
@@ -3328,7 +3342,6 @@ def test_mode_a_next_ignores_stale_completion_ticket_id(app, client):
             "/api/mode-a/next",
             json={
                 "device_id": "device-a",
-                "device_name": "Device A",
                 "complete_current_ticket_id": first_ticket_id,
             },
         )
@@ -3361,7 +3374,6 @@ def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
         "/api/mode-a/next",
         json={
             "device_id": "device-a",
-            "device_name": "Device A",
             "complete_current_ticket_id": current_ticket_id,
             "complete_current_ticket_action": "expired",
         },
@@ -3395,7 +3407,6 @@ def test_mode_a_next_stops_after_completing_current_when_pool_disabled(app):
             user_id=user.id,
             device_id="device-a",
             username=user.username,
-            device_name="设备A",
             complete_current_ticket_id=current_ticket_id,
             complete_current_ticket_action="completed",
         )
@@ -3737,13 +3748,13 @@ def test_device_register_rejects_claiming_other_users_device_id(app, client):
         create_user("device_other_user", "secret123", client_mode="mode_b")
         from models.device import DeviceRegistry
 
-        db.session.add(DeviceRegistry(device_id="shared-device", user_id=user_a.id, device_name="A设备"))
+        db.session.add(DeviceRegistry(device_id="shared-device", user_id=user_a.id))
         db.session.commit()
 
     resp = login(client, "device_other_user", "secret123")
     assert resp.status_code == 200
 
-    resp = client.post("/api/device/register", json={"device_id": "shared-device", "device_name": "B设备"})
+    resp = client.post("/api/device/register", json={"device_id": "shared-device"})
     assert resp.status_code == 409
     data = resp.get_json()
     assert data["success"] is False
@@ -3773,37 +3784,48 @@ def test_device_register_rejects_invalid_device_id_format(app, client):
     assert "设备ID只能包含字母、数字、连字符和下划线" in data["error"]
 
 
-def test_device_update_name_rejects_too_long_name(app, client):
+def test_device_register_returns_device_id_only(app, client):
+    with app.app_context():
+        create_user("device_default_name_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "device_default_name_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/device/register", json={"device_id": "device-one", "client_info": {"client_type": "web"}})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["device"]["device_id"] == "device-one"
+    assert data["device"]["device_id"] == "device-one"
+
+
+def test_device_register_rejects_too_long_device_id(app, client):
     with app.app_context():
         user = create_user("device_long_name_user", "secret123", client_mode="mode_b")
-        from models.device import DeviceRegistry
-
-        db.session.add(DeviceRegistry(device_id="device-a", user_id=user.id, device_name="旧设备名"))
-        db.session.commit()
 
     resp = login(client, "device_long_name_user", "secret123")
     assert resp.status_code == 200
 
-    resp = client.put("/api/device/device-a/name", json={"name": "x" * 21})
+    resp = client.post("/api/device/register", json={"device_id": "x" * 51})
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "长度不能超过 20" in data["error"]
+    assert '长度不能超过20' in data["error"]
 
 
-def test_device_update_name_returns_json_for_missing_device(app, client):
+def test_device_register_returns_json_for_missing_device_id(app, client):
     with app.app_context():
         create_user("device_missing_name_user", "secret123", client_mode="mode_b")
 
     resp = login(client, "device_missing_name_user", "secret123")
     assert resp.status_code == 200
 
-    resp = client.put("/api/device/missing-device/name", json={"name": "新设备名"})
-    assert resp.status_code == 404
+    resp = client.post("/api/device/register", json={})
+    assert resp.status_code == 400
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "设备不存在" in data["error"]
+    assert '请输入设备ID' in data["error"]
 
 
 def test_change_password_handles_empty_json_body(app, client):
@@ -4035,7 +4057,6 @@ def test_user_daily_stats_uses_current_business_window_before_noon(app, client, 
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="设备A",
             ticket_amount=2,
             completed_at=business_start + timedelta(hours=1),
         )
@@ -4047,7 +4068,6 @@ def test_user_daily_stats_uses_current_business_window_before_noon(app, client, 
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="设备A",
             ticket_amount=3,
             completed_at=business_start - timedelta(hours=1),
         )
@@ -4382,7 +4402,6 @@ def test_expire_overdue_tickets_updates_file_counters(app):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="device-a",
             deadline_time=beijing_now() - timedelta(minutes=1),
         ))
         db.session.commit()
@@ -4445,7 +4464,6 @@ def test_expire_overdue_tickets_removes_pending_ids_from_redis(app, monkeypatch)
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="device-a",
             deadline_time=beijing_now() - timedelta(minutes=1),
         )
         db.session.add_all([pending_ticket, assigned_ticket])
@@ -4594,7 +4612,6 @@ def test_archive_old_tickets_deletes_completed_ticket_after_retention(app):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="device-a",
             admin_upload_time=beijing_now() - timedelta(days=40),
             assigned_at=beijing_now() - timedelta(days=40),
             completed_at=beijing_now() - timedelta(days=35),
@@ -5089,7 +5106,7 @@ def test_user_export_daily_uses_business_date_filename(app, client, monkeypatch)
             status="completed",
             assigned_user_id=user.id,
             assigned_username=user.username,
-            assigned_device_name="设备A",
+            assigned_device_id="设备A",
             deadline_time=business_start + timedelta(hours=1),
             completed_at=business_start + timedelta(hours=2),
             detail_period="26034",
@@ -5114,7 +5131,7 @@ def test_user_export_daily_uses_business_date_filename(app, client, monkeypatch)
 def test_admin_export_tickets_by_date_includes_device_id_column():
     admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
     content = admin_route.read_text(encoding="utf-8")
-    assert "['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '设备名', '分配时间', '完成时间', '来源文件名']" in content
+    assert "['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名']" in content
     assert "t.assigned_device_id or ''" in content
 
 
@@ -5259,7 +5276,6 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-rv",
-            assigned_device_name="设备RV",
             assigned_at=beijing_now(),
             admin_upload_time=beijing_now(),
         )
@@ -5337,7 +5353,6 @@ def test_revoke_file_increments_ticket_versions(app):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-rv",
-            assigned_device_name="设备RV",
             assigned_at=beijing_now(),
             version=5,
             admin_upload_time=beijing_now(),
@@ -6019,14 +6034,14 @@ def test_client_dashboard_clears_password_success_timer_before_reopen():
 def test_client_dashboard_only_shows_no_ticket_toast_once():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert content.count("showToast(data.error || '暂无可用票', 'warning');") == 1
+    assert content.count("showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');") == 1
 
 
 def test_client_dashboard_handles_mode_a_stop_failures_and_localizes_next_ticket_messages():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "showToast('请等待 ' + remaining + ' 秒后再获取下一张', 'warning');" in content
-    assert "showToast(data.error || '暂无可用票', 'warning');" in content
+    assert "showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');" in content
     assert "showToast('获取下一张失败，请稍后重试', 'danger');" in content
     assert "if (!res.ok || data.success === false) {" in content
     assert "showToast(e.message || '停止接单失败', 'danger');" in content
@@ -6764,7 +6779,6 @@ def test_my_winning_returns_business_date(app, client):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-a",
-            assigned_device_name="device-a",
             completed_at=beijing_now(),
             is_winning=True,
         )
@@ -7401,8 +7415,149 @@ def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeyp
     assert refreshed.calc_started_at is None
     assert refreshed.calc_finished_at is None
     assert refreshed.tickets_total == 0
-    assert refreshed.tickets_winning == 0
-    assert float(refreshed.total_winning_amount or 0) == 0.0
+
+
+def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="predicted_final_parser_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    predicted_file = tmp_path / "predicted_result.txt"
+    predicted_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.85\n", encoding="utf-8")
+    final_file = tmp_path / "final_result.txt"
+    final_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t2.05\n", encoding="utf-8")
+    predicted_file_2 = tmp_path / "predicted_result_2.txt"
+    predicted_file_2.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.95\n", encoding="utf-8")
+
+    with app.app_context():
+        first = parse_result_file(str(predicted_file), "26188", admin_id, upload_kind="predicted")
+        second = parse_result_file(str(final_file), "26188", admin_id, upload_kind="final")
+        third = parse_result_file(str(predicted_file_2), "26188", admin_id, upload_kind="predicted")
+        match_result = MatchResult.query.filter_by(detail_period="26188").first()
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert third["success"] is True
+    assert match_result.result_data["1"]["SPF"]["result"] == "3"
+    assert match_result.result_data["1"]["SPF"]["predicted_sp"] == 1.95
+    assert match_result.result_data["1"]["SPF"]["sp"] == 2.05
+
+
+def test_winning_calc_stores_predicted_and_final_amounts_separately(app):
+    from services.winning_calc_service import process_match_result
+
+    with app.app_context():
+        user = create_user("predicted_final_calc_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26189",
+            result_data={"1": {"SPF": {"result": "3", "predicted_sp": 5, "sp": 10}}},
+            uploaded_by=user.id,
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26189",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_match_result = MatchResult.query.get(match_result_id)
+        refreshed_ticket = LotteryTicket.query.get(ticket_id)
+
+    assert refreshed_ticket.is_winning is True
+    assert float(refreshed_ticket.predicted_winning_amount) == 6.5
+    assert float(refreshed_ticket.winning_amount) == 13.0
+    assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
+    assert float(refreshed_match_result.total_winning_amount) == 13.0
+
+
+def test_my_winning_falls_back_to_predicted_amount_when_final_missing(app, client):
+    with app.app_context():
+        user = create_user("predicted_only_client_user", "secret123", client_mode="mode_b")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26190",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            predicted_winning_gross=120,
+            predicted_winning_amount=120,
+            predicted_winning_tax=0,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = login(client, "predicted_only_client_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    record = [item for items in data["grouped"].values() for item in items][0]
+
+    assert record["winning_amount"] is None
+    assert record["display_winning_amount"] == 120.0
+    assert record["display_winning_tax"] == 0.0
+    assert record["is_predicted_display"] is True
+
+
+def test_admin_winning_api_returns_predicted_amount_and_change_percent(app, client):
+    with app.app_context():
+        admin = User(username="predicted_final_admin", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("predicted_final_member", "secret123", client_mode="mode_b")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26191",
+            lottery_type="SPF",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            predicted_winning_amount=100,
+            predicted_winning_tax=0,
+            winning_amount=120,
+            winning_tax=0,
+        )
+        db.session.add_all([admin, ticket])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "predicted_final_admin", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/winning")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    record = data["records"][0]
+
+    assert data["summary"]["predicted_amount"] == 100.0
+    assert data["summary"]["amount"] == 120.0
+    assert record["predicted_winning_amount"] == 100.0
+    assert record["winning_amount"] == 120.0
+    assert record["winning_change_percent"] == 20.0
 
 
 def test_admin_user_management_endpoints_reject_admin_targets(app, client):
@@ -7502,7 +7657,6 @@ def test_mode_b_finalize_ignores_duplicate_ticket_ids(app):
             assigned_user_id=user.id,
             assigned_username=user.username,
             assigned_device_id="device-b",
-            assigned_device_name="device-b",
             assigned_at=beijing_now(),
             deadline_time=beijing_now() - timedelta(minutes=1),
         )
@@ -7531,7 +7685,7 @@ def test_mode_b_preview_rejects_invalid_count(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "下载张数" in data["error"]
+    assert '整数' in data["error"]
 
 
 def test_mode_b_download_rejects_invalid_count(app, client):
@@ -7541,21 +7695,20 @@ def test_mode_b_download_rejects_invalid_count(app, client):
     resp = login(client, "mode_b_download_invalid", "secret123")
     assert resp.status_code == 200
 
-    resp = client.post("/api/mode-b/download", json={"count": 0, "device_id": "dev-1", "device_name": "设备1"})
+    resp = client.post("/api/mode-b/download", json={"count": 0, "device_id": "dev-1"})
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "下载张数" in data["error"]
+    assert '整数' in data["error"]
 
 
 def test_client_dashboard_handles_mode_b_confirm_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "throw new Error(data.error || '确认失败');" in content
-    assert "showToast(e.message || '确认失败，请稍后重试', 'danger');" in content
-    assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount, device_id: deviceId })," in content
+    assert "throw new Error(data.error ||" in content
+    assert "showToast(e.message ||" in content
+    assert "body: JSON.stringify({ ticket_ids: batch.ticket_ids, completed_count: completedCount, device_id: currentDeviceId() })," in content
     assert "showToast(message, 'success');" in content
-    assert "showToast('请等待 1 秒后再下载', 'warning');" in content
     assert "bDownloadCooldownUntil > Date.now()" in content
 
 
@@ -7605,10 +7758,37 @@ def test_client_dashboard_restores_mode_a_current_ticket_on_mount():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "async loadCurrentModeATicket()" in content
-    assert "fetch(`/api/mode-a/current?device_id=${encodeURIComponent(deviceId)}`)" in content
+    assert "fetch(`/api/mode-a/current?device_id=${encodeURIComponent(currentDeviceId())}`)" in content
     assert "document.body.classList.add('mode-a-active');" in content
     assert "this.ticketHistory = [data.ticket];" in content
     assert "this.modeAActive = true;" in content
+
+
+def test_client_dashboard_uses_dynamic_device_identifier_helpers():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "const currentDeviceId = () => getOrCreateDeviceId();" in content
+    assert "device_id: currentDeviceId()," in content
+    assert "client_type: 'web'," in content
+
+
+def test_web_device_registration_uses_single_identifier_flow():
+    app_js = Path(__file__).resolve().parents[1] / "static" / "js" / "app.js"
+    content = app_js.read_text(encoding="utf-8")
+    assert "client_info: { client_type: 'web' }," in content
+    assert "lottery_device_id" in content
+
+
+def test_mode_a_mobile_layout_keeps_stop_action_visible():
+    style_path = Path(__file__).resolve().parents[1] / "static" / "css" / "style.css"
+    content = style_path.read_text(encoding="utf-8")
+    assert "body.mode-a-active {" in content
+    assert "overflow: hidden;" in content
+    assert "body.mode-a-active .client-device-stats," in content
+    assert "body.mode-a-active .client-quick-links {" in content
+    assert ".mode-a-bottom-bar {" in content
+    assert "env(safe-area-inset-bottom)" in content
+    assert "height: calc(100dvh - 88px);" in content
 
 
 def test_client_dashboard_fully_resets_mode_a_state_when_current_ticket_missing():
@@ -7635,7 +7815,7 @@ def test_client_dashboard_keeps_latest_ticket_visible_when_next_returns_empty():
     assert "if (this.ticketHistory.length > 0) {" in content
     assert "this.historyOffset = 0;" in content
     assert "this.currentTicket = this.ticketHistory[0];" in content
-    assert "showToast(data.error || '暂无可用票', 'warning');" in content
+    assert "showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');" in content
 
 
 def test_client_dashboard_resets_full_mode_a_state_after_stop_success():
@@ -7697,7 +7877,7 @@ def test_client_dashboard_handles_mode_b_preview_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "this.bPreview = null;" in content
-    assert "showToast(e.message || '预览失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '\u83b7\u53d6\u9884\u89c8\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_client_dashboard_handles_export_daily_network_failure():
@@ -8075,10 +8255,10 @@ def test_admin_winning_defaults_date_filter_to_current_business_day():
 def test_client_dashboard_handles_mode_b_network_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "throw new Error(data.error || '预览失败');" in content
-    assert "showToast(e.message || '预览失败，请稍后重试', 'danger');" in content
-    assert "throw new Error(data.error || '确认失败');" in content
-    assert "showToast(e.message || '确认失败，请稍后重试', 'danger');" in content
+    assert "throw new Error(data.error || '\u83b7\u53d6\u9884\u89c8\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u83b7\u53d6\u9884\u89c8\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "throw new Error(data.error || '\u786e\u8ba4\u5b8c\u6210\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u786e\u8ba4\u5b8c\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_client_dashboard_renders_fixed_announcement_card_and_hides_global_bar():

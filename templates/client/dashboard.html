@@ -2,7 +2,6 @@
 {% block title %}我的主页{% endblock %}
 {% block content %}
 <div id="client-dashboard">
-  <!-- Stats bar -->
   {% raw %}
   <div class="row g-3 mb-3">
     <div class="col-6 col-md-3">
@@ -17,7 +16,7 @@
       <div class="card text-center border-success">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-success">¥{{ stats.total_amount.toFixed(0) }}</div>
-          <div class="small text-muted">今日处理�?/div>
+          <div class="small text-muted">今日处理金额</div>
         </div>
       </div>
     </div>
@@ -25,7 +24,7 @@
       <div class="card text-center border-warning">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-warning">{{ stats.pool_total_pending }}</div>
-          <div class="small text-muted">待理�?/div>
+          <div class="small text-muted">待处理票数</div>
         </div>
       </div>
     </div>
@@ -33,13 +32,12 @@
       <div class="card text-center border-info">
         <div class="card-body py-2">
           <div class="fs-4 fw-bold text-info">{{ stats.active_count }}</div>
-          <div class="small text-muted">处理?/div>
+          <div class="small text-muted">处理中</div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Announcement -->
   <div class="card mb-3 client-announcement-card">
     <div class="card-body py-2">
       <div class="d-flex align-items-start gap-2">
@@ -52,15 +50,22 @@
     </div>
   </div>
 
-  <!-- 今日设统 -->
   <div v-if="stats.device_stats && stats.device_stats.length > 1" class="card mb-3 client-device-stats">
-    <div class="card-header py-2 small fw-bold"><i class="bi bi-phone"></i> 今日各设备出票统计</div>
+    <div class="card-header py-2 small fw-bold">
+      <i class="bi bi-phone"></i> 今日各设备出票统计
+    </div>
     <div class="card-body p-0">
       <table class="table table-sm table-hover mb-0">
-        <thead class="table-light"><tr><th>设备</th><th class="text-end">张数</th><th class="text-end">金额</th></tr></thead>
+        <thead class="table-light">
+          <tr>
+            <th>设备</th>
+            <th class="text-end">张数</th>
+            <th class="text-end">金额</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="d in stats.device_stats" :key="d.device_id">
-            <td class="small">{{ d.device_name }}</td>
+            <td class="small">{{ d.device_id || '未知设备' }}</td>
             <td class="text-end small">{{ d.count }}</td>
             <td class="text-end small text-success">¥{{ d.amount.toFixed(0) }}</td>
           </tr>
@@ -70,59 +75,58 @@
   </div>
   {% endraw %}
 
-  <!-- Mode A section -->
   {% if current_user.client_mode == 'mode_a' %}
   {% raw %}
   <div id="mode-a" class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-play-circle"></i> A模式接单 <span class="badge bg-light text-dark border ms-1" id="device-name-badge" style="font-size:.75rem"></span></span>
+      <span>
+        <i class="bi bi-play-circle"></i> A模式接单
+        <span class="badge bg-light text-dark border ms-1" id="device-name-badge" style="font-size:.75rem"></span>
+      </span>
       <div class="form-check form-switch mb-0">
         <input class="form-check-input" type="checkbox" v-model="modeAActive" @change="toggleModeA" id="modeASwitch" style="width:3em;height:1.5em">
-        <label class="form-check-label fw-bold fs-6" for="modeASwitch">{{ modeAActive ? '接单? : '已停? }}</label>
+        <label class="form-check-label fw-bold fs-6" for="modeASwitch">{{ modeAActive ? '接单中' : '已停止' }}</label>
       </div>
     </div>
     <div class="card-body text-center p-2">
       <div v-if="!modeAActive" class="text-muted py-5 text-center">
         <i class="bi bi-toggle-off" style="font-size:3rem"></i>
-        <div class="mt-3 mb-4">打开右上角开关开始接?/div>
-        <button class="btn btn-primary btn-start-receiving" @click="modeAActive=true; toggleModeA()">
-          <i class="bi bi-play-fill me-2"></i>始接?/button>
+        <div class="mt-3 mb-4">打开右上角开关开始接单</div>
+        <button class="btn btn-primary btn-start-receiving" @click="modeAActive = true; toggleModeA()">
+          <i class="bi bi-play-fill me-2"></i>开始接单
+        </button>
       </div>
       <div v-else-if="currentTicket" class="position-relative">
-        <!-- 全屏票面显示容器 -->
         <div class="mode-a-fullscreen-container">
-          <!-- 信息?- 固定顶部 -->
           <div class="mode-a-info-bar">
             <div class="d-flex justify-content-between align-items-center">
               <div class="info-left">编号: {{ currentTicket.detail_period }}</div>
               <div class="info-center">
                 <div>{{ currentTicket.lottery_type }}{{ currentTicket.multiplier || '' }}倍投</div>
-                <div class="info-amount">�?{{ currentTicket.ticket_amount || calculateTicketAmount(currentTicket.raw_content) }} ?/div>
+                <div class="info-amount">¥{{ currentTicket.ticket_amount || calculateTicketAmount(currentTicket.raw_content) }}</div>
               </div>
               <div class="info-right">
                 <div class="countdown-text">{{ countdown }}</div>
-                <div class="deadline-text"> {{ deadlineStr }}</div>
+                <div class="deadline-text">{{ deadlineStr }}</div>
               </div>
             </div>
           </div>
 
-          <!-- 主内容区 - 左右按钮 + 丗票�?-->
           <div class="mode-a-main-area">
-            <!-- 左侧按钮 -->
             <button class="mode-a-side-btn mode-a-side-btn-left" @click="previousTicket" :disabled="historyOffset >= ticketHistory.length - 1">
               <i class="bi bi-arrow-left"></i>
             </button>
 
-            <!-- 票面�?- 叻动�?-->
             <div class="mode-a-ticket-scroll">
               <div v-html="renderTicket(currentTicket.raw_content)"></div>
             </div>
 
-            <!-- 右侧按钮 -->
-            <button class="mode-a-side-btn mode-a-side-btn-right"
-                    @click="nextTicket"
-                    :disabled="loadingNext || (historyOffset === 0 && nextCooldownSec > 0)"
-                    :title="historyOffset === 0 && nextCooldownSec > 0 ? `冷却丼还需等待 ${nextCooldownSec} 秒` : '下一?">
+            <button
+              class="mode-a-side-btn mode-a-side-btn-right"
+              @click="nextTicket"
+              :disabled="loadingNext || (historyOffset === 0 && nextCooldownSec > 0)"
+              :title="historyOffset === 0 && nextCooldownSec > 0 ? ('冷却中，还需等待 ' + nextCooldownSec + ' 秒') : '下一张'"
+            >
               <span v-if="loadingNext" class="spinner-border spinner-border-sm"></span>
               <template v-else-if="historyOffset === 0 && nextCooldownSec > 0">
                 <span class="mode-a-cooldown-sec">{{ nextCooldownSec }}</span>
@@ -131,32 +135,32 @@
             </button>
           </div>
 
-          <!-- 底部操作?-->
           <div class="mode-a-bottom-bar">
-            <!-- History indicator -->
             <div v-if="ticketHistory.length > 1" class="text-center mb-2">
-              <span v-for="(t, i) in ticketHistory" :key="i"
-                    class="d-inline-block rounded-circle me-1 history-dot"
-                    :class="i === historyOffset ? 'bg-primary' : 'bg-secondary'"></span>
+              <span
+                v-for="(t, i) in ticketHistory"
+                :key="i"
+                class="d-inline-block rounded-circle me-1 history-dot"
+                :class="i === historyOffset ? 'bg-primary' : 'bg-secondary'"
+              ></span>
             </div>
             <button class="btn btn-danger w-100 mode-a-stop-btn" @click="confirmStop">
-              <i class="bi bi-stop-circle"></i> 停接�?
+              <i class="bi bi-stop-circle"></i> 停止接单
             </button>
           </div>
         </div>
       </div>
       <div v-else class="text-center py-4">
-        <div class="spinner-border text-primary" v-if="loadingNext"></div>
+        <div v-if="loadingNext" class="spinner-border text-primary"></div>
         <div v-else class="text-muted">
           <i class="bi bi-inbox fs-1"></i>
-          <div class="mt-2">票池暂时为空，等待新?..</div>
+          <div class="mt-2">票池暂时为空，等待新票中...</div>
           <button class="btn btn-outline-primary mt-2 btn-sm" @click="nextTicket">重试获取</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Stop confirm dialog -->
   <div v-if="showStopConfirm" class="modal show d-block" style="background:rgba(0,0,0,0.5)">
     <div class="modal-dialog modal-sm">
       <div class="modal-content">
@@ -174,66 +178,61 @@
   {% endraw %}
   {% endif %}
 
-  <!-- Mode B section -->
   {% if current_user.client_mode == 'mode_b' %}
   {% raw %}
   <div id="mode-b" class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-      <span><i class="bi bi-download"></i> B模式批量下载 <span class="badge bg-light text-dark border ms-1" id="device-name-badge-b" style="font-size:.75rem"></span></span>
-      <span class="badge bg-secondary">票池剩余: {{ poolStatus.total_pending || 0 }} ?/span>
+      <span>
+        <i class="bi bi-download"></i> B模式批量下载
+        <span class="badge bg-light text-dark border ms-1" id="device-name-badge-b" style="font-size:.75rem"></span>
+      </span>
+      <span class="badge bg-secondary">票池剩余: {{ poolStatus.total_pending || 0 }} 张</span>
     </div>
     <div class="card-body">
-      <!-- Pool overview -->
       <div v-if="poolStatus.by_type && poolStatus.by_type.length > 0" class="mb-3">
-        <div class="small text-muted mb-1">当前票池概况（服务器臊按截止时间分配�?/div>
+        <div class="small text-muted mb-1">当前票池概况，服务器会按截止时间优先分配</div>
         <div class="d-flex flex-wrap gap-1">
-          <span v-for="item in poolStatus.by_type" :key="item.lottery_type + item.deadline_time"
-                class="badge bg-light text-dark border">
-            {{ item.lottery_type }} {{ item.deadline_time ? item.deadline_time.substring(11,16) : '' }}
-            <span class="text-primary fw-bold">{{ item.count }}?/span>
+          <span v-for="item in poolStatus.by_type" :key="item.lottery_type + item.deadline_time" class="badge bg-light text-dark border">
+            {{ item.lottery_type }} {{ item.deadline_time ? item.deadline_time.substring(11, 16) : '' }}
+            <span class="text-primary fw-bold">{{ item.count }} 张</span>
           </span>
         </div>
       </div>
       <div v-else class="alert alert-warning py-2 mb-3">
-        <i class="bi bi-inbox"></i> 当前票池暂无�?/div>
+        <i class="bi bi-inbox"></i> 当前票池暂无票据
+      </div>
 
-      <!-- Count selector -->
       <div class="row g-3 align-items-end">
         <div class="col-8 col-md-4">
           <label class="form-label fw-bold">下载张数</label>
           <select v-model.number="bCount" class="form-select form-select-lg" @change="previewBatch">
-            <option v-for="n in bOptions" :key="n" :value="n">{{ n }}?/option>
+            <option v-for="n in bOptions" :key="n" :value="n">{{ n }} 张</option>
           </select>
         </div>
         <div class="col-4 col-md-3">
-          <button class="btn btn-primary btn-lg w-100" @click="downloadBatch"
-                  :disabled="!poolStatus.total_pending || downloading || bDownloadCooldownUntil > Date.now()">
+          <button class="btn btn-primary btn-lg w-100" @click="downloadBatch" :disabled="!poolStatus.total_pending || downloading || bDownloadCooldownUntil > Date.now()">
             <span v-if="downloading" class="spinner-border spinner-border-sm me-1"></span>
-            <i class="bi bi-download"></i> {{ bDownloadCooldownUntil > Date.now() ? '冷却? : '下载' }}
+            <i class="bi bi-download"></i> {{ bDownloadCooldownUntil > Date.now() ? '冷却中' : '下载' }}
           </button>
         </div>
       </div>
 
-      <!-- Preview hint -->
       <div v-if="bPreview" class="alert mt-3 py-2" :class="bPreview.sufficient ? 'alert-info' : 'alert-warning'">
         <i class="bi bi-info-circle"></i>
-        <span v-if="bPreview.sufficient">
-          �?<strong>{{ bCount }}</strong> 张，服务器将按截止时间优先分?/span>
-        <span v-else>
-          票池当前仅剩 <strong>{{ bPreview.available }}</strong> 张，将全部下?/span>
+        <span v-if="bPreview.sufficient">预计下载 <strong>{{ bCount }}</strong> 张，服务器将按截止时间优先分配</span>
+        <span v-else>票池当前仅剩 <strong>{{ bPreview.available }}</strong> 张，将全部下载</span>
       </div>
 
-      <!-- 出票�?-->
       <div v-if="bPendingBatches.length > 0" class="mt-3">
-        <div class="fw-bold mb-2"><i class="bi bi-hourglass-split text-warning"></i> 处理?/div>
-        <div v-for="(batch, index) in bPendingBatches" :key="index"
-             class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
+        <div class="fw-bold mb-2"><i class="bi bi-hourglass-split text-warning"></i> 处理中</div>
+        <div v-for="(batch, index) in bPendingBatches" :key="index" class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
           <div>
             <div class="small fw-bold">{{ batch.filename }}</div>
-            <div class="small text-muted">{{ batch.count }}?/ ¥{{ batch.amount.toFixed(0) }} / {{ batch.downloaded_at }}</div>
+            <div class="small text-muted">{{ batch.count }} 张 / ¥{{ batch.amount.toFixed(0) }} / {{ batch.downloaded_at }}</div>
           </div>
           <button class="btn btn-success btn-sm" @click="confirmBatch(batch, index)">
-            <i class="bi bi-check-circle"></i> 已完?/button>
+            <i class="bi bi-check-circle"></i> 已完成
+          </button>
         </div>
       </div>
     </div>
@@ -242,17 +241,16 @@
   {% endif %}
 
   {% raw %}
-  <!-- Quick links -->
   <div class="row g-3 client-quick-links">
-    <div class="col-md-6">
+    <div class="col-md-4">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-trophy text-warning"></i> 记录</span>
+          <span><i class="bi bi-trophy text-warning"></i> 中奖记录</span>
           <button class="btn btn-sm btn-outline-warning" @click="openWinning">查看</button>
         </div>
       </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-md-4">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
           <span><i class="bi bi-file-earmark-arrow-down text-info"></i> 今日处理清单</span>
@@ -260,62 +258,59 @@
         </div>
       </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-md-4">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
-          <span><i class="bi bi-key text-secondary"></i> 俔密�?/span>
-          <button class="btn btn-sm btn-outline-secondary" @click="openChangePassword">�?/button>
+          <span><i class="bi bi-key text-secondary"></i> 修改密码</span>
+          <button class="btn btn-sm btn-outline-secondary" @click="openChangePassword">修改</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 俔密码弹�?-->
-  <div v-if="pwdModalVisible" class="modal-backdrop-custom" @click.self="pwdModalVisible=false">
+  <div v-if="pwdModalVisible" class="modal-backdrop-custom" @click.self="pwdModalVisible = false">
     <div class="card" style="width:100%;max-width:380px">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-key"></i> 俔密�?/span>
-        <button type="button" class="btn-close" @click="pwdModalVisible=false"></button>
+        <span><i class="bi bi-key"></i> 修改密码</span>
+        <button type="button" class="btn-close" @click="pwdModalVisible = false"></button>
       </div>
       <div class="card-body">
         <div v-if="pwdError" class="alert alert-danger py-2 small">{{ pwdError }}</div>
         <div v-if="pwdSuccess" class="alert alert-success py-2 small">{{ pwdSuccess }}</div>
         <div class="mb-3">
           <label class="form-label small fw-bold">当前密码</label>
-          <input type="password" class="form-control" v-model="pwdOld" placeholder="请输入当前密? @keyup.enter="submitChangePassword">
+          <input type="password" class="form-control" v-model="pwdOld" placeholder="请输入当前密码" @keyup.enter="submitChangePassword">
         </div>
         <div class="mb-3">
-          <label class="form-label small fw-bold">新密?/label>
-          <input type="password" class="form-control" v-model="pwdNew" placeholder="至少6? @keyup.enter="submitChangePassword">
+          <label class="form-label small fw-bold">新密码</label>
+          <input type="password" class="form-control" v-model="pwdNew" placeholder="至少 6 位" @keyup.enter="submitChangePassword">
         </div>
         <div class="mb-3">
-          <label class="form-label small fw-bold">新密?/label>
-          <input type="password" class="form-control" v-model="pwdConfirm" placeholder="再输入新�? @keyup.enter="submitChangePassword">
+          <label class="form-label small fw-bold">确认新密码</label>
+          <input type="password" class="form-control" v-model="pwdConfirm" placeholder="再次输入新密码" @keyup.enter="submitChangePassword">
         </div>
         <div class="d-grid">
           <button class="btn btn-primary" @click="submitChangePassword" :disabled="pwdLoading">
             <span v-if="pwdLoading" class="spinner-border spinner-border-sm me-1"></span>
-            {{ pwdLoading ? '提交?..' : '�? }}
+            {{ pwdLoading ? '提交中...' : '提交' }}
           </button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 记录全屏面板 -->
   <div v-if="winningVisible" class="winning-panel">
     <div class="winning-panel-header">
-      <span><i class="bi bi-trophy text-warning"></i> 我的记录</span>
+      <span><i class="bi bi-trophy text-warning"></i> 我的中奖记录</span>
       <div class="d-flex align-items-center gap-2">
         <div class="btn-group btn-group-sm">
-          <button class="btn" :class="winningGroupBy==='date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日?/button>
-          <button class="btn" :class="winningGroupBy==='type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按类?/button>
+          <button class="btn" :class="winningGroupBy === 'date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日期</button>
+          <button class="btn" :class="winningGroupBy === 'type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按类型</button>
         </div>
-        <button class="btn btn-sm btn-outline-secondary" @click="winningVisible=false">关闭</button>
+        <button class="btn btn-sm btn-outline-secondary" @click="winningVisible = false">关闭</button>
       </div>
     </div>
 
-    <!-- 筛条?-->
     <div class="winning-filter-bar">
       <div class="row g-2 align-items-end">
         <div class="col-auto">
@@ -326,7 +321,7 @@
           </select>
         </div>
         <div class="col-auto">
-          <label class="form-label small mb-1">�?/label>
+          <label class="form-label small mb-1">类型</label>
           <select class="form-select form-select-sm" v-model="winningFilterType" style="min-width:120px">
             <option value="">全部</option>
             <option v-for="type in winningFilterOptions.lottery_types" :key="type" :value="type">{{ type }}</option>
@@ -334,8 +329,9 @@
         </div>
         <div class="col-auto">
           <button class="btn btn-sm btn-primary" @click="applyWinningFilter">
-            <i class="bi bi-funnel"></i> �?/button>
-          <button class="btn btn-sm btn-outline-secondary ms-1" @click="resetWinningFilter" v-if="winningFilterDate || winningFilterType">
+            <i class="bi bi-funnel"></i> 筛选
+          </button>
+          <button v-if="winningFilterDate || winningFilterType" class="btn btn-sm btn-outline-secondary ms-1" @click="resetWinningFilter">
             <i class="bi bi-x-circle"></i> 重置
           </button>
         </div>
@@ -343,31 +339,32 @@
     </div>
 
     <div class="winning-panel-body">
-      <div v-if="winningLoading" class="text-center py-5">加载?..</div>
+      <div v-if="winningLoading" class="text-center py-5">加载中...</div>
       <div v-else-if="Object.keys(winningGrouped).length === 0" class="text-center py-5 text-muted">暂无记录</div>
       <div v-else>
-        <div v-for="(items, date) in winningGrouped" :key="date" class="mb-4">
-          <div class="winning-date-header">{{ date }}</div>
+        <div v-for="(items, groupKey) in winningGrouped" :key="groupKey" class="mb-4">
+          <div class="winning-date-header">{{ groupKey }}</div>
           <div v-for="r in items" :key="r.ticket_id" class="winning-card">
             <div class="winning-card-top">
               <div class="winning-badges">
                 <span class="badge bg-secondary">#{{ r.ticket_id }}</span>
                 <span class="badge bg-primary">{{ r.lottery_type }}</span>
                 <span class="badge bg-dark">编号 {{ r.detail_period }}</span>
-                <span v-if="r.assigned_device_name" class="badge bg-info text-dark">�? {{ r.assigned_device_name }}</span>
-                <span v-else-if="r.assigned_device_id" class="badge bg-info text-dark">设ID: {{ r.assigned_device_id.substring(0,8) }}</span>
+                <span v-if="r.is_predicted_display" class="badge bg-warning text-dark">预测</span>
+                <span v-if="r.assigned_device_id" class="badge bg-info text-dark">设备ID: {{ r.assigned_device_id.substring(0, 8) }}</span>
               </div>
               <div class="winning-amount">
-                <span v-if="r.winning_tax > 0">税后 ¥{{ r.winning_amount }}（税 ¥{{ r.winning_tax }}?/span>
-                <span v-else>¥{{ r.winning_amount }}</span>
+                <span v-if="r.display_winning_tax > 0">税后 ¥{{ r.display_winning_amount }}（税 ¥{{ r.display_winning_tax }}）</span>
+                <span v-else>¥{{ r.display_winning_amount }}</span>
               </div>
             </div>
+            <div v-if="r.is_predicted_display" class="small text-warning mb-1">预测奖金非最终结果，请以最终结果为准</div>
             <div class="winning-raw">{{ r.raw_content }}</div>
             <div class="winning-card-bottom">
-              <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0,16) : '-' }}</span>
+              <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0, 16) : '-' }}</span>
               <div class="winning-img-actions">
                 <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewWinningImage(r.winning_image_url)">查看图片</button>
-                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{'opacity-50': uploadingWinningId === r.ticket_id}">
+                <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{ 'opacity-50': uploadingWinningId === r.ticket_id }">
                   <span v-if="uploadingWinningId === r.ticket_id" class="spinner-border spinner-border-sm"></span>
                   <span v-else>{{ r.winning_image_url ? '换图' : '上传图片' }}</span>
                   <input type="file" accept="image/*" class="d-none" :disabled="uploadingWinningId === r.ticket_id" @change="uploadWinningImage($event, r)">
@@ -380,10 +377,9 @@
     </div>
   </div>
 
-  <!-- 图片预弹�?-->
-  <div v-if="winningPreviewUrl" class="modal-backdrop-custom" @click.self="winningPreviewUrl=null" style="z-index:2000">
+  <div v-if="winningPreviewUrl" class="modal-backdrop-custom" @click.self="winningPreviewUrl = null" style="z-index:2000">
     <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
-      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl=null">关闭</button>
+      <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl = null">关闭</button>
       <img :src="winningPreviewUrl" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
     </div>
   </div>
@@ -396,16 +392,14 @@
 <script src="{{ url_for('static', filename='js/mode_b.js') }}"></script>
 <script>
 const currentDeviceId = () => getOrCreateDeviceId();
-const currentDeviceName = () => getDeviceName() || currentDeviceId() || '';
 registerDeviceAndCheckName();
 
 (function updateDeviceNameBadge() {
   const deviceId = currentDeviceId();
-  const name = currentDeviceName();
-  const display = name ? name : (deviceId ? deviceId.substring(0, 8) + '...' : '');
+  const display = deviceId ? deviceId.substring(0, 8) + '...' : '';
   ['device-name-badge', 'device-name-badge-b'].forEach(id => {
     const el = document.getElementById(id);
-    if (el && display) el.textContent = '�?' + display;
+    if (el && display) el.textContent = '设备 ' + display;
   });
 })();
 
@@ -439,7 +433,7 @@ createApp({
       countdownTimer: null,
       deadlineStr: '',
       showStopConfirm: false,
-      // 下一张冷却：7秒内不能再调�?API 获取新票
+      // 下一张冷却：7秒内不能再次调用 API 获取新票
       nextCooldownUntil: 0,
       nextCooldownSec: 0,
       cooldownTimer: null,
@@ -451,17 +445,18 @@ createApp({
       downloading: false,
       bDownloadCooldownUntil: 0,
       isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %},
-      // 出票丈衼[{filename, ticket_ids, count, amount, downloaded_at}]
+      // 待处理批次：[{filename, ticket_ids, count, amount, downloaded_at}]
+      // 鍑虹エ涓堣〖[{filename, ticket_ids, count, amount, downloaded_at}]
       bPendingBatches: [],
-      // 记录弹窗
+      // 璁板綍寮圭獥
       winningVisible: false, winningLoading: false, winningGrouped: {},
       winningPreviewUrl: null, uploadingWinningId: null,
       winningGroupBy: 'date', // 'date' | 'type'
-      // 记录�?
+      // 中奖筛选
       winningFilterDate: '',
       winningFilterType: '',
       winningFilterOptions: { dates: [], lottery_types: [] },
-      // 俔密码弹�?
+      // 修改密码弹窗
       pwdModalVisible: false,
       pwdOld: '', pwdNew: '', pwdConfirm: '',
       pwdError: '', pwdSuccess: '', pwdLoading: false,
@@ -541,7 +536,7 @@ createApp({
     window.addEventListener('pool_enabled', this._onPoolEnabled);
     window.addEventListener('file_revoked', this._onFileRevoked);
 
-    // 心跳：每30秒更新会话活跃时?
+    // ?30??????????????
     setInterval(() => {
       fetch('/auth/heartbeat', {
         method: 'POST',
@@ -550,7 +545,6 @@ createApp({
       }).catch(() => {});
     }, 30000);
   },
-  methods: {
     resetModeAState() {
       this.currentTicket = null;
       this.modeAActive = false;
@@ -599,7 +593,7 @@ createApp({
         this.announcement = data.announcement || '';
         if (data.mode_b_options && data.mode_b_options.length > 0) {
           this.bOptions = data.mode_b_options;
-          // 如果当前选择的张数不在新选项里，重置�?
+          // 如果当前选择的张数不在新选项里，重置为第一个可用值
           if (!this.bOptions.includes(this.bCount)) {
             this.bCount = this.bOptions[0];
           }
@@ -614,18 +608,18 @@ createApp({
     // Mode A methods
     async toggleModeA() {
       if (this.modeAActive) {
-        // 始接?- 添加 body class 防诧
+        // 接单中时继续下一张，保持 body class
         document.body.classList.add('mode-a-active');
         await this.nextTicket();
       } else {
-        // 停接�?- 移除body class
+        // 停止接单时移除 body class
         document.body.classList.remove('mode-a-active');
         this.confirmStop();
       }
     },
     async nextTicket() {
-      // 如果在看历史祼“下张只昜朜数组前进，不?API（不受冷却限制）
-      if (this.historyOffset > 0) {
+      // 濡傛灉鍦ㄧ湅鍘嗗彶绁尖€滀笅寮犲彧鏄滄湝鏁扮粍鍓嶈繘锛屼笉?API锛堜笉鍙楀喎鍗撮檺鍒讹級
+      // 浏览历史记录时不请求 API，只有停留在最新一张时才请求下一张
         this.historyOffset -= 1;
         this.currentTicket = this.ticketHistory[this.historyOffset];
         this.startCountdown(this.currentTicket.deadline_time);
@@ -649,7 +643,6 @@ createApp({
           headers: {'Content-Type':'application/json'},
           body: JSON.stringify({
             device_id: currentDeviceId(),
-            device_name: currentDeviceName(),
             complete_current_ticket_id: this.currentTicket ? this.currentTicket.id : null,
             complete_current_ticket_action: completeCurrentTicketAction,
           }),
@@ -677,7 +670,7 @@ createApp({
           } else {
             this.currentTicket = null;
           }
-          showToast(data.error || '暂无可用票', 'warning');
+          showToast(data.error || '暂无可用票据', 'warning');
         }
       } catch (e) {
         showToast('获取下一张失败，请稍后重试', 'danger');
@@ -702,7 +695,7 @@ createApp({
       }, 200);
     },
     previousTicket() {
-      // 在本地历史数组中后，完全�?API
+      // 上一张只在本地历史记录中切换，不调用 API
       if (this.historyOffset >= this.ticketHistory.length - 1) return;
       this.historyOffset += 1;
       this.currentTicket = this.ticketHistory[this.historyOffset];
@@ -732,21 +725,21 @@ createApp({
       return !!deadlineStr && new Date(deadlineStr).getTime() <= Date.now();
     },
     resolveModeAOverdueAction() {
-      const completed = window.confirm('当前已过时间，昐完成？\n点击“确定标记为已完成，点击“取消标记为已过�?);
+      const completed = window.confirm('当前已过截止时间。\n点击“确定”标记为已完成，点击“取消”标记为已过期。');
       return completed ? 'completed' : 'expired';
     },
     resolveModeBCompletedCount(batch) {
-      const allCompleted = window.confirm('当前已过时间，昐全部完成？\n点击“确定标记整批已完成；点击取消可输入已完成张数，其余将标记为已过�?);
+      const allCompleted = window.confirm('当前已过截止时间。\n点击“确定”标记整批已完成；点击“取消”后可输入已完成张数，其余将标记为已过期。');
       if (allCompleted) {
         return batch.count;
       }
-      const input = window.prompt('请输入已完成的张数（例输�?10，则?10 张完成，其余标为已过期；果一张都没完成输�?0?, '0');
+      const input = window.prompt('请输入已完成的张数，例如输入 10 则前 10 张完成，其余标记为已过期；如果一张都没完成请输入 0。', '0');
       if (input === null) {
         return null;
       }
       const value = Number(input);
       if (!Number.isInteger(value) || value < 0 || value > batch.count) {
-        showToast('请输?0 ?' + batch.count + ' 之间的整?, 'warning');
+        showToast('请输入 0 到 ' + batch.count + ' 之间的整数', 'warning');
         return false;
       }
       return value;
@@ -843,17 +836,17 @@ createApp({
         const res = await fetch(`/api/mode-b/preview?count=${this.bCount}`);
         const data = await res.json();
         if (!res.ok || data.success === false) {
-          throw new Error(data.error || '预览失败');
+          throw new Error(data.error || '获取预览失败');
         }
         this.bPreview = data;
       } catch (e) {
         this.bPreview = null;
-        showToast(e.message || '预览失败，请稍后重试', 'danger');
+        showToast(e.message || '获取预览失败，请稍后重试', 'danger');
       }
     },
     async downloadBatch() {
       if (this.bDownloadCooldownUntil > Date.now()) {
-        showToast('请等�?1 秒后再下�?, 'warning');
+        showToast('请等待 1 秒后再下载', 'warning');
         return;
       }
       this.downloading = true;
@@ -872,7 +865,6 @@ createApp({
           body: JSON.stringify({
             count: actualCount,
             device_id: currentDeviceId(),
-            device_name: currentDeviceName(),
             client_type: 'web',
           }),
         });
@@ -881,7 +873,7 @@ createApp({
           throw new Error(data.error || '下载失败');
         }
         if (!data.files || data.files.length === 0) {
-          showToast('暂无可下载文�?, 'warning');
+          showToast('暂无可下载文件', 'warning');
           return;
         }
         for (const file of data.files) {
@@ -899,7 +891,7 @@ createApp({
         if (data.adjustment_message) {
           showToast(data.adjustment_message, 'info');
         }
-        showToast('已下�?' + data.files.length + ' 个文件，�?' + data.actual_count + ' 张票', 'success');
+        showToast('已下载 ' + data.files.length + ' 个文件，共 ' + data.actual_count + ' 张票', 'success');
         this.loadPoolStatus();
         this.bPreview = null;
       } catch (e) {
@@ -924,18 +916,18 @@ createApp({
         });
         const data = await res.json();
         if (!res.ok || data.success === false) {
-          throw new Error(data.error || '确认失败');
+          throw new Error(data.error || '确认完成失败');
         }
         await this.loadProcessingBatches();
         this.loadStats();
         this.loadPoolStatus();
         const expiredCount = data.expired_count || 0;
         const message = expiredCount > 0
-          ? ('已确认完?' + data.completed_count + ' 张，标过�?' + expiredCount + ' ?)
-          : ('已确认完?' + data.completed_count + ' 张票');
+          ? ('已确认完成 ' + data.completed_count + ' 张，标记过期 ' + expiredCount + ' 张')
+          : ('已确认完成 ' + data.completed_count + ' 张票');
         showToast(message, 'success');
       } catch (e) {
-        showToast(e.message || '确认失败，请稍后重试', 'danger');
+        showToast(e.message || '确认完成失败，请稍后重试', 'danger');
       }
     },
     async openWinning() {
@@ -1008,7 +1000,7 @@ createApp({
         });
       } else {
         this._winningAll.forEach(r => {
-          const key = r.lottery_type || '期类�?;
+          const key = r.lottery_type || '未知类型';
           (grouped[key] = grouped[key] || []).push(r);
         });
       }
@@ -1032,7 +1024,7 @@ createApp({
           a.click();
           URL.revokeObjectURL(url);
           if (pendingCount > 0) {
-            showToast('还有 ' + pendingCount + ' 张票月时间，截止后即可导�?, 'info');
+            showToast('还有 ' + pendingCount + ' 张票未到截止时间，截止后即可导出', 'info');
           }
         } else {
           const data = await res.json();
@@ -1054,15 +1046,15 @@ createApp({
     async submitChangePassword() {
       this.pwdError = ''; this.pwdSuccess = '';
       if (!this.pwdOld || !this.pwdNew || !this.pwdConfirm) {
-        this.pwdError = '请填写完?;
+        this.pwdError = '请填写完整';
         return;
       }
       if (this.pwdNew.length < 6) {
-        this.pwdError = '新密码至?6 ?;
+        this.pwdError = '新密码至少 6 位';
         return;
       }
       if (this.pwdNew !== this.pwdConfirm) {
-        this.pwdError = '两输入的新密码不一?;
+        this.pwdError = '两次输入的新密码不一致';
         return;
       }
       this.pwdLoading = true;
@@ -1076,7 +1068,7 @@ createApp({
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '密码修改失败');
         }
-        this.pwdSuccess = data.message || '密码俔成�?;
+        this.pwdSuccess = data.message || '密码修改成功';
         this.pwdOld = ''; this.pwdNew = ''; this.pwdConfirm = '';
         this.pwdSuccessTimer = setTimeout(() => {
           this.pwdModalVisible = false;
@@ -1105,12 +1097,12 @@ createApp({
         const data = await res.json();
         if (res.ok && data.success) {
           Object.assign(record, data.record || {}, { winning_image_url: data.image_url });
-          showToast('图片上传成功', 'success');
+          showToast('鍥剧墖涓婁紶鎴愬姛', 'success');
         } else {
-          showToast(data.error || '上传失败', 'danger');
+          showToast(data.error || '涓婁紶澶辫触', 'danger');
         }
       } catch(e) {
-        showToast('上传失败', 'danger');
+        showToast('涓婁紶澶辫触', 'danger');
       } finally {
         this.uploadingWinningId = null;
         event.target.value = '';
@@ -1150,7 +1142,7 @@ createApp({
   position: fixed; inset: 0; background: rgba(0,0,0,.5);
   z-index: 1050; display: flex; align-items: center; justify-content: center;
 }
-/* 全屏记录面板 */
+/* 鍏ㄥ睆璁板綍闈㈡澘 */
 .winning-panel {
   position: fixed; inset: 0; z-index: 1040;
   background: #f8f9fa; display: flex; flex-direction: column;
@@ -1193,7 +1185,7 @@ createApp({
 }
 .winning-img-actions { display: flex; align-items: center; gap: .25rem; }
 .btn-xs { padding: .15rem .4rem; font-size: .75rem; }
-/* A模式下一张冷却时�?*/
+/* A 模式下一张冷却时间 */
 .mode-a-cooldown-sec {
   font-size: 1.1rem;
   font-weight: 700;
