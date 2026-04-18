@@ -16,7 +16,7 @@
 
 - 执行完整回归：`python -m pytest -q` -> `339 passed, 1 skipped, 42 warnings`（约 `19m14s`）
 - 当前未发现阻断上线的 P0/P1 新缺陷；42 条告警均为测试代码中的 SQLAlchemy `LegacyAPIWarning`
-- 文档口径已统一到“生产部署 / 并发验收 / 风险清单 / 当日验收报告”四个权威入口
+- 文档口径已统一到“生产部署 / 并发验收 / 变更汇总”三个执行入口
 - 并发验收文档已改为 Linux `bash` 主路径示例，避免与 PowerShell 指令混用导致误执行
 
 ## 并发安全说明
@@ -135,10 +135,9 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 ## 文档口径与生效日期
 
 - 当前统一口径生效日期：`2026-04-18`
-- 生产部署权威文档：`docs/cloud-deploy-ubuntu-2026-04-09.md`
-- 多 worker 并发验收文档：`docs/multi-worker-strict-acceptance-2026-04-09.md`
-- 风险与修复追踪：`docs/真实bug与风险清单-2026-04-13.md`
-- 上线前最终结论：`docs/上线前最终验收报告-2026-04-18.md`
+- 生产部署执行文档：`docs/cloud-deploy-ubuntu-2026-04-09.md`
+- 多 worker 并发验收执行文档：`docs/multi-worker-strict-acceptance-2026-04-09.md`
+- 变更汇总：`docs/project-change-summary.md`
 
 ## 关键文件
 

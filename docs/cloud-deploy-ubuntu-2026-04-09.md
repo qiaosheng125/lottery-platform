@@ -59,11 +59,7 @@ sudo journalctl -u file-hub -n 200 --no-pager
 ```bash
 cd /path/to/file-hub
 source .venv/bin/activate
-export RUN_LIVE_CONCURRENCY_TESTS=1
-export LIVE_TEST_SERVER_MODE=gunicorn
-export LIVE_TEST_GUNICORN_WORKERS=2
-export LIVE_TEST_STRICT_DEVICE_GUARD=1
-python -m pytest -q tests/test_concurrent_20devices.py -s
+./scripts/run_linux_strict_acceptance.sh
 ```
 
 ### 2) 阶梯容量压测（观察容量拐点）
@@ -85,3 +81,4 @@ source .venv/bin/activate
 
 - `init_db.py` 现在会基于当前 `DATABASE_URL` 初始化数据库，并在初始化阶段自动禁用 scheduler，所以全新的 PostgreSQL 空库也能正常启动。
 - `.env.example` 现在已经和部署脚本对齐，不再使用旧的 `user:password@localhost` 占位配置。
+- 当前发布流程按“可清空重建数据库”执行，`init_db.py` 会直接建表；不依赖手工迁移脚本。

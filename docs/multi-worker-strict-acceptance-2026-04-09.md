@@ -65,11 +65,12 @@ export RUN_LIVE_CONCURRENCY_TESTS=1
 export LIVE_TEST_SERVER_MODE=gunicorn
 export LIVE_TEST_GUNICORN_WORKERS=2
 export LIVE_TEST_STRICT_DEVICE_GUARD=1
-export LIVE_TEST_MODE_A_ACCOUNTS=4
-export LIVE_TEST_MODE_B_ACCOUNTS=4
-export LIVE_TEST_DEVICES_PER_ACCOUNT=10
-export LIVE_TEST_MODE_B_BATCH_COUNT=20
-python -m pytest tests/test_concurrent_20devices.py -v -s
+export LIVE_TEST_MODE_A_ACCOUNTS=20
+export LIVE_TEST_MODE_B_ACCOUNTS=10
+export LIVE_TEST_MODE_A_DEVICES_PER_ACCOUNT=2
+export LIVE_TEST_MODE_B_DEVICES_PER_ACCOUNT=6
+export LIVE_TEST_MODE_B_BATCH_COUNT=1
+./scripts/run_linux_strict_acceptance.sh
 ```
 
 如果要测更重的 B 模式批次：
@@ -77,9 +78,10 @@ python -m pytest tests/test_concurrent_20devices.py -v -s
 ```bash
 export LIVE_TEST_MODE_A_ACCOUNTS=3
 export LIVE_TEST_MODE_B_ACCOUNTS=3
-export LIVE_TEST_DEVICES_PER_ACCOUNT=10
+export LIVE_TEST_MODE_A_DEVICES_PER_ACCOUNT=10
+export LIVE_TEST_MODE_B_DEVICES_PER_ACCOUNT=10
 export LIVE_TEST_MODE_B_BATCH_COUNT=30
-python -m pytest tests/test_concurrent_20devices.py -v -s
+./scripts/run_linux_strict_acceptance.sh
 ```
 
 如需在 Windows 本地临时设置环境变量，请使用 PowerShell 语法；但这条并发验收路径的有效结果仍以 Linux + gunicorn 为准。
