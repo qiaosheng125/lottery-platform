@@ -43,7 +43,7 @@ GUNICORN_KEEPALIVE=5
 
 1. 同一张票被领取两次。
 2. 一张已领取的票在完整 A/B 流程结束后不是 `completed`。
-3. `assigned_user_id`、`assigned_username`、`assigned_device_id`、`assigned_device_id` 任一字段和实际领票设备不一致。
+3. `assigned_user_id`、`assigned_username`、`assigned_device_id` 任一字段和实际领票设备不一致。
 4. 任意测试账号在压测结束后仍残留 `assigned` 票。
 5. 任意用户穿透 `daily_ticket_limit`。
 6. 任意用户穿透 `max_processing_b_mode`。
@@ -58,29 +58,31 @@ GUNICORN_KEEPALIVE=5
 - Windows 不能用于这条路径，因为 `gunicorn` 依赖 `fcntl`。
 - 如果只在 Windows 上跑测试，不能证明多 worker 正确性。
 
-在接近生产的 Linux 主机上，可以这样跑一轮严格验收：
+在接近生产的 Linux 主机上，可以这样跑一轮严格验收（`bash`）：
 
-```powershell
-$env:RUN_LIVE_CONCURRENCY_TESTS=1
-$env:LIVE_TEST_SERVER_MODE='gunicorn'
-$env:LIVE_TEST_GUNICORN_WORKERS='2'
-$env:LIVE_TEST_STRICT_DEVICE_GUARD='1'
-$env:LIVE_TEST_MODE_A_ACCOUNTS='4'
-$env:LIVE_TEST_MODE_B_ACCOUNTS='4'
-$env:LIVE_TEST_DEVICES_PER_ACCOUNT='10'
-$env:LIVE_TEST_MODE_B_BATCH_COUNT='20'
+```bash
+export RUN_LIVE_CONCURRENCY_TESTS=1
+export LIVE_TEST_SERVER_MODE=gunicorn
+export LIVE_TEST_GUNICORN_WORKERS=2
+export LIVE_TEST_STRICT_DEVICE_GUARD=1
+export LIVE_TEST_MODE_A_ACCOUNTS=4
+export LIVE_TEST_MODE_B_ACCOUNTS=4
+export LIVE_TEST_DEVICES_PER_ACCOUNT=10
+export LIVE_TEST_MODE_B_BATCH_COUNT=20
 python -m pytest tests/test_concurrent_20devices.py -v -s
 ```
 
 如果要测更重的 B 模式批次：
 
-```powershell
-$env:LIVE_TEST_MODE_A_ACCOUNTS='3'
-$env:LIVE_TEST_MODE_B_ACCOUNTS='3'
-$env:LIVE_TEST_DEVICES_PER_ACCOUNT='10'
-$env:LIVE_TEST_MODE_B_BATCH_COUNT='30'
+```bash
+export LIVE_TEST_MODE_A_ACCOUNTS=3
+export LIVE_TEST_MODE_B_ACCOUNTS=3
+export LIVE_TEST_DEVICES_PER_ACCOUNT=10
+export LIVE_TEST_MODE_B_BATCH_COUNT=30
 python -m pytest tests/test_concurrent_20devices.py -v -s
 ```
+
+如需在 Windows 本地临时设置环境变量，请使用 PowerShell 语法；但这条并发验收路径的有效结果仍以 Linux + gunicorn 为准。
 
 ## 这套测试现在会校验什么
 

@@ -12,16 +12,12 @@
   - 不能残留 `assigned`
   - 文件计数和金额不能漂移
 
-## 2026-04-09 最新更新
+## 2026-04-18 最新更新（上线前统一口径）
 
-- 修复 PostgreSQL 空库首次启动时，scheduler 先读 `system_settings` 导致初始化失败的问题
-- 新增 Ubuntu 一键部署脚本：`scripts/deploy_production_ubuntu.sh`
-- 新增 Linux 严格压测脚本：`scripts/run_linux_strict_acceptance.sh`
-- 新增 Linux 阶梯压测脚本：`scripts/run_linux_capacity_sweep.sh`
-- Linux 实测结论：
-  - `40` 设备档通过，未发现重复分票、串设备、残留 `assigned`
-  - `60` 设备档开始首先暴露登录/会话超时
-  - 当前最需要注意的是瞬时登录高峰，不是核心分票逻辑错误
+- 执行完整回归：`python -m pytest -q` -> `339 passed, 1 skipped, 42 warnings`（约 `19m14s`）
+- 当前未发现阻断上线的 P0/P1 新缺陷；42 条告警均为测试代码中的 SQLAlchemy `LegacyAPIWarning`
+- 文档口径已统一到“生产部署 / 并发验收 / 风险清单 / 当日验收报告”四个权威入口
+- 并发验收文档已改为 Linux `bash` 主路径示例，避免与 PowerShell 指令混用导致误执行
 
 ## 并发安全说明
 
@@ -119,12 +115,30 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 ./scripts/run_linux_capacity_sweep.sh
 ```
 
+部署后补跑高压测试（必做）请按部署文档执行：`docs/cloud-deploy-ubuntu-2026-04-09.md` 的“部署后补跑高压测试（必做）”章节。
+
 阶梯压测默认执行：
 
 - `40` 设备
 - `60` 设备
 - `80` 设备
 - `100` 设备
+
+## 压测参数基线（统一口径）
+
+| 场景 | 必备条件 | 默认参数 |
+|---|---|---|
+| 严格并发验收 | Linux + `gunicorn` + PostgreSQL + Redis | `RUN_LIVE_CONCURRENCY_TESTS=1` `LIVE_TEST_SERVER_MODE=gunicorn` `LIVE_TEST_GUNICORN_WORKERS=2` |
+| 阶梯容量压测 | Linux + PostgreSQL + Redis | `40/60/80/100` 设备分档 |
+| 本地功能回归 | 任意开发机 | `python -m pytest -q` |
+
+## 文档口径与生效日期
+
+- 当前统一口径生效日期：`2026-04-18`
+- 生产部署权威文档：`docs/cloud-deploy-ubuntu-2026-04-09.md`
+- 多 worker 并发验收文档：`docs/multi-worker-strict-acceptance-2026-04-09.md`
+- 风险与修复追踪：`docs/真实bug与风险清单-2026-04-13.md`
+- 上线前最终结论：`docs/上线前最终验收报告-2026-04-18.md`
 
 ## 关键文件
 
@@ -139,8 +153,8 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 - `scripts/run_linux_strict_acceptance.sh`：严格压测
 - `scripts/run_linux_capacity_sweep.sh`：阶梯压测
 
-## 上线前唯一最该注意的风险点
+## 上线前首要风险点（非唯一）
 
-瞬时登录高峰。
+瞬时登录高峰仍是首要风险。
 
-当前 Linux 实测显示，系统先暴露的是登录/会话超时，而不是核心分票正确性错误。所以真实业务里应尽量避免大量设备在同一时刻集中重登。
+当前 Linux 实测显示，系统先暴露的是登录/会话超时，而不是核心分票正确性错误。真实业务里应尽量避免大量设备在同一时刻集中重登；同时继续观察导出链路随数据增长的耗时变化，并按计划执行周期性并发活体验收。
