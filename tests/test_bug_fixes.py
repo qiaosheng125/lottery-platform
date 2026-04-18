@@ -7296,7 +7296,7 @@ def test_upload_match_result_falls_back_to_sync_calc_when_scheduler_missing(app,
         "/admin/match-results/upload",
         data={
             "detail_period": "26080",
-            "file": (io.BytesIO(payload), "result.txt"),
+            "file": (io.BytesIO(payload), "26080期彩果-最终.txt"),
         },
         content_type="multipart/form-data",
     )
@@ -7333,6 +7333,58 @@ def test_upload_match_result_rejects_empty_filename(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "文件名不能为空" in data["error"]
+
+
+def test_upload_match_result_rejects_filename_period_mismatch(app, client):
+    with app.app_context():
+        admin = User(username="admin_result_bad_period_name", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_bad_period_name", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\t1.85\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "26080",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "26081期彩果-最终.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "文件名需包含期号 26080" in data["error"]
+
+
+def test_upload_match_result_rejects_filename_kind_mismatch(app, client):
+    with app.app_context():
+        admin = User(username="admin_result_bad_kind_name", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_bad_kind_name", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\t1.85\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "26080",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "26080期彩果-预测.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "上传类型为“最终”时，文件名需包含“最终”" in data["error"]
 
 
 def test_parse_result_file_updates_latest_duplicate_match_result(app, tmp_path):

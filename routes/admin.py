@@ -38,6 +38,11 @@ SCHEDULER_EXPECTED_JOB_IDS = (
     'purge_old_auxiliary_records',
 )
 
+RESULT_UPLOAD_KIND_HINTS = {
+    'predicted': ('预测', 'predicted'),
+    'final': ('最终', 'final'),
+}
+
 
 def _winning_terminal_at(ticket: LotteryTicket):
     return ticket.completed_at or ticket.deadline_time or ticket.assigned_at or ticket.admin_upload_time
@@ -102,6 +107,31 @@ def _parse_bool_flag(value):
             return False
     if isinstance(value, int) and value in (0, 1):
         return bool(value)
+    return None
+
+
+def _safe_uploaded_filename(filename: str) -> str:
+    normalized = (filename or '').strip().replace('\\', '/')
+    return normalized.rsplit('/', 1)[-1]
+
+
+def _validate_result_upload_filename(filename: str, detail_period: str, upload_kind: str):
+    basename = _safe_uploaded_filename(filename)
+    compact = re.sub(r'\s+', '', basename).lower()
+
+    if not re.search(rf'(?<!\d){re.escape(detail_period)}(?!\d)', compact):
+        return f'文件名需包含期号 {detail_period}（示例：{detail_period}期彩果-预测.txt / {detail_period}期彩果-最终.txt）'
+
+    has_predicted = any(token in compact for token in RESULT_UPLOAD_KIND_HINTS['predicted'])
+    has_final = any(token in compact for token in RESULT_UPLOAD_KIND_HINTS['final'])
+    if has_predicted and has_final:
+        return '文件名同时包含“预测”和“最终”，请确认后重新上传'
+
+    expected_label = '预测' if upload_kind == 'predicted' else '最终'
+    expected_tokens = RESULT_UPLOAD_KIND_HINTS[upload_kind]
+    if not any(token in compact for token in expected_tokens):
+        return f'上传类型为“{expected_label}”时，文件名需包含“{expected_label}”'
+
     return None
 
 
@@ -1666,6 +1696,10 @@ def upload_match_result():
 
     if upload_kind not in {'predicted', 'final'}:
         return jsonify({'success': False, 'error': '上传类型无效'}), 400
+
+    filename_error = _validate_result_upload_filename(file.filename, detail_period, upload_kind)
+    if filename_error:
+        return jsonify({'success': False, 'error': filename_error}), 400
 
     upload_folder = current_app.config['UPLOAD_FOLDER']
     stored = f"result_{upload_kind}_{uuid.uuid4().hex[:8]}_{file.filename}"
