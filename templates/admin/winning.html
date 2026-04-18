@@ -237,14 +237,14 @@
 
   <!-- 4. 结果详情弹窗 -->
   <div v-if="detailVisible" class="modal-backdrop-custom" @click.self="detailVisible=false">
-    <div class="modal-box">
+    <div class="modal-box modal-box-wide">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <h6 class="mb-0"><i class="bi bi-file-text"></i> 结果详情 - 编号 {{ detailPeriod }}</h6>
         <button class="btn btn-sm btn-outline-secondary" @click="detailVisible=false">关闭</button>
       </div>
       <div v-if="detailLoading" class="text-center py-4">加载中...</div>
-      <div v-else class="table-responsive" style="max-height:60vh;overflow-y:auto">
-        <table class="table table-sm table-bordered table-hover">
+      <div v-else class="table-responsive detail-table-scroll">
+        <table class="table table-sm table-bordered table-hover detail-table">
           <thead class="table-dark sticky-top">
             <tr>
               <th>场次</th>
@@ -295,7 +295,38 @@
   width: 95vw; max-width: 1000px; max-height: 90vh; overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0,0,0,.2);
 }
+.modal-box-wide {
+  width: 98vw;
+  max-width: 1500px;
+  padding: 1rem 1.25rem;
+}
+.detail-table-scroll {
+  max-height: 70vh;
+  overflow: auto;
+}
+.detail-table {
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.82rem;
+}
+.detail-table th,
+.detail-table td {
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: middle;
+  padding: .35rem .4rem;
+}
 .btn-xs { padding: .15rem .4rem; font-size: .75rem; }
+@media (max-width: 992px) {
+  .modal-box-wide {
+    width: 95vw;
+    max-width: 95vw;
+    padding: 1rem;
+  }
+  .detail-table {
+    font-size: 0.78rem;
+  }
+}
 </style>
 <script>
 const { createApp } = Vue;
@@ -363,10 +394,16 @@ createApp({
       };
       return labels[status] || status;
     },
+    formatSpDisplay(value) {
+      if (value === null || value === undefined || value === '') return '-';
+      const num = Number(value);
+      if (!Number.isFinite(num)) return String(value);
+      return num.toFixed(2);
+    },
     formatPredictedFinalSp(play) {
       if (!play) return '-';
-      const predicted = play.predicted_sp === null || play.predicted_sp === undefined || play.predicted_sp === '' ? '-' : play.predicted_sp;
-      const finalSp = play.sp === null || play.sp === undefined || play.sp === '' ? '-' : play.sp;
+      const predicted = this.formatSpDisplay(play.predicted_sp);
+      const finalSp = this.formatSpDisplay(play.sp);
       return `${predicted} / ${finalSp}`;
     },
     async loadFilterOptions() {

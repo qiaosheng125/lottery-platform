@@ -2,6 +2,7 @@
 Winning calculation service for predicted/final result uploads.
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from flask import current_app
@@ -40,15 +41,37 @@ def _clear_ticket_amounts(ticket: LotteryTicket, clear_predicted: bool, clear_fi
         ticket.winning_tax = None
 
 
-def process_match_result(match_result_id: int, app=None):
+def _parse_expected_uploaded_at(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def process_match_result(match_result_id: int, expected_uploaded_at=None, app=None):
     from app import create_app
 
     if app is None:
         app = create_app()
 
     with app.app_context():
+        expected_uploaded_at_dt = _parse_expected_uploaded_at(expected_uploaded_at)
         match_result = db.session.get(MatchResult, match_result_id)
         if not match_result:
+            return
+        if expected_uploaded_at_dt and match_result.uploaded_at != expected_uploaded_at_dt:
+            current_app.logger.info(
+                "Skip stale winning calc start for result %s (expected=%s actual=%s)",
+                match_result_id,
+                expected_uploaded_at_dt,
+                match_result.uploaded_at,
+            )
             return
 
         match_result.calc_status = 'processing'
@@ -128,6 +151,20 @@ def process_match_result(match_result_id: int, app=None):
                         delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
                         db.session.delete(winning_record)
                     ticket.winning_image_url = None
+
+            if expected_uploaded_at_dt:
+                latest_uploaded_at = db.session.query(MatchResult.uploaded_at).filter(
+                    MatchResult.id == match_result_id
+                ).scalar()
+                if latest_uploaded_at != expected_uploaded_at_dt:
+                    db.session.rollback()
+                    current_app.logger.info(
+                        "Skip stale winning calc commit for result %s (expected=%s actual=%s)",
+                        match_result_id,
+                        expected_uploaded_at_dt,
+                        latest_uploaded_at,
+                    )
+                    return
 
             match_result.calc_status = 'done'
             match_result.calc_finished_at = beijing_now()

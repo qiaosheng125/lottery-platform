@@ -3,10 +3,14 @@ Parse result TXT files into MatchResult and preserve predicted/final SP independ
 """
 
 import copy
+import hashlib
 import re
+import threading
+from contextlib import contextmanager
 
 from extensions import db
 from models.result import MatchResult
+from sqlalchemy import text
 from utils.time_utils import beijing_now
 
 
@@ -27,6 +31,40 @@ UPLOAD_KIND_TO_SP_KEY = {
     'predicted': 'predicted_sp',
     'final': 'sp',
 }
+
+
+_period_locks_guard = threading.Lock()
+_period_locks = {}
+
+
+def _period_advisory_lock_key(detail_period: str) -> int:
+    digest = hashlib.blake2b(detail_period.encode('utf-8'), digest_size=8).digest()
+    key = int.from_bytes(digest, byteorder='big', signed=False)
+    if key >= (1 << 63):
+        key -= (1 << 64)
+    return key
+
+
+@contextmanager
+def _period_upload_lock(detail_period: str):
+    bind = db.session.get_bind()
+    dialect = getattr(bind, 'dialect', None) if bind else None
+    dialect_name = (getattr(dialect, 'name', '') or '').lower()
+    if dialect_name == 'postgresql':
+        db.session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {'lock_key': _period_advisory_lock_key(detail_period)},
+        )
+        yield
+        return
+
+    with _period_locks_guard:
+        lock = _period_locks.setdefault(detail_period, threading.Lock())
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _safe_get(cols, idx):
@@ -171,38 +209,45 @@ def parse_result_file(
     if not parsed_data:
         return {'success': False, 'error': '\u672a\u80fd\u89e3\u6790\u4efb\u4f55\u8d5b\u679c\u6570\u636e', 'count': 0}
 
-    existing = MatchResult.query.filter_by(detail_period=detail_period).order_by(
-        MatchResult.uploaded_at.desc(),
-        MatchResult.id.desc(),
-    ).first()
+    with _period_upload_lock(detail_period):
+        existing = MatchResult.query.filter_by(detail_period=detail_period).order_by(
+            MatchResult.uploaded_at.desc(),
+            MatchResult.id.desc(),
+        ).first()
 
-    base_data = _clear_upload_kind(existing.result_data if existing else {}, upload_kind)
-    merged_data = _merge_result_data(base_data, parsed_data, upload_kind)
+        base_data = _clear_upload_kind(existing.result_data if existing else {}, upload_kind)
+        merged_data = _merge_result_data(base_data, parsed_data, upload_kind)
 
-    if existing:
-        existing.result_data = merged_data
-        existing.calc_status = 'pending'
-        existing.calc_started_at = None
-        existing.calc_finished_at = None
-        existing.tickets_total = 0
-        existing.tickets_winning = 0
-        existing.predicted_total_winning_amount = 0
-        existing.total_winning_amount = 0
-        existing.uploaded_at = beijing_now()
-        existing.uploaded_by = uploader_id
-        if result_file_id:
-            existing.result_file_id = result_file_id
-        match_result = existing
-    else:
-        match_result = MatchResult(
-            detail_period=detail_period,
-            result_data=merged_data,
-            result_file_id=result_file_id,
-            uploaded_by=uploader_id,
-        )
-        db.session.add(match_result)
+        if existing:
+            existing.result_data = merged_data
+            existing.calc_status = 'pending'
+            existing.calc_started_at = None
+            existing.calc_finished_at = None
+            existing.tickets_total = 0
+            existing.tickets_winning = 0
+            existing.predicted_total_winning_amount = 0
+            existing.total_winning_amount = 0
+            existing.uploaded_at = beijing_now()
+            existing.uploaded_by = uploader_id
+            if result_file_id:
+                existing.result_file_id = result_file_id
+            match_result = existing
+        else:
+            match_result = MatchResult(
+                detail_period=detail_period,
+                result_data=merged_data,
+                result_file_id=result_file_id,
+                uploaded_by=uploader_id,
+            )
+            db.session.add(match_result)
 
-    db.session.flush()
-    db.session.commit()
+        db.session.flush()
+        db.session.commit()
+        uploaded_at = match_result.uploaded_at.isoformat() if match_result.uploaded_at else None
 
-    return {'success': True, 'match_result_id': match_result.id, 'count': count}
+    return {
+        'success': True,
+        'match_result_id': match_result.id,
+        'count': count,
+        'uploaded_at': uploaded_at,
+    }

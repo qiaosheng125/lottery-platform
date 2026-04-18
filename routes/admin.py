@@ -1735,19 +1735,24 @@ def upload_match_result():
 
     # Trigger async winning calculation
     match_result_id = result['match_result_id']
+    expected_uploaded_at = result.get('uploaded_at')
     from tasks.scheduler import get_scheduler
     sched = get_scheduler()
     if sched:
         from services.winning_calc_service import process_match_result
         sched.add_job(
             func=process_match_result,
-            args=[match_result_id],
+            args=[match_result_id, expected_uploaded_at],
             id=f'winning_calc_{match_result_id}',
             replace_existing=True,
         )
     else:
         from services.winning_calc_service import process_match_result
-        process_match_result(match_result_id, app=current_app._get_current_object())
+        process_match_result(
+            match_result_id,
+            expected_uploaded_at=expected_uploaded_at,
+            app=current_app._get_current_object(),
+        )
 
     return jsonify({'success': True, 'match_result_id': match_result_id, 'count': result['count']})
 
@@ -1814,17 +1819,22 @@ def api_recalc(result_id):
     match_result.predicted_total_winning_amount = 0
     match_result.total_winning_amount = 0
     db.session.commit()
+    expected_uploaded_at = match_result.uploaded_at.isoformat() if match_result.uploaded_at else None
 
     sched = get_scheduler()
     if sched:
         sched.add_job(
             func=process_match_result,
-            args=[result_id],
+            args=[result_id, expected_uploaded_at],
             id=f'winning_recalc_{result_id}',
             replace_existing=True,
         )
     else:
-        process_match_result(result_id, app=current_app._get_current_object())
+        process_match_result(
+            result_id,
+            expected_uploaded_at=expected_uploaded_at,
+            app=current_app._get_current_object(),
+        )
     return jsonify({'success': True})
 
 

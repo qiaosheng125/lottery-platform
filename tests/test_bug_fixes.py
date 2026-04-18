@@ -7434,7 +7434,10 @@ def test_parse_result_file_updates_latest_duplicate_match_result(app, tmp_path):
 
 def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeypatch):
     monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
-    monkeypatch.setattr("services.winning_calc_service.process_match_result", lambda result_id, app=None: None)
+    monkeypatch.setattr(
+        "services.winning_calc_service.process_match_result",
+        lambda result_id, expected_uploaded_at=None, app=None: None,
+    )
 
     with app.app_context():
         admin = User(username="admin_recalc_reset", is_admin=True)
@@ -7537,6 +7540,50 @@ def test_winning_calc_stores_predicted_and_final_amounts_separately(app):
     assert float(refreshed_ticket.winning_amount) == 13.0
     assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
     assert float(refreshed_match_result.total_winning_amount) == 13.0
+
+
+def test_winning_calc_skips_stale_upload_token(app):
+    from services.winning_calc_service import process_match_result
+
+    with app.app_context():
+        user = create_user("stale_result_token_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26190",
+            result_data={"1": {"SPF": {"result": "3", "sp": 2.0}}},
+            uploaded_by=user.id,
+            calc_status="pending",
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26190",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+        stale_token = match_result.uploaded_at.isoformat()
+
+        match_result.uploaded_at = beijing_now() + timedelta(seconds=3)
+        db.session.commit()
+
+    process_match_result(match_result_id, expected_uploaded_at=stale_token, app=app)
+
+    with app.app_context():
+        refreshed_match_result = db.session.get(MatchResult, match_result_id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+
+    assert refreshed_match_result.calc_status == "pending"
+    assert refreshed_match_result.calc_started_at is None
+    assert refreshed_match_result.calc_finished_at is None
+    assert refreshed_ticket.winning_amount is None
+    assert refreshed_ticket.predicted_winning_amount is None
 
 
 def test_my_winning_falls_back_to_predicted_amount_when_final_missing(app, client):
@@ -8301,6 +8348,15 @@ def test_admin_winning_template_handles_list_and_detail_load_failures():
     assert "showToast(e.message || '加载赛果列表失败', 'danger');" in content
     assert "throw new Error(data.error || '加载赛果详情失败');" in content
     assert "showToast(e.message || '加载赛果详情失败', 'danger');" in content
+
+
+def test_admin_winning_template_formats_sp_display_to_two_decimals():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "formatSpDisplay(value) {" in content
+    assert "return num.toFixed(2);" in content
+    assert "const predicted = this.formatSpDisplay(play.predicted_sp);" in content
+    assert "const finalSp = this.formatSpDisplay(play.sp);" in content
 
 
 def test_admin_dashboard_and_winning_templates_check_http_status_on_actions():
