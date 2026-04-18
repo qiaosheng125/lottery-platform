@@ -1,0 +1,145 @@
+mustache	246	total
+v-model	407	filterUsername
+v-for	531	u in usernameOptions
+:key	560	u
+:value	569	u
+mustache	580	u
+v-model	681	filterDate
+v-for	801	d in winningDateOptions
+:key	833	d
+:value	842	d
+mustache	853	d
+v-model	954	filterLotteryType
+v-for	1081	t in lotteryTypeOptions
+:key	1113	t
+:value	1122	t
+mustache	1133	t
+v-model	1234	filterImage
+v-model	1524	filterChecked
+@click	1857	page=1; loadWinning()
+@click	1959	resetWinningFilters()
+@click	2059	exportWinning
+mustache	2335	total
+mustache	2414	summaryAmount.toFixed(2)
+mustache	2559	summaryPredictedAmount.toFixed(2)
+v-if	2700	summaryChangeDisplay() === null
+v-else-if	2788	summaryChangeDisplay() > 0
+mustache	2848	summaryChangeDisplay().toFixed(2)
+v-else-if	2916	summaryChangeDisplay() < 0
+mustache	2976	summaryChangeDisplay().toFixed(2)
+v-if	3119	summaryTax > 0
+mustache	3176	summaryTax.toFixed(2)
+mustache	3268	summaryMissing
+v-if	3940	loading
+v-else-if	4030	records.length === 0
+v-for	4147	r in records
+:key	4168	r.ticket_id
+mustache	4235	r.ticket_id
+mustache	4354	r.raw_content
+v-if	4401	r.status === 'expired'
+mustache	4589	r.ticket_amount
+mustache	4634	r.username
+mustache	4674	r.lottery_type
+mustache	4718	r.detail_period
+v-if	4805	r.predicted_winning_amount !== null
+v-if	4902	r.predicted_winning_tax > 0
+mustache	4959	r.predicted_winning_amount
+mustache	5013	r.predicted_winning_tax
+mustache	5094	r.predicted_winning_amount
+v-if	5294	r.winning_amount !== null
+v-if	5381	r.winning_tax > 0
+mustache	5428	r.winning_amount
+mustache	5472	r.winning_tax
+mustache	5543	r.winning_amount
+v-if	5734	displayWinningChangePercent(r) === null
+v-else-if	5832	displayWinningChangePercent(r) > 0
+mustache	5908	displayWinningChangePercent(r).toFixed(2)
+v-else-if	5986	displayWinningChangePercent(r) < 0
+mustache	6062	displayWinningChangePercent(r).toFixed(2)
+v-if	6279	r.winning_image_url
+v-if	6371	r.winning_image_url
+@click	6439	previewImage(r.winning_image_url)
+:class	6586	{'opacity-50': uploadingImageId === r.ticket_id || r.is_checked}
+:title	6660	r.is_checked ? '已检查的记录不能更换图片' : ''
+v-if	6729	uploadingImageId === r.ticket_id
+mustache	6849	r.winning_image_url ? '换图' : '上传'
+:disabled	6965	uploadingImageId === r.ticket_id || r.is_checked
+@change	7026	uploadImage($event, r)
+v-if	7173	r.is_checked
+:title	7218	'检查人: ' + (r.checked_by_username || '未知') + '\n检查时间: ' + (r.checked_at ? r.checked_at.substring(0,16) : '未知')
+v-else-if	7372	r.winning_image_url && r.winning_record_id
+@click	7466	markChecked(r)
+:disabled	7490	markingCheckedId === r.winning_record_id
+v-if	7568	markingCheckedId === r.winning_record_id
+:class	7862	r.status === 'expired' ? 'text-danger' : ''
+mustache	7932	r.terminal_at ? r.terminal_at.substring(0,16) : (r.completed_at ? r.completed_at.substring(0,16) : '-')
+v-if	8203	totalPages > 1
+mustache	8267	total
+@click	8385	page--; loadWinning()
+:disabled	8416	page<=1
+mustache	8510	page
+mustache	8521	totalPages
+@click	8599	page++; loadWinning()
+:disabled	8630	page>=totalPages
+@change	9109	onResultFileChange
+v-model	9318	uploadPeriod
+v-model	9548	uploadKind
+@click	9815	uploadResultFile
+:disabled	9841	uploading || !resultFile || !uploadPeriod
+v-if	9914	uploading
+mustache	9997	uploading ? '上传中...' : '上传并计算'
+v-if	10093	uploadMsg
+:class	10129	uploadSuccess ? 'text-success' : 'text-danger'
+mustache	10185	uploadMsg
+v-model	10428	mrFilterDate
+@change	10493	loadMatchResults()
+v-for	10578	d in mrDateOptions
+:key	10605	d
+:value	10614	d
+mustache	10625	d
+v-if	10956	matchResults.length === 0
+v-for	11070	r in matchResults
+:key	11096	r.id
+mustache	11125	r.detail_period
+mustache	11182	r.uploaded_at ? r.uploaded_at.substring(0,16) : '-'
+:class	11296	{
+                'bg-secondary': r.calc_status === 'pending',
+                'bg-warning text-dark': r.calc_status === 'processing',
+                'bg-success': r.calc_status === 'done',
+                'bg-danger': r.calc_status === 'error',
+              }}
+mustache	11569	calcStatusLabel(r.calc_status)
+mustache	11647	r.tickets_total
+mustache	11690	r.tickets_winning
+mustache	11769	r.predicted_total_winning_amount
+mustache	11859	r.total_winning_amount
+v-if	11950	displayMatchResultChangePercent(r) === null
+v-else-if	12050	displayMatchResultChangePercent(r) > 0
+mustache	12130	displayMatchResultChangePercent(r).toFixed(2)
+v-else-if	12210	displayMatchResultChangePercent(r) < 0
+mustache	12290	displayMatchResultChangePercent(r).toFixed(2)
+@click	12522	viewResultDetail(r)
+@click	12626	recalc(r.id)
+v-if	12775	detailVisible
+mustache	13031	detailPeriod
+@click	13112	detailVisible=false
+v-if	13177	detailLoading
+v-for	14035	(row, seq) in detailRows
+:key	14068	seq
+mustache	14114	seq
+mustache	14147	row.SPF ? row.SPF.result : '-'
+mustache	14192	formatPredictedFinalSp(row.SPF)
+mustache	14253	row.CBF ? row.CBF.result : '-'
+mustache	14298	formatPredictedFinalSp(row.CBF)
+mustache	14359	row.JQS ? row.JQS.result : '-'
+mustache	14404	formatPredictedFinalSp(row.JQS)
+mustache	14465	row.BQC ? row.BQC.result : '-'
+mustache	14510	formatPredictedFinalSp(row.BQC)
+mustache	14571	row.SXP ? row.SXP.result : '-'
+mustache	14616	formatPredictedFinalSp(row.SXP)
+mustache	14677	row.SF ? (row.SF.seq || seq) : '-'
+mustache	14741	row.SF ? row.SF.result : '-'
+mustache	14784	formatPredictedFinalSp(row.SF)
+v-if	14942	previewUrl
+@click	15187	previewUrl=null
+:src	15235	previewUrl
