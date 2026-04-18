@@ -13,7 +13,7 @@ from models.ticket import LotteryTicket
 from models.winning import WinningRecord
 from services.oss_service import delete_stored_image
 from utils.time_utils import beijing_now
-from utils.winning_calculator import calculate_winning
+from utils.winning_calculator import calculate_winning, has_complete_result_data
 
 
 def _run_calculation(raw_content: str, result_data: dict, multiplier: int, sp_field: str):
@@ -54,23 +54,64 @@ def _parse_expected_uploaded_at(value):
     return None
 
 
-def process_match_result(match_result_id: int, expected_uploaded_at=None, app=None):
+def _parse_expected_calc_token(expected_calc_token=None, expected_uploaded_at=None):
+    token = expected_calc_token
+    if token is None and expected_uploaded_at is not None:
+        token = expected_uploaded_at
+    if token is None:
+        return None
+    if isinstance(token, str) and token.startswith('rf:'):
+        try:
+            return ('result_file_id', int(token[3:]))
+        except ValueError:
+            return None
+    if isinstance(token, str) and token.startswith('ts:'):
+        parsed = _parse_expected_uploaded_at(token[3:])
+        if parsed:
+            return ('uploaded_at', parsed)
+        return None
+    parsed_dt = _parse_expected_uploaded_at(token)
+    if parsed_dt:
+        return ('uploaded_at', parsed_dt)
+    return None
+
+
+def _build_calc_token(result_file_id, uploaded_at):
+    if result_file_id is not None:
+        return f'rf:{result_file_id}'
+    if uploaded_at is not None:
+        return f'ts:{uploaded_at.isoformat()}'
+    return None
+
+
+def _token_matches(token_meta, result_file_id, uploaded_at):
+    if token_meta is None:
+        return True
+    token_type, token_value = token_meta
+    if token_type == 'result_file_id':
+        return result_file_id == token_value
+    if token_type == 'uploaded_at':
+        return uploaded_at == token_value
+    return True
+
+
+def process_match_result(match_result_id: int, expected_calc_token=None, expected_uploaded_at=None, app=None):
     from app import create_app
 
     if app is None:
         app = create_app()
 
     with app.app_context():
-        expected_uploaded_at_dt = _parse_expected_uploaded_at(expected_uploaded_at)
+        token_meta = _parse_expected_calc_token(expected_calc_token=expected_calc_token, expected_uploaded_at=expected_uploaded_at)
         match_result = db.session.get(MatchResult, match_result_id)
         if not match_result:
             return
-        if expected_uploaded_at_dt and match_result.uploaded_at != expected_uploaded_at_dt:
+        if not _token_matches(token_meta, match_result.result_file_id, match_result.uploaded_at):
             current_app.logger.info(
                 "Skip stale winning calc start for result %s (expected=%s actual=%s)",
                 match_result_id,
-                expected_uploaded_at_dt,
-                match_result.uploaded_at,
+                token_meta,
+                _build_calc_token(match_result.result_file_id, match_result.uploaded_at),
             )
             return
 
@@ -90,14 +131,23 @@ def process_match_result(match_result_id: int, expected_uploaded_at=None, app=No
             active_winning_count = 0
             active_total_amount = Decimal('0')
             predicted_total_amount = Decimal('0')
+            cleanup_targets = []
+            cleanup_record_ids = set()
 
             for ticket in tickets:
                 winning_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
                 try:
                     predicted_result = (False, Decimal('0'), Decimal('0'), Decimal('0'))
                     final_result = (False, Decimal('0'), Decimal('0'), Decimal('0'))
+                    has_predicted_ticket_data = False
+                    has_final_ticket_data = False
 
                     if has_predicted_results:
+                        has_predicted_ticket_data = has_complete_result_data(
+                            raw_content=ticket.raw_content,
+                            result_data=match_result.result_data,
+                            sp_field='predicted_sp',
+                        )
                         predicted_result = _run_calculation(
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
@@ -106,6 +156,11 @@ def process_match_result(match_result_id: int, expected_uploaded_at=None, app=No
                         )
 
                     if has_final_results:
+                        has_final_ticket_data = has_complete_result_data(
+                            raw_content=ticket.raw_content,
+                            result_data=match_result.result_data,
+                            sp_field='sp',
+                        )
                         final_result = _run_calculation(
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
@@ -131,40 +186,51 @@ def process_match_result(match_result_id: int, expected_uploaded_at=None, app=No
                     else:
                         _clear_ticket_amounts(ticket, clear_predicted=False, clear_final=True)
 
-                    active_is_win = final_is_win if has_final_results else predicted_is_win
-                    active_net_amount = final_net if has_final_results else predicted_net
+                    if has_final_results and has_final_ticket_data:
+                        active_is_win = final_is_win
+                        active_net_amount = final_net
+                    elif has_predicted_results and has_predicted_ticket_data:
+                        active_is_win = predicted_is_win
+                        active_net_amount = predicted_net
+                    else:
+                        active_is_win = False
+                        active_net_amount = Decimal('0')
 
                     ticket.is_winning = active_is_win
                     if active_is_win:
                         active_winning_count += 1
                         active_total_amount += active_net_amount
                     else:
-                        if winning_record:
-                            delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
-                            db.session.delete(winning_record)
+                        if winning_record and winning_record.id not in cleanup_record_ids:
+                            cleanup_record_ids.add(winning_record.id)
+                            cleanup_targets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record))
                         ticket.winning_image_url = None
                 except Exception as exc:
                     current_app.logger.warning("Winning calc error for ticket %s: %s", ticket.id, exc)
                     ticket.is_winning = False
                     _clear_ticket_amounts(ticket, clear_predicted=True, clear_final=True)
-                    if winning_record:
-                        delete_stored_image(winning_record.image_oss_key, winning_record.winning_image_url)
-                        db.session.delete(winning_record)
+                    if winning_record and winning_record.id not in cleanup_record_ids:
+                        cleanup_record_ids.add(winning_record.id)
+                        cleanup_targets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record))
                     ticket.winning_image_url = None
 
-            if expected_uploaded_at_dt:
-                latest_uploaded_at = db.session.query(MatchResult.uploaded_at).filter(
+            latest_row = db.session.query(MatchResult.result_file_id, MatchResult.uploaded_at).filter(
                     MatchResult.id == match_result_id
-                ).scalar()
-                if latest_uploaded_at != expected_uploaded_at_dt:
+                ).first()
+            latest_result_file_id = latest_row[0] if latest_row else None
+            latest_uploaded_at = latest_row[1] if latest_row else None
+            if not _token_matches(token_meta, latest_result_file_id, latest_uploaded_at):
                     db.session.rollback()
                     current_app.logger.info(
                         "Skip stale winning calc commit for result %s (expected=%s actual=%s)",
                         match_result_id,
-                        expected_uploaded_at_dt,
-                        latest_uploaded_at,
+                        token_meta,
+                        _build_calc_token(latest_result_file_id, latest_uploaded_at),
                     )
                     return
+
+            for _oss_key, _image_url, winning_record in cleanup_targets:
+                db.session.delete(winning_record)
 
             match_result.calc_status = 'done'
             match_result.calc_finished_at = beijing_now()
@@ -173,6 +239,9 @@ def process_match_result(match_result_id: int, expected_uploaded_at=None, app=No
             match_result.predicted_total_winning_amount = predicted_total_amount
             match_result.total_winning_amount = active_total_amount
             db.session.commit()
+
+            for oss_key, image_url, _record in cleanup_targets:
+                delete_stored_image(oss_key, image_url)
 
             from services.notify_service import notify_admins
 

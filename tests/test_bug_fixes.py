@@ -7436,7 +7436,7 @@ def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeyp
     monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
     monkeypatch.setattr(
         "services.winning_calc_service.process_match_result",
-        lambda result_id, expected_uploaded_at=None, app=None: None,
+        lambda result_id, expected_calc_token=None, expected_uploaded_at=None, app=None: None,
     )
 
     with app.app_context():
@@ -7498,6 +7498,9 @@ def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
     assert first["success"] is True
     assert second["success"] is True
     assert third["success"] is True
+    assert first["calc_token"].startswith("ts:")
+    assert second["calc_token"].startswith("ts:")
+    assert third["calc_token"].startswith("ts:")
     assert match_result.result_data["1"]["SPF"]["result"] == "3"
     assert match_result.result_data["1"]["SPF"]["predicted_sp"] == 1.95
     assert match_result.result_data["1"]["SPF"]["sp"] == 2.05
@@ -7584,6 +7587,117 @@ def test_winning_calc_skips_stale_upload_token(app):
     assert refreshed_match_result.calc_finished_at is None
     assert refreshed_ticket.winning_amount is None
     assert refreshed_ticket.predicted_winning_amount is None
+
+
+def test_winning_calc_falls_back_to_predicted_when_final_is_incomplete(app):
+    from services.winning_calc_service import process_match_result
+
+    with app.app_context():
+        user = create_user("final_incomplete_fallback_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26192",
+            result_data={
+                "1": {"SPF": {"result": "3", "predicted_sp": 5.0, "sp": None}},
+                "2": {"SPF": {"result": "3", "sp": 1.5}},
+            },
+            uploaded_by=user.id,
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26192",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_match_result = db.session.get(MatchResult, match_result_id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+
+    assert refreshed_ticket.is_winning is True
+    assert float(refreshed_ticket.predicted_winning_amount) == 6.5
+    assert refreshed_ticket.winning_amount is None
+    assert refreshed_match_result.tickets_winning == 1
+    assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
+    assert float(refreshed_match_result.total_winning_amount) == 6.5
+
+
+def test_winning_calc_stale_commit_does_not_delete_winning_image(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    calls = {'token_checks': 0, 'deleted_images': 0}
+
+    def fake_token_matches(_token_meta, _result_file_id, _uploaded_at):
+        calls['token_checks'] += 1
+        return calls['token_checks'] == 1
+
+    def fake_delete_stored_image(_oss_key, _image_url):
+        calls['deleted_images'] += 1
+
+    monkeypatch.setattr("services.winning_calc_service._token_matches", fake_token_matches)
+    monkeypatch.setattr("services.winning_calc_service.delete_stored_image", fake_delete_stored_image)
+
+    with app.app_context():
+        user = create_user("stale_commit_image_guard_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="26193",
+            result_data={"1": {"SPF": {"result": "0", "sp": 1.1}}},
+            uploaded_by=user.id,
+            calc_status="pending",
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26193",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_amount=100,
+            winning_image_url="/uploads/images/stale-guard.png",
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        record = WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            image_oss_key="oss/stale-guard.png",
+            uploaded_by=user.id,
+        )
+        db.session.add(record)
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+        record_id = record.id
+
+    process_match_result(match_result_id, expected_calc_token="rf:999999", app=app)
+
+    with app.app_context():
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+        refreshed_record = db.session.get(WinningRecord, record_id)
+        refreshed_result = db.session.get(MatchResult, match_result_id)
+
+    assert calls['token_checks'] >= 2
+    assert calls['deleted_images'] == 0
+    assert refreshed_result.calc_status in {"pending", "processing"}
+    assert refreshed_ticket.winning_image_url == "/uploads/images/stale-guard.png"
+    assert refreshed_record is not None
 
 
 def test_my_winning_falls_back_to_predicted_amount_when_final_missing(app, client):

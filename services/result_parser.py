@@ -250,4 +250,5 @@ def parse_result_file(
         'match_result_id': match_result.id,
         'count': count,
         'uploaded_at': uploaded_at,
+        'calc_token': f"rf:{result_file_id}" if result_file_id is not None else (f"ts:{uploaded_at}" if uploaded_at else None),
     }

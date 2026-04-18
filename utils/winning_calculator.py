@@ -104,3 +104,39 @@ def calculate_winning(
     is_winning = total_gross > 0
     net_amount, tax_amount = apply_tax(total_gross)
     return is_winning, total_gross, net_amount, tax_amount
+
+
+def has_complete_result_data(
+    raw_content: str,
+    result_data: dict,
+    sp_field: str = 'sp',
+) -> bool:
+    parsed = parse_ticket_line(raw_content)
+    if not parsed:
+        return False
+
+    result_key = BET_CODE_TO_RESULT_KEY.get(parsed['bet_code'])
+    if not result_key:
+        return False
+
+    sorted_fields = sorted(
+        parsed['fields'].items(),
+        key=lambda item: int(item[0]) if item[0].isdigit() else 0,
+    )
+
+    for field_no, _selected_options in sorted_fields:
+        match_info = (result_data.get(field_no) or {}).get(result_key)
+        if not match_info:
+            return False
+
+        actual_result = str(match_info.get('result', '')).strip()
+        if not actual_result:
+            return False
+        if _is_postponed(actual_result):
+            continue
+
+        decimal_sp = _get_decimal_sp(match_info, sp_field)
+        if decimal_sp is None:
+            return False
+
+    return True
