@@ -92,7 +92,19 @@ def ensure_runtime_aux_tables(app):
 def ensure_runtime_columns(app):
     ensure_model_metadata_loaded()
     inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
     column_specs = {
+        'users': {
+            'client_mode': "VARCHAR(10) NOT NULL DEFAULT 'mode_a'",
+            'max_devices': 'INTEGER NOT NULL DEFAULT 1',
+            'max_processing_b_mode': 'INTEGER',
+            'daily_ticket_limit': 'INTEGER',
+            'blocked_lottery_types': 'TEXT',
+            'is_active': 'BOOLEAN NOT NULL DEFAULT TRUE',
+            'can_receive': 'BOOLEAN NOT NULL DEFAULT TRUE',
+            'desktop_only_b_mode': 'BOOLEAN NOT NULL DEFAULT TRUE',
+            'updated_at': 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
+        },
         'result_files': {
             'upload_kind': "VARCHAR(20) NOT NULL DEFAULT 'final'",
         },
@@ -108,6 +120,8 @@ def ensure_runtime_columns(app):
 
     with db.engine.begin() as conn:
         for table_name, specs in column_specs.items():
+            if table_name not in existing_tables:
+                continue
             existing = {column['name'] for column in inspector.get_columns(table_name)}
             for column_name, ddl in specs.items():
                 if column_name in existing:

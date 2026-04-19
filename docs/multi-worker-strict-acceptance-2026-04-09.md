@@ -11,13 +11,13 @@
 
 - `PostgreSQL`
 - `Redis`
-- `gunicorn workers=2`
+- `gunicorn workers>=2`（默认 `2`，2C2G 可按压测调优到 `4`）
 
 核心要求只有一条：正确性优先。只要票状态有任何错乱，吞吐提升都没有意义。
 
 ## 推荐的生产默认值
 
-建议使用以下环境变量：
+建议先使用以下默认环境变量：
 
 ```env
 DATABASE_URL=postgresql://user:password@host:5432/lottery_platform
@@ -30,12 +30,16 @@ GUNICORN_TIMEOUT=120
 GUNICORN_KEEPALIVE=5
 ```
 
-原因：
+原因（默认基线）：
 
-- `workers=2` 和主机 CPU 核数匹配，不会太早把进程竞争放大。
+- `workers=2` 是通用起步值，便于先稳定验证正确性。
 - 小一点的数据库连接池更适合小机器，也能减少空闲连接浪费。
 - `PostgreSQL` 的行锁和 advisory lock 能保证跨 worker 的正确性。
 - `Redis` 能保证共享 pending 池在多 worker 下保持一致。
+
+补充（2026-04-20 统一口径）：
+
+- 若 `2核2G` 机型在登录高峰出现明显超时，可在通过回归后将 `GUNICORN_WORKERS` 调整为 `4` 再做一轮严格验收。
 
 ## 严格验收规则
 
@@ -72,6 +76,8 @@ export LIVE_TEST_MODE_B_DEVICES_PER_ACCOUNT=6
 export LIVE_TEST_MODE_B_BATCH_COUNT=1
 ./scripts/run_linux_strict_acceptance.sh
 ```
+
+如需验证 `2核2G` 调优参数，可将 `LIVE_TEST_GUNICORN_WORKERS=4` 并按部署文档中的 32 设备基线复测。
 
 如果要测更重的 B 模式批次：
 

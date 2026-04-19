@@ -82,3 +82,74 @@ source .venv/bin/activate
 - `init_db.py` 现在会基于当前 `DATABASE_URL` 初始化数据库，并在初始化阶段自动禁用 scheduler，所以全新的 PostgreSQL 空库也能正常启动。
 - `.env.example` 现在已经和部署脚本对齐，不再使用旧的 `user:password@localhost` 占位配置。
 - 当前发布流程按“可清空重建数据库”执行，`init_db.py` 会直接建表；不依赖手工迁移脚本。
+
+## 2026-04-20 发布补充（口径统一）
+
+### 配置口径（统一版）
+- 通用默认值仍为 `GUNICORN_WORKERS=2`（仓库脚本与 `.env.example` 默认值）。
+- 若目标机为 `2核2G` 且出现登录高峰超时，可在压测通过后调优到 `GUNICORN_WORKERS=4`。
+- 本次发布包含 `users` 表兼容修复：老库缺失新列时，应用启动会自动补齐，不需要手工改表。
+
+### 2核2G 实测结论（2026-04-19）
+- 稳定通过档位：16 / 24 / 28 / 32 设备（`errors=0`）。
+- 32 设备实测：`slow_requests=3`（在阈值内）。
+- 40/60/100 设备档在该机型出现较多登录超时（`ReadTimeout`），不建议作为常态档位。
+
+### 推荐压测基线参数（2核2G）
+```bash
+export RUN_LIVE_CONCURRENCY_TESTS=1
+export LIVE_TEST_SERVER_MODE=gunicorn
+export LIVE_TEST_GUNICORN_WORKERS=4
+export LIVE_TEST_MODE_A_ACCOUNTS=8
+export LIVE_TEST_MODE_B_ACCOUNTS=4
+export LIVE_TEST_MODE_A_DEVICES_PER_ACCOUNT=2
+export LIVE_TEST_MODE_B_DEVICES_PER_ACCOUNT=4
+export LIVE_TEST_MODE_B_BATCH_COUNT=1
+export LIVE_TEST_MAX_SLOW_REQUESTS=20
+pytest tests/test_concurrent_20devices.py -rs -vv -s
+```
+
+### 从 GitHub 更新并发布（main）
+```bash
+cd /root/file-hub
+git status
+git fetch origin
+git pull --ff-only origin main
+
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 本次发布包含 users 表 schema 兼容修复，必须执行
+python init_db.py
+
+systemctl restart file-hub.service
+systemctl status file-hub.service --no-pager -l
+curl -I http://127.0.0.1/auth/login
+```
+
+### 常见坑与可复用命令
+- 仅删除项目目录不会停旧服务；`systemd` 残留会占用 `5000` 端口。
+- Shell 环境变量会覆盖 `.env`，存在外部 `DATABASE_URL` 时可能误连其他库。
+- Linux 脚本如有 `CRLF`，先执行 `dos2unix scripts/*.sh`。
+
+```bash
+# 清理旧服务残留
+systemctl stop file-hub.service 2>/dev/null || true
+systemctl disable file-hub.service 2>/dev/null || true
+rm -f /etc/systemd/system/file-hub.service /etc/systemd/system/multi-user.target.wants/file-hub.service
+systemctl daemon-reload
+systemctl reset-failed
+
+# 压测前清理端口占用
+fuser -k 5000/tcp 2>/dev/null || true
+ss -ltnp | grep ':5000' || echo '5000 free'
+```
+
+### 机器重启后检查
+```bash
+systemctl is-active file-hub nginx postgresql redis-server
+```
+- 若任一服务不是 `active`：
+```bash
+systemctl start postgresql redis-server nginx file-hub
+```

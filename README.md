@@ -12,12 +12,13 @@
   - 不能残留 `assigned`
   - 文件计数和金额不能漂移
 
-## 2026-04-18 最新更新（上线前统一口径）
+## 2026-04-20 最新更新（上线口径）
 
 - 执行完整回归：`python -m pytest -q` -> `339 passed, 1 skipped, 42 warnings`（约 `19m14s`）
 - 当前未发现阻断上线的 P0/P1 新缺陷；42 条告警均为测试代码中的 SQLAlchemy `LegacyAPIWarning`
 - 文档口径已统一到“生产部署 / 并发验收 / 变更汇总”三个执行入口
 - 并发验收文档已改为 Linux `bash` 主路径示例，避免与 PowerShell 指令混用导致误执行
+- 修复老库升级兼容：应用启动时会自动补齐 `users` 表缺失新字段（`client_mode`、`can_receive`、`desktop_only_b_mode` 等），避免发布后因缺列报错
 
 ## 并发安全说明
 
@@ -31,7 +32,8 @@
 ### PostgreSQL
 
 - 生产推荐使用
-- 推荐 `workers=2`
+- 默认建议 `workers=2`（通用基线）
+- `2C2G` 机器在高并发登录场景可按压测结果调优到 `workers=4`
 - 分票正确性依赖数据库并发控制，而不是单进程锁
 - 关键机制：
   - `FOR UPDATE SKIP LOCKED`
@@ -134,7 +136,7 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 
 ## 文档口径与生效日期
 
-- 当前统一口径生效日期：`2026-04-18`
+- 当前统一口径生效日期：`2026-04-20`
 - 生产部署执行文档：`docs/cloud-deploy-ubuntu-2026-04-09.md`
 - 多 worker 并发验收执行文档：`docs/multi-worker-strict-acceptance-2026-04-09.md`
 - 变更汇总：`docs/project-change-summary.md`

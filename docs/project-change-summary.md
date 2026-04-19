@@ -28,6 +28,24 @@
 
 ## 关键里程碑
 
+### 2026-04-20：发布兼容修复（users 表缺列）
+
+本轮新增一个上线兼容修复，解决“老版本数据库 users 表缺少新字段导致部署后报错”的问题：
+
+- 在应用启动阶段增加 `users` 表运行时补列能力（幂等），可自动补齐：
+  - `client_mode`
+  - `max_devices`
+  - `max_processing_b_mode`
+  - `daily_ticket_limit`
+  - `blocked_lottery_types`
+  - `is_active`
+  - `can_receive`
+  - `desktop_only_b_mode`
+  - `updated_at`
+- 发布口径统一为：
+  - 通用默认：`GUNICORN_WORKERS=2`
+  - `2核2G` 高并发可调优：`GUNICORN_WORKERS=4`（以压测结果为准）
+
 ### 第一阶段：打基础
 
 这一阶段主要完成了系统骨架收口和基础稳定性提升：

@@ -6,13 +6,13 @@ from datetime import datetime, timedelta
 import io
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from werkzeug.datastructures import FileStorage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import tasks.scheduler as scheduler_module
-from app import create_app, should_start_scheduler
+from app import create_app, ensure_runtime_columns, should_start_scheduler
 from extensions import db
 from models.audit import AuditLog
 from models.settings import SystemSettings
@@ -97,6 +97,39 @@ def test_should_start_scheduler_uses_config_name_when_flask_env_missing(monkeypa
 
     assert should_start_scheduler("production") is False
     assert should_start_scheduler("development") is True
+
+
+def test_ensure_runtime_columns_backfills_legacy_users_table(app):
+    with app.app_context():
+        db.drop_all()
+        with db.engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(64) NOT NULL UNIQUE,
+                    password_hash VARCHAR(256) NOT NULL,
+                    is_admin BOOLEAN NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+
+        ensure_runtime_columns(app)
+        ensure_runtime_columns(app)
+
+        inspector = inspect(db.engine)
+        columns = {column["name"] for column in inspector.get_columns("users")}
+        expected_columns = {
+            "client_mode",
+            "max_devices",
+            "max_processing_b_mode",
+            "daily_ticket_limit",
+            "blocked_lottery_types",
+            "is_active",
+            "can_receive",
+            "desktop_only_b_mode",
+            "updated_at",
+        }
+        assert expected_columns.issubset(columns)
 
 
 def test_login_json_post_stays_json_for_authenticated_user(app, client):
