@@ -3,6 +3,15 @@
   // Only connect if socket.io is available
   if (typeof io === 'undefined') return;
 
+  function submitLogout() {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/auth/logout';
+    form.style.display = 'none';
+    document.body.appendChild(form);
+    form.submit();
+  }
+
   const socket = io({ transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
@@ -25,7 +34,7 @@
 
   socket.on('force_logout', (data) => {
     alert(data.reason || '您已被强制下线，请重新登录');
-    window.location.href = '/auth/logout';
+    submitLogout();
   });
 
   socket.on('announcement', (data) => {

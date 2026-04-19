@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify, request
+﻿from flask import Blueprint, jsonify, request, session
 from flask_login import current_user, login_required
 
+from extensions import db
 from models.settings import SystemSettings
+from models.user import UserSession
 from services.mode_b_service import (
     confirm_batch,
     download_batch,
@@ -9,14 +11,13 @@ from services.mode_b_service import (
     preview_batch,
 )
 from services.ticket_pool import get_pool_status
-from utils.decorators import can_receive_required, login_required_json, mode_b_required
+from utils.decorators import can_receive_required, login_required_json, mode_b_required, parse_json_object
 
 mode_b_bp = Blueprint('mode_b', __name__)
 MODE_B_POOL_RESERVE = 20
 
 
 def _validate_device_id(device_id: str):
-    device_id = (device_id or '').strip()
     if not device_id:
         return '缺少设备ID'
     if len(device_id) > 20 or not all(c.isalnum() or c in '-_' for c in device_id):
@@ -25,15 +26,9 @@ def _validate_device_id(device_id: str):
 
 
 def _is_browser_request(client_type: str = None) -> bool:
-    normalized = (client_type or '').strip().lower()
-    if normalized == 'web':
-        return True
-    if normalized == 'desktop':
-        return False
+    normalized = (client_type or '').strip().lower() if isinstance(client_type, str) else ''
 
     user_agent = (request.user_agent.string or '').lower()
-    if not user_agent:
-        return False
 
     desktop_agent_markers = (
         'python-requests',
@@ -44,7 +39,7 @@ def _is_browser_request(client_type: str = None) -> bool:
         'go-http-client',
         'python-urllib',
     )
-    if any(marker in user_agent for marker in desktop_agent_markers):
+    if user_agent and any(marker in user_agent for marker in desktop_agent_markers):
         return False
 
     browser_markers = (
@@ -55,17 +50,47 @@ def _is_browser_request(client_type: str = None) -> bool:
         'firefox/',
         'edg/',
     )
-    return any(marker in user_agent for marker in browser_markers)
+    is_browser_ua = user_agent and any(marker in user_agent for marker in browser_markers)
+    if is_browser_ua:
+        return True
+    if normalized == 'web':
+        return True
+    if normalized == 'desktop':
+        return False
+    return False
 
 
 def _parse_batch_count(value, default: int = 100):
+    if value is None:
+        value = default
+    if isinstance(value, bool) or isinstance(value, float):
+        return None
     try:
-        count = int(value if value is not None else default)
+        count = int(value)
     except (TypeError, ValueError):
         return None
     if count < 1:
         return None
     return count
+
+
+def _enforce_bound_session_device(device_id: str):
+    token = session.get('session_token')
+    if not token:
+        return jsonify({'success': False, 'error': 'session invalid'}), 401
+
+    session_record = UserSession.query.filter_by(session_token=token, user_id=current_user.id).first()
+    if not session_record:
+        return jsonify({'success': False, 'error': 'session invalid'}), 401
+
+    bound_device_id = (session_record.device_id or '').strip()
+    if bound_device_id and bound_device_id != device_id:
+        return jsonify({'success': False, 'error': 'device_id mismatch with active session'}), 403
+
+    if not bound_device_id:
+        session_record.device_id = device_id
+        db.session.commit()
+    return None
 
 
 def _trim_status_for_mode_b(status: dict) -> dict:
@@ -128,12 +153,20 @@ def preview():
 @mode_b_required
 @can_receive_required
 def download():
-    data = request.get_json(silent=True) or {}
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
     count = _parse_batch_count(data.get('count', 100) if data else 100)
     if count is None:
         return jsonify({'success': False, 'error': 'count 必须是大于 0 的整数'}), 400
 
-    device_id = (data.get('device_id') or '').strip()
+    raw_device_id = data.get('device_id')
+    if raw_device_id is None:
+        device_id = ''
+    elif isinstance(raw_device_id, str):
+        device_id = raw_device_id.strip()
+    else:
+        return jsonify({'success': False, 'error': 'invalid device_id type'}), 400
     client_type = data.get('client_type')
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
@@ -141,9 +174,12 @@ def download():
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
+    session_error = _enforce_bound_session_device(device_id)
+    if session_error:
+        return session_error
 
     if current_user.desktop_only_b_mode and _is_browser_request(client_type):
-        return jsonify({'success': False, 'error': 'B模式仅允许通过桌面端接单'}), 403
+        return jsonify({'success': False, 'error': 'B 模式仅允许通过桌面端接单'}), 403
 
     result = download_batch(
         user_id=current_user.id,
@@ -170,6 +206,9 @@ def processing():
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
+    session_error = _enforce_bound_session_device(device_id)
+    if session_error:
+        return session_error
 
     batches = get_processing_batches(current_user.id, device_id)
     return jsonify({'success': True, 'batches': batches})
@@ -180,20 +219,39 @@ def processing():
 @login_required
 @mode_b_required
 def confirm():
-    data = request.get_json(silent=True) or {}
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
     ticket_ids = data.get('ticket_ids', [])
     completed_count = data.get('completed_count')
-    device_id = (data.get('device_id') or '').strip()
+    raw_device_id = data.get('device_id')
+    if raw_device_id is None:
+        device_id = ''
+    elif isinstance(raw_device_id, str):
+        device_id = raw_device_id.strip()
+    else:
+        return jsonify({'success': False, 'error': 'invalid device_id type'}), 400
     if not device_id:
         return jsonify({'success': False, 'error': '缺少设备ID'}), 400
-    if not ticket_ids:
-        return jsonify({'success': False, 'error': '缺少票ID'}), 400
+    if isinstance(ticket_ids, bool):
+        return jsonify({'success': False, 'error': '票ID必须是数组'}), 400
     if not isinstance(ticket_ids, list):
         return jsonify({'success': False, 'error': '票ID必须是数组'}), 400
+    if any(isinstance(ticket_id, bool) for ticket_id in ticket_ids):
+        return jsonify({'success': False, 'error': '票ID必须是整数'}), 400
+    if any(isinstance(ticket_id, float) for ticket_id in ticket_ids):
+        return jsonify({'success': False, 'error': 'ticket_id must be integer'}), 400
+    if isinstance(completed_count, bool) or isinstance(completed_count, float):
+        return jsonify({'success': False, 'error': 'completed_count must be integer'}), 400
+    if not ticket_ids:
+        return jsonify({'success': False, 'error': '缺少票ID'}), 400
 
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
+    session_error = _enforce_bound_session_device(device_id)
+    if session_error:
+        return session_error
 
     try:
         parsed_ticket_ids = [int(i) for i in ticket_ids]
@@ -201,6 +259,7 @@ def confirm():
         return jsonify({'success': False, 'error': '票ID必须是整数'}), 400
 
     result = confirm_batch(parsed_ticket_ids, current_user.id, completed_count=completed_count, device_id=device_id or None)
-    if not result.get('success') and (('未找到' in (result.get('error') or '')) or ('不属于当前设备' in (result.get('error') or ''))):
+    if not result.get('success'):
         return jsonify(result), 400
     return jsonify(result)
+

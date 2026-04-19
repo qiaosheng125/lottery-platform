@@ -27,6 +27,18 @@ from utils.time_utils import beijing_now, get_business_date, get_business_window
 _sqlite_upload_lock = BoundedSemaphore(1)
 _sqlite_pending_upload_keys = set()
 
+_LOTTERY_TYPE_ALIASES = {
+    '鑳滃钩璐?': '胜平负',
+    '璁╃悆鑳滃钩璐?': '让球胜平负',
+    '姣斿垎': '比分',
+    '???': '胜平负',
+}
+
+
+def _normalize_lottery_type(value: str) -> str:
+    normalized = (value or '').strip()
+    return _LOTTERY_TYPE_ALIASES.get(normalized, normalized)
+
 
 def _is_postgres() -> bool:
     uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
@@ -85,18 +97,28 @@ def build_uploaded_txt_relative_path(filename: str, upload_dt=None) -> str:
 
 
 def resolve_uploaded_txt_path(stored_filename: str, upload_folder: str) -> str:
-    candidates = [
-        os.path.join(upload_folder, stored_filename),
-        os.path.join(upload_folder, os.path.basename(stored_filename)),
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
-    return candidates[0]
+    normalized = (stored_filename or '').replace('\\', '/').strip()
+    if not normalized:
+        return ''
+
+    upload_root = os.path.abspath(upload_folder)
+    candidate = os.path.abspath(os.path.join(upload_root, normalized))
+    try:
+        if os.path.commonpath([upload_root, candidate]) != upload_root:
+            return ''
+    except ValueError:
+        return ''
+    return candidate
 
 
 def archive_uploaded_txt_file(uploaded_file: UploadedFile, upload_folder: str) -> bool:
     current_path = resolve_uploaded_txt_path(uploaded_file.stored_filename, upload_folder)
+    if not current_path:
+        current_app.logger.warning(
+            'Skip archiving uploaded txt outside upload dir: %s',
+            uploaded_file.stored_filename,
+        )
+        return False
     if not os.path.exists(current_path):
         return False
 
@@ -119,6 +141,12 @@ def archive_uploaded_txt_file(uploaded_file: UploadedFile, upload_folder: str) -
 
 def delete_uploaded_txt_file(uploaded_file: UploadedFile, upload_folder: str) -> bool:
     current_path = resolve_uploaded_txt_path(uploaded_file.stored_filename, upload_folder)
+    if not current_path:
+        current_app.logger.warning(
+            'Skip deleting uploaded txt outside upload dir: %s',
+            uploaded_file.stored_filename,
+        )
+        return False
     if not os.path.exists(current_path):
         return False
     os.remove(current_path)
@@ -150,6 +178,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     parsed_meta = parse_filename(filename, upload_dt)
     if not parsed_meta:
         return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
+    parsed_meta['lottery_type'] = _normalize_lottery_type(parsed_meta.get('lottery_type'))
 
     business_date = get_business_date(upload_dt)
     if _is_postgres():

@@ -27,11 +27,32 @@ def preview_batch(requested_count: int, user_id: int = None) -> dict:
             'sufficient': False,
         }
     blocked_lottery_types = []
+    max_processing = None
+    daily_limit = None
+    current_processing = 0
+    today_count = 0
     if user_id is not None:
         from models.user import User
         user = db.session.get(User, user_id)
-        blocked_lottery_types = user.get_blocked_lottery_types() if user else []
+        if user:
+            blocked_lottery_types = user.get_blocked_lottery_types()
+            max_processing = user.max_processing_b_mode
+            daily_limit = user.daily_ticket_limit
+            if max_processing is not None:
+                current_processing = LotteryTicket.query.filter_by(
+                    assigned_user_id=user_id,
+                    status='assigned',
+                ).count()
+            if daily_limit is not None:
+                from utils.time_utils import get_today_noon
+                from services.ticket_pool import _count_today_completed
+
+                today_count = _count_today_completed(user_id, get_today_noon())
     available = get_mode_b_preview_available(blocked_lottery_types=blocked_lottery_types)
+    if max_processing is not None:
+        available = min(available, max(0, max_processing - current_processing))
+    if daily_limit is not None:
+        available = min(available, max(0, daily_limit - today_count))
     return {
         'available': available,
         'requested': requested_count,
@@ -208,6 +229,8 @@ def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = No
     """确认收到，批量改为 completed"""
     ticket_ids = list(dict.fromkeys(ticket_ids))
     if completed_count is not None:
+        if isinstance(completed_count, bool) or isinstance(completed_count, float):
+            return {'success': False, 'error': 'completed_count must be integer', 'completed_count': 0, 'expired_count': 0}
         try:
             completed_count = int(completed_count)
         except (TypeError, ValueError):

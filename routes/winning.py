@@ -1,4 +1,5 @@
-import re
+﻿import re
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
@@ -6,7 +7,7 @@ from flask_login import current_user, login_required
 from extensions import db
 from models.ticket import LotteryTicket
 from models.winning import WinningRecord
-from utils.decorators import login_required_json
+from utils.decorators import login_required_json, parse_json_object
 from utils.time_utils import beijing_now, get_business_date, get_business_window
 
 winning_bp = Blueprint('winning', __name__)
@@ -41,17 +42,17 @@ def _winning_key_matches_ticket(ticket_id: int, oss_key: str) -> bool:
 def presign():
     ticket_id = request.args.get('ticket_id')
     if not ticket_id:
-        return jsonify({'success': False, 'error': '缺少票ID'}), 400
+        return jsonify({'success': False, 'error': '缂哄皯绁↖D'}), 400
 
     ticket, error_response = _get_winning_ticket_or_error(ticket_id)
     if error_response:
         return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
-        return jsonify({'success': False, 'error': '权限不足'}), 403
+        return jsonify({'success': False, 'error': '鏉冮檺涓嶈冻'}), 403
 
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record and record.is_checked:
-        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法替换图片'}), 403
 
     try:
         from services.oss_service import build_oss_key, generate_presign_url
@@ -62,7 +63,7 @@ def presign():
             url = f"{url}&ticket_id={ticket.id}"
         return jsonify({'success': True, 'url': url, 'oss_key': key})
     except Exception as e:
-        return jsonify({'success': False, 'error': f'OSS错误: {e}'}), 500
+        return jsonify({'success': False, 'error': f'OSS閿欒: {e}'}), 500
 
 
 @winning_bp.route('/upload-local', methods=['POST'])
@@ -76,27 +77,24 @@ def upload_local():
     key = (request.args.get('key') or '').strip()
     ticket_id = (request.args.get('ticket_id') or '').strip()
     if not key:
-        return jsonify({'success': False, 'error': '缺少 key'}), 400
+        return jsonify({'success': False, 'error': '缂哄皯 key'}), 400
     if not ticket_id:
-        return jsonify({'success': False, 'error': '缺少票ID'}), 400
+        return jsonify({'success': False, 'error': '缂哄皯绁↖D'}), 400
     if 'file' not in request.files:
-        return jsonify({'success': False, 'error': '请选择图片'}), 400
+        return jsonify({'success': False, 'error': '璇烽€夋嫨鍥剧墖'}), 400
 
     ticket, error_response = _get_winning_ticket_or_error(ticket_id)
     if error_response:
         return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
-        return jsonify({'success': False, 'error': '权限不足'}), 403
+        return jsonify({'success': False, 'error': '鏉冮檺涓嶈冻'}), 403
 
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record and record.is_checked:
-        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法替换图片'}), 403
 
-    from services.oss_service import build_oss_key
-
-    expected_key = build_oss_key(ticket.id).replace('/', '_')
-    if key != expected_key:
-        return jsonify({'success': False, 'error': '上传 key 与票据不匹配'}), 400
+    if not _winning_key_matches_ticket(ticket.id, key):
+        return jsonify({'success': False, 'error': '涓婁紶 key 涓庣エ鎹笉鍖归厤'}), 400
 
     file = request.files['file']
     if not file.filename:
@@ -127,10 +125,22 @@ def upload_local():
 @login_required_json
 @login_required
 def record_winning():
-    data = request.get_json(silent=True) or {}
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
     ticket_id = data.get('ticket_id')
     oss_key = data.get('oss_key')
-    winning_amount = data.get('winning_amount')
+    raw_winning_amount = data.get('winning_amount')
+    winning_amount = None
+    if raw_winning_amount is not None:
+        if isinstance(raw_winning_amount, bool):
+            return jsonify({'success': False, 'error': 'winning_amount 蹇呴』鏄暟瀛?'}), 400
+        try:
+            winning_amount = Decimal(str(raw_winning_amount))
+        except (InvalidOperation, TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'winning_amount 蹇呴』鏄暟瀛?'}), 400
+        if winning_amount < 0:
+            return jsonify({'success': False, 'error': 'winning_amount 涓嶈兘涓鸿礋鏁?'}), 400
 
     if not ticket_id or not oss_key:
         return jsonify({'success': False, 'error': '参数不完整'}), 400
@@ -139,7 +149,7 @@ def record_winning():
     if error_response:
         return error_response
     if ticket.assigned_user_id != current_user.id and not current_user.is_admin:
-        return jsonify({'success': False, 'error': '权限不足'}), 403
+        return jsonify({'success': False, 'error': '鏉冮檺涓嶈冻'}), 403
 
     from services.oss_service import delete_stored_image, get_public_url
 
@@ -148,9 +158,9 @@ def record_winning():
     record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
     if record:
         if record.is_checked:
-            return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+            return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法替换图片'}), 403
         if not _winning_key_matches_ticket(ticket.id, oss_key):
-            return jsonify({'success': False, 'error': 'oss_key 与票据不匹配'}), 400
+            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
         old_key = record.image_oss_key
         old_url = record.winning_image_url
         if old_key != oss_key or old_url != image_url:
@@ -162,7 +172,7 @@ def record_winning():
         record.uploaded_at = beijing_now()
     else:
         if not _winning_key_matches_ticket(ticket.id, oss_key):
-            return jsonify({'success': False, 'error': 'oss_key 与票据不匹配'}), 400
+            return jsonify({'success': False, 'error': 'oss_key 涓庣エ鎹笉鍖归厤'}), 400
         record = WinningRecord(
             ticket_id=ticket_id,
             source_file_id=ticket.source_file_id,
@@ -208,7 +218,7 @@ def my_winning():
         try:
             filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
-            return jsonify({'success': False, 'error': '日期格式无效，请使用 YYYY-MM-DD'}), 400
+            return jsonify({'success': False, 'error': '鏃ユ湡鏍煎紡鏃犳晥锛岃浣跨敤 YYYY-MM-DD'}), 400
         filter_start, filter_end = get_business_window(filter_date)
         q = q.filter(
             LotteryTicket.completed_at >= filter_start,
@@ -272,7 +282,7 @@ def my_winning():
 @login_required
 def mark_checked(record_id):
     if not current_user.is_admin:
-        return jsonify({'success': False, 'error': '权限不足'}), 403
+        return jsonify({'success': False, 'error': '鏉冮檺涓嶈冻'}), 403
 
     rows_updated = db.session.query(WinningRecord).filter(
         WinningRecord.id == record_id,
@@ -288,7 +298,7 @@ def mark_checked(record_id):
     if rows_updated == 0:
         record = db.session.get(WinningRecord, record_id)
         if not record:
-            return jsonify({'success': False, 'error': '记录不存在'}), 404
+            return jsonify({'success': False, 'error': '璁板綍涓嶅瓨鍦?'}), 404
         return jsonify({'success': False, 'error': '该记录已经标记为已检查'}), 400
 
     record = db.session.get(WinningRecord, record_id)
@@ -309,14 +319,14 @@ def upload_winning_image(ticket_id):
     if error_response:
         return error_response
     if ticket.assigned_user_id != current_user.id:
-        return jsonify({'success': False, 'error': '权限不足'}), 403
+        return jsonify({'success': False, 'error': '鏉冮檺涓嶈冻'}), 403
 
     record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
     if record and record.is_checked:
-        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法更换图片'}), 403
+        return jsonify({'success': False, 'error': '该中奖记录已被管理员标记为已检查，无法替换图片'}), 403
 
     if 'image' not in request.files:
-        return jsonify({'success': False, 'error': '请选择图片'}), 400
+        return jsonify({'success': False, 'error': '璇烽€夋嫨鍥剧墖'}), 400
 
     file = request.files['image']
     if not file.filename:
@@ -340,7 +350,7 @@ def upload_winning_image(ticket_id):
             _get_bucket().put_object(image_oss_key, image_stream.read())
             image_url = get_public_url(image_oss_key)
         except Exception as e:
-            return jsonify({'success': False, 'error': f'OSS上传失败: {e}'}), 500
+            return jsonify({'success': False, 'error': f'OSS涓婁紶澶辫触: {e}'}), 500
     else:
         upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
         images_dir = os.path.join(upload_folder, 'images')
@@ -373,3 +383,4 @@ def upload_winning_image(ticket_id):
     ticket.is_winning = True
     db.session.commit()
     return jsonify({'success': True, 'image_url': image_url, 'record': record.to_dict()})
+

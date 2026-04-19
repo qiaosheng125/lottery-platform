@@ -12,10 +12,26 @@ from models.audit import AuditLog
 from models.settings import SystemSettings
 from models.user import User, UserSession
 from services.session_service import create_session, delete_session
-from utils.decorators import get_client_ip, login_required_json
+from utils.decorators import get_client_ip, login_required_json, parse_json_object
 from utils.time_utils import beijing_now
 
 auth_bp = Blueprint('auth', __name__)
+
+
+def _normalize_device_id(raw_device_id):
+    if raw_device_id is None:
+        return ''
+    if not isinstance(raw_device_id, str):
+        return None
+    return raw_device_id.strip()
+
+
+def _validate_device_id(device_id):
+    if not device_id:
+        return None
+    if len(device_id) > 20 or not all(c.isalnum() or c in '-_' for c in device_id):
+        return 'invalid device_id'
+    return None
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -32,10 +48,42 @@ def login():
         return redirect(url_for('index'))
 
     if request.method == 'POST':
-        data = (request.get_json(silent=True) or {}) if request.is_json else request.form
-        username = (data.get('username') or '').strip()
-        password = data.get('password') or ''
-        device_id = data.get('device_id') or ''
+        if request.is_json:
+            data, data_error = parse_json_object()
+            if data_error:
+                return data_error
+        else:
+            data = request.form
+        raw_username = data.get('username')
+        if raw_username is None:
+            username = ''
+        elif isinstance(raw_username, str):
+            username = raw_username.strip()
+        else:
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'invalid username type'}), 400
+            flash('invalid username type', 'danger')
+            return render_template('login.html')
+
+        raw_password = data.get('password')
+        password = '' if raw_password is None else raw_password
+        if not isinstance(password, str):
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'invalid password type'}), 400
+            flash('invalid password type', 'danger')
+            return render_template('login.html')
+        device_id = _normalize_device_id(data.get('device_id'))
+        if device_id is None:
+            if request.is_json:
+                return jsonify({'success': False, 'error': 'invalid device_id type'}), 400
+            flash('invalid device_id type', 'danger')
+            return render_template('login.html')
+        device_error = _validate_device_id(device_id)
+        if device_error:
+            if request.is_json:
+                return jsonify({'success': False, 'error': device_error}), 400
+            flash(device_error, 'danger')
+            return render_template('login.html')
 
         user = User.query.filter_by(username=username).first()
 
@@ -51,15 +99,17 @@ def login():
             flash('账号已被禁用', 'danger')
             return render_template('login.html')
 
-        if not user.is_admin and device_id:
+        if not user.is_admin:
             settings = SystemSettings.get()
             cutoff = beijing_now() - timedelta(hours=settings.session_lifetime_hours)
             active_sessions = UserSession.query.filter_by(user_id=user.id).filter(
                 UserSession.last_seen >= cutoff
             ).count()
-            existing = UserSession.query.filter_by(user_id=user.id, device_id=device_id).filter(
-                UserSession.last_seen >= cutoff
-            ).first()
+            existing = None
+            if device_id:
+                existing = UserSession.query.filter_by(user_id=user.id, device_id=device_id).filter(
+                    UserSession.last_seen >= cutoff
+                ).first()
             if not existing and active_sessions >= user.max_devices:
                 message = f'已超过最大设备数限制（{user.max_devices}台）'
                 if request.is_json:
@@ -94,7 +144,7 @@ def login():
     return render_template('login.html')
 
 
-@auth_bp.route('/logout', methods=['POST', 'GET'])
+@auth_bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
     token = session.pop('session_token', None)
@@ -115,8 +165,15 @@ def heartbeat():
     if token:
         session_record = UserSession.query.filter_by(session_token=token).first()
         if session_record:
-            data = request.get_json(silent=True) or {}
-            device_id = (data.get('device_id') or '').strip()
+            data, data_error = parse_json_object()
+            if data_error:
+                return data_error
+            device_id = _normalize_device_id(data.get('device_id'))
+            if device_id is None:
+                return jsonify({'success': False, 'error': 'invalid device_id type'}), 400
+            device_error = _validate_device_id(device_id)
+            if device_error:
+                return jsonify({'success': False, 'error': device_error}), 400
             if device_id:
                 session_record.device_id = device_id
             now = beijing_now()

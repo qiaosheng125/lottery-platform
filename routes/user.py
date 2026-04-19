@@ -10,7 +10,7 @@ from extensions import db
 from models.settings import SystemSettings
 from models.ticket import LotteryTicket
 from services.ticket_pool import get_pool_status, get_pool_total_pending
-from utils.decorators import login_required_json
+from utils.decorators import login_required_json, parse_json_object
 from utils.time_utils import beijing_now, get_business_date, get_today_noon
 
 user_bp = Blueprint('user', __name__)
@@ -169,9 +169,13 @@ def export_daily():
 @login_required_json
 @login_required
 def change_password():
-    data = request.get_json(silent=True) or {}
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
+    if not isinstance(old_password, str) or not isinstance(new_password, str):
+        return jsonify({'success': False, 'error': 'invalid password type'}), 400
 
     if not old_password or not new_password:
         return jsonify({'success': False, 'error': '请填写完整'}), 400

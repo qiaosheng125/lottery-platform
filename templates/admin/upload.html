@@ -147,6 +147,8 @@ createApp({
     return {
       files: [], loading: false, page: 1, totalPages: 1, total: 0,
       filterDate: '', dateOptions: [],
+      currentBusinessDate: '',
+      defaultDateInitialized: false,
       uploadQueue: [], uploading: false,
       detailTickets: [],
       listRequestSeq: 0,
@@ -190,6 +192,16 @@ createApp({
           this.dateOptions = data.date_options;
           if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {
             this.filterDate = '';
+            this.page = 1;
+            await this.loadFiles();
+            return;
+          }
+        }
+        this.currentBusinessDate = data.current_business_date || '';
+        if (!this.defaultDateInitialized) {
+          this.defaultDateInitialized = true;
+          if (!this.filterDate && this.currentBusinessDate) {
+            this.filterDate = this.currentBusinessDate;
             this.page = 1;
             await this.loadFiles();
             return;

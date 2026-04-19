@@ -446,7 +446,7 @@ createApp({
       bPreview: null,
       downloading: false,
       bDownloadCooldownUntil: 0,
-      isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %},
+      isModeB: {{ (current_user.client_mode == 'mode_b') | tojson }},
       // 待处理批次：[{filename, ticket_ids, count, amount, downloaded_at}]
       // 出票记录：[{filename, ticket_ids, count, amount, downloaded_at}]
       bPendingBatches: [],

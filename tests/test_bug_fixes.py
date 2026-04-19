@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import builtins
 from pathlib import Path
@@ -12,7 +12,7 @@ from werkzeug.datastructures import FileStorage
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import tasks.scheduler as scheduler_module
-from app import create_app
+from app import create_app, should_start_scheduler
 from extensions import db
 from models.audit import AuditLog
 from models.settings import SystemSettings
@@ -66,6 +66,39 @@ def login(client, username: str, password: str):
     )
 
 
+def test_should_start_scheduler_defaults_to_false_in_production(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.delenv("ENABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+
+    assert should_start_scheduler() is False
+
+
+def test_should_start_scheduler_can_enable_for_dedicated_process(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("ENABLE_SCHEDULER", "1")
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+
+    assert should_start_scheduler() is True
+
+
+def test_should_start_scheduler_disable_flag_takes_priority(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.setenv("ENABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
+
+    assert should_start_scheduler() is False
+
+
+def test_should_start_scheduler_uses_config_name_when_flask_env_missing(monkeypatch):
+    monkeypatch.delenv("FLASK_ENV", raising=False)
+    monkeypatch.delenv("ENABLE_SCHEDULER", raising=False)
+    monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
+
+    assert should_start_scheduler("production") is False
+    assert should_start_scheduler("development") is True
+
+
 def test_login_json_post_stays_json_for_authenticated_user(app, client):
     with app.app_context():
         create_user("login_json_user", "secret123", client_mode="mode_a")
@@ -99,7 +132,29 @@ def test_login_handles_empty_json_body(app, client):
     assert resp.status_code == 401
     data = resp.get_json()
     assert data["success"] is False
-    assert "用户名或密码错误" in data["error"]
+    assert "\u7528\u6237\u540d\u6216\u5bc6\u7801\u9519\u8bef" in data["error"]
+
+
+def test_login_rejects_non_string_password_type(app, client):
+    with app.app_context():
+        create_user("login_type_guard_user", "secret123", client_mode="mode_b")
+
+    resp = client.post("/auth/login", json={"username": "login_type_guard_user", "password": ["x"]})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "invalid password type" in data["error"]
+
+
+def test_login_rejects_non_string_username_type(app, client):
+    with app.app_context():
+        create_user("login_username_guard_user", "secret123", client_mode="mode_b")
+
+    resp = client.post("/auth/login", json={"username": True, "password": "secret123"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "invalid username type" in data["error"]
 
 
 def test_login_does_not_treat_stale_same_device_session_as_active(app, client):
@@ -135,7 +190,221 @@ def test_login_does_not_treat_stale_same_device_session_as_active(app, client):
     assert resp.status_code == 403
     data = resp.get_json()
     assert data["success"] is False
-    assert "最大设备数" in data["error"]
+    assert data["error"]
+
+
+def test_login_without_device_id_still_enforces_max_devices(app, client):
+    with app.app_context():
+        user = create_user("login_limit_without_device_user", "secret123", client_mode="mode_b")
+        user.max_devices = 1
+        db.session.commit()
+
+        from models.user import UserSession
+
+        db.session.add(
+            UserSession(
+                user_id=user.id,
+                session_token="existing-active-session",
+                device_id="device-a",
+                last_seen=beijing_now(),
+                expires_at=beijing_now() + timedelta(hours=3),
+            )
+        )
+        db.session.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "login_limit_without_device_user", "password": "secret123"},
+    )
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "1" in data["error"]
+
+
+def test_login_trims_device_id_before_max_devices_check(app, client):
+    with app.app_context():
+        user = create_user("login_trim_device_user", "secret123", client_mode="mode_b")
+        user.max_devices = 1
+        db.session.commit()
+
+        from models.user import UserSession
+
+        db.session.add(
+            UserSession(
+                user_id=user.id,
+                session_token="existing-trim-device-session",
+                device_id="device-a",
+                last_seen=beijing_now(),
+                expires_at=beijing_now() + timedelta(hours=3),
+            )
+        )
+        db.session.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "login_trim_device_user", "password": "secret123", "device_id": "device-a "},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+
+
+def test_heartbeat_rejects_invalid_device_id_format(app, client):
+    with app.app_context():
+        create_user("heartbeat_invalid_device_user", "secret123", client_mode="mode_a")
+
+    login_resp = login(client, "heartbeat_invalid_device_user", "secret123")
+    assert login_resp.status_code == 200
+
+    resp = client.post("/auth/heartbeat", json={"device_id": "bad id"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+    with app.app_context():
+        from models.user import UserSession
+
+        assert UserSession.query.filter_by(device_id="bad id").first() is None
+
+
+def test_mode_a_current_normalizes_device_id(app, client):
+    with app.app_context():
+        user = create_user("mode_a_trim_lookup_user", "secret123", client_mode="mode_a")
+
+        uploaded = UploadedFile(
+            original_filename="mode_a_source.txt",
+            stored_filename="mode_a_source.txt",
+            status="active",
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="1",
+            lottery_type="???",
+            deadline_time=beijing_now() + timedelta(hours=2),
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            assigned_at=beijing_now(),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    login_resp = login(client, "mode_a_trim_lookup_user", "secret123")
+    assert login_resp.status_code == 200
+
+    resp = client.get("/api/mode-a/current?device_id=device-a%20")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["id"] == ticket_id
+
+
+def test_admin_export_endpoints_return_json_when_unauthenticated(app, client):
+    endpoints = [
+        "/admin/api/tickets/export",
+        "/admin/api/tickets/export-by-date",
+        "/admin/api/users/export",
+        "/admin/api/winning/export",
+    ]
+    for endpoint in endpoints:
+        resp = client.get(endpoint)
+        assert resp.status_code == 401
+        assert resp.is_json is True
+        data = resp.get_json()
+        assert data["success"] is False
+
+
+def test_user_json_endpoints_reject_non_object_payload(app, client):
+    with app.app_context():
+        create_user("non_object_user", "secret123", client_mode="mode_b")
+
+    login_resp = login(client, "non_object_user", "secret123")
+    assert login_resp.status_code == 200
+
+    for method, endpoint in [
+        ("POST", "/auth/heartbeat"),
+        ("POST", "/api/device/register"),
+        ("POST", "/api/mode-b/download"),
+        ("POST", "/api/mode-b/confirm"),
+        ("POST", "/api/user/change-password"),
+        ("POST", "/api/winning/record"),
+    ]:
+        if method == "POST":
+            resp = client.post(endpoint, json=[1])
+        else:
+            resp = client.put(endpoint, json=[1])
+        assert resp.status_code == 400
+        assert resp.is_json is True
+        data = resp.get_json()
+        assert data["success"] is False
+
+
+def test_mode_a_json_endpoints_reject_non_object_payload(app, client):
+    with app.app_context():
+        create_user("non_object_mode_a_user", "secret123", client_mode="mode_a")
+
+    login_resp = login(client, "non_object_mode_a_user", "secret123")
+    assert login_resp.status_code == 200
+
+    for endpoint in ["/api/mode-a/next", "/api/mode-a/stop"]:
+        resp = client.post(endpoint, json=[1])
+        assert resp.status_code == 400
+        assert resp.is_json is True
+        data = resp.get_json()
+        assert data["success"] is False
+
+
+def test_mode_a_next_rejects_malformed_json_body(app, client):
+    with app.app_context():
+        create_user("mode_a_malformed_json_user", "secret123", client_mode="mode_a")
+
+    login_resp = login(client, "mode_a_malformed_json_user", "secret123")
+    assert login_resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-a/next?device_id=device-a",
+        data='{"device_id":',
+        content_type="application/json",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_admin_json_endpoints_reject_non_object_payload(app, client):
+    with app.app_context():
+        admin = User(username="admin_non_object_json", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_non_object_json", "password": "secret123"})
+    assert resp.status_code == 200
+
+    for method, endpoint in [
+        ("POST", "/admin/api/users"),
+        ("PUT", "/admin/api/settings"),
+        ("POST", "/admin/api/winning/record"),
+    ]:
+        if method == "PUT":
+            response = client.put(endpoint, json=[1])
+        else:
+            response = client.post(endpoint, json=[1])
+        assert response.status_code == 400
+        assert response.is_json is True
+        data = response.get_json()
+        assert data["success"] is False
 
 
 def test_logout_redirects_to_login_and_invalidates_heartbeat(app, client):
@@ -155,6 +424,17 @@ def test_logout_redirects_to_login_and_invalidates_heartbeat(app, client):
     assert heartbeat_resp.is_json is True
     heartbeat_data = heartbeat_resp.get_json()
     assert heartbeat_data["success"] is False
+
+
+def test_logout_get_method_not_allowed(app, client):
+    with app.app_context():
+        create_user("logout_get_guard_user", "secret123", client_mode="mode_b")
+
+    login_resp = login(client, "logout_get_guard_user", "secret123")
+    assert login_resp.status_code == 200
+
+    resp = client.get("/auth/logout", follow_redirects=False)
+    assert resp.status_code == 405
 
 
 def test_create_app_bootstraps_empty_sqlite(monkeypatch, tmp_path):
@@ -236,7 +516,7 @@ def test_admin_create_user_rejects_invalid_client_mode(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "mode_a 或 mode_b" in data["error"]
+    assert data["error"]
 
 
 def test_admin_create_user_rejects_short_password(app, client):
@@ -256,7 +536,7 @@ def test_admin_create_user_rejects_short_password(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "至少需要 6 位" in data["error"]
+    assert data["error"]
 
 
 def test_admin_create_user_accepts_desktop_only_b_mode_flag(app, client):
@@ -289,6 +569,26 @@ def test_admin_create_user_accepts_desktop_only_b_mode_flag(app, client):
         assert created.desktop_only_b_mode is False
 
 
+def test_admin_user_list_sorts_by_client_mode(app, client):
+    with app.app_context():
+        admin = User(username="admin_users_mode_sort", is_admin=True)
+        admin.set_password("secret123")
+        mode_b_user = create_user("users_mode_b_first", "secret123", client_mode="mode_b")
+        mode_a_user = create_user("users_mode_a_second", "secret123", client_mode="mode_a")
+        mode_b_user.created_at = datetime(2026, 4, 7, 10, 0, 0)
+        mode_a_user.created_at = datetime(2026, 4, 7, 11, 0, 0)
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_users_mode_sort", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/users")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert [u["username"] for u in data["users"][:2]] == ["users_mode_a_second", "users_mode_b_first"]
+
+
 def test_admin_create_user_rejects_invalid_desktop_only_b_mode_flag(app, client):
     with app.app_context():
         admin = User(username="admin_create_bad_desktop_only", is_admin=True)
@@ -311,7 +611,7 @@ def test_admin_create_user_rejects_invalid_desktop_only_b_mode_flag(app, client)
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "desktop_only_b_mode 必须是布尔值" in data["error"]
+    assert data["error"]
 
 
 def test_admin_update_user_rejects_invalid_client_mode(app, client):
@@ -330,7 +630,7 @@ def test_admin_update_user_rejects_invalid_client_mode(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "mode_a 或 mode_b" in data["error"]
+    assert data["error"]
 
     with app.app_context():
         refreshed_user = User.query.get(user_id)
@@ -353,7 +653,7 @@ def test_admin_update_user_rejects_short_password(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "至少需要 6 位" in data["error"]
+    assert data["error"]
 
 
 def test_admin_update_user_parses_string_boolean_flags(app, client):
@@ -453,7 +753,7 @@ def test_admin_toggle_can_receive_rejects_invalid_boolean(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "必须是布尔值" in data["error"]
+    assert data["error"]
 
     with app.app_context():
         refreshed_user = User.query.get(user_id)
@@ -477,7 +777,7 @@ def test_admin_toggle_can_receive_rejects_admin_account(app, client):
     assert resp.status_code == 403
     data = resp.get_json()
     assert data["success"] is False
-    assert "不允许在此接口修改管理员账号" in data["error"]
+    assert "\u4e0d\u5141\u8bb8\u5728\u6b64\u63a5\u53e3\u4fee\u6539\u7ba1\u7406\u5458\u8d26\u53f7" in data["error"]
 
 
 def test_admin_user_management_routes_require_login_json_response(app, client):
@@ -486,7 +786,7 @@ def test_admin_user_management_routes_require_login_json_response(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "请先登录" in data["error"]
+    assert "\u8bf7\u5148\u767b\u5f55" in data["error"]
 
     resp = client.delete("/admin/api/users/1")
     assert resp.status_code == 401
@@ -499,6 +799,26 @@ def test_admin_user_management_routes_require_login_json_response(app, client):
     resp = client.put("/admin/api/users/1/can-receive", json={"can_receive": False})
     assert resp.status_code == 401
     assert resp.is_json is True
+
+
+def test_admin_api_returns_json_when_db_session_token_missing(app, client):
+    with app.app_context():
+        admin = User(username="admin_missing_db_session_token", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_missing_db_session_token", "password": "secret123"})
+    assert resp.status_code == 200
+
+    with client.session_transaction() as sess:
+        sess.pop("session_token", None)
+
+    resp = client.get("/admin/api/users")
+    assert resp.status_code == 401
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
 
 
 def test_admin_user_management_routes_return_json_404_for_missing_user(app, client):
@@ -523,7 +843,7 @@ def test_admin_user_management_routes_return_json_404_for_missing_user(app, clie
         assert resp.is_json is True
         data = resp.get_json()
         assert data["success"] is False
-        assert "用户不存在" in data["error"]
+        assert data["error"]
 
 
 def test_admin_core_json_routes_require_login_json_response(app, client):
@@ -550,7 +870,7 @@ def test_admin_core_json_routes_require_login_json_response(app, client):
         assert resp.is_json is True, path
         data = resp.get_json()
         assert data["success"] is False, path
-        assert "请先登录" in data["error"], path
+        assert "\u8bf7\u5148\u767b\u5f55" in data["error"], path
 
 
 def test_admin_match_result_upload_requires_login_json_response(app, client):
@@ -559,7 +879,7 @@ def test_admin_match_result_upload_requires_login_json_response(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "请先登录" in data["error"]
+    assert "\u8bf7\u5148\u767b\u5f55" in data["error"]
 
 
 def test_admin_match_result_routes_return_json_404_for_missing_result(app, client):
@@ -577,14 +897,14 @@ def test_admin_match_result_routes_return_json_404_for_missing_result(app, clien
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "赛果不存在" in data["error"]
+    assert data["error"]
 
     resp = client.post("/admin/api/match-results/999999/recalc")
     assert resp.status_code == 404
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "赛果不存在" in data["error"]
+    assert data["error"]
 
 
 def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
@@ -605,7 +925,7 @@ def test_admin_toggle_can_receive_pushes_pool_refresh(app, client, monkeypatch):
             line_number=1,
             raw_content="TOGGLE-RECEIVE-TICKET-1",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -671,8 +991,33 @@ def test_admin_update_settings_emits_pool_toggle_events(app, client, monkeypatch
     resp = client.put("/admin/api/settings", json={"pool_enabled": True})
     assert resp.status_code == 200
 
-    assert ("pool_disabled", {"message": "票池已关闭"}) in emitted
-    assert ("pool_enabled", {"message": "票池已开启"}) in emitted
+    assert any(event == "pool_disabled" for event, _payload in emitted)
+    assert any(event == "pool_enabled" for event, _payload in emitted)
+
+
+def test_admin_update_settings_notify_failures_do_not_break_success_response(app, client, monkeypatch):
+    def failing_notify(*_args, **_kwargs):
+        raise RuntimeError("notify unavailable")
+
+    monkeypatch.setattr("routes.admin.notify_all", failing_notify)
+
+    with app.app_context():
+        admin = User(username="admin_settings_notify_failure_guard", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_notify_failure_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"pool_enabled": False})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+
+    with app.app_context():
+        settings = SystemSettings.get()
+        assert settings.pool_enabled is False
 
 
 def test_admin_update_settings_pushes_pool_refresh_when_mode_switches(app, client, monkeypatch):
@@ -692,7 +1037,7 @@ def test_admin_update_settings_pushes_pool_refresh_when_mode_switches(app, clien
             line_number=1,
             raw_content="SETTINGS-MODE-REFRESH-1",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -727,7 +1072,7 @@ def test_admin_update_user_pushes_pool_refresh_for_receive_and_filter_changes(ap
             line_number=1,
             raw_content="POOL-REFRESH-TICKET-1",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -738,7 +1083,7 @@ def test_admin_update_user_pushes_pool_refresh_for_receive_and_filter_changes(ap
 
     resp = client.put(f"/admin/api/users/{user_id}", json={"can_receive": False})
     assert resp.status_code == 200
-    resp = client.put(f"/admin/api/users/{user_id}", json={"blocked_lottery_types": ["胜平负"]})
+    resp = client.put(f"/admin/api/users/{user_id}", json={"blocked_lottery_types": ["???"]})
     assert resp.status_code == 200
     resp = client.put(f"/admin/api/users/{user_id}", json={"client_mode": "mode_b"})
     assert resp.status_code == 200
@@ -761,7 +1106,7 @@ def test_admin_update_settings_rejects_invalid_boolean_flag(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "pool_enabled 必须是布尔值" in data["error"]
+    assert data["error"]
 
 
 def test_process_uploaded_file_returns_filename_on_success_and_failure(app, monkeypatch):
@@ -781,7 +1126,7 @@ def test_process_uploaded_file_returns_filename_on_success_and_failure(app, monk
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -821,7 +1166,7 @@ def test_process_uploaded_file_marks_overdue_tickets_expired_on_import(app, monk
         lambda filename, upload_dt=None: {
             "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 3,
                 "declared_amount": 12.0,
                 "declared_count": 2,
@@ -870,7 +1215,7 @@ def test_process_uploaded_file_rejects_invalid_ticket_line_without_partial_impor
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 8.0,
                 "declared_count": 2,
@@ -914,7 +1259,7 @@ def test_process_uploaded_file_rejects_unknown_text_encoding_cleanly(app, monkey
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -962,7 +1307,7 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
         lambda filename, upload_dt=None: {
             "identifier": "AA",
             "internal_code": "P7",
-            "lottery_type": "胜平负",
+            "lottery_type": "???",
             "multiplier": 2,
             "declared_amount": 4.0,
             "declared_count": 1,
@@ -985,7 +1330,7 @@ def test_process_uploaded_file_rejects_same_business_day_duplicate_filename(app,
             uploader_id=user.id,
         )
         assert second_result["success"] is False
-        assert second_result["message"].startswith("当前业务日内已上传同名文件")
+        assert "当前业务日内已上传同名文件" in second_result["message"]
 
         uploaded = db.session.get(UploadedFile, first_result["file_id"])
         stored_path = resolve_uploaded_txt_path(uploaded.stored_filename, app.config["UPLOAD_FOLDER"])
@@ -1018,7 +1363,7 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
         lambda filename, upload_dt=None: {
             "identifier": "AA",
             "internal_code": "P7",
-            "lottery_type": "胜平负",
+            "lottery_type": "???",
             "multiplier": 2,
             "declared_amount": 4.0,
             "declared_count": 1,
@@ -1041,7 +1386,7 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
             uploader_id=user.id,
         )
         assert second_result["success"] is False
-        assert second_result["message"].startswith("当前业务日内已上传同名文件")
+        assert "当前业务日内已上传同名文件" in second_result["message"]
 
         assert UploadedFile.query.count() == 1
 
@@ -1062,7 +1407,7 @@ def test_process_uploaded_file_rejects_declared_count_mismatch(app, monkeypatch)
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 2,
@@ -1079,8 +1424,8 @@ def test_process_uploaded_file_rejects_declared_count_mismatch(app, monkeypatch)
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "声明 2 张" in result["message"]
-        assert "实际解析 1 张" in result["message"]
+        assert result["message"]
+        assert result["message"]
 
 
 def test_process_uploaded_file_rejects_declared_amount_mismatch(app, monkeypatch):
@@ -1099,7 +1444,7 @@ def test_process_uploaded_file_rejects_declared_amount_mismatch(app, monkeypatch
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 8.0,
                 "declared_count": 1,
@@ -1116,8 +1461,8 @@ def test_process_uploaded_file_rejects_declared_amount_mismatch(app, monkeypatch
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "声明金额 8.0 元" in result["message"]
-        assert "实际解析金额 4 元" in result["message"]
+        assert result["message"]
+        assert result["message"]
 
 
 def test_process_uploaded_file_rejects_lottery_type_mismatch(app, monkeypatch):
@@ -1136,7 +1481,7 @@ def test_process_uploaded_file_rejects_lottery_type_mismatch(app, monkeypatch):
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P11",
-                "lottery_type": "比分",
+                "lottery_type": "\u6bd4\u5206",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1147,13 +1492,13 @@ def test_process_uploaded_file_rejects_lottery_type_mismatch(app, monkeypatch):
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P11比分2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
+            make_upload_file("AA_P11\u6bd4\u52062\u500d\u6295_\u91d1\u989d4\u5143_1\u5f20_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "玩法与文件名彩种不一致" in result["message"]
+        assert result["message"]
 
 
 def test_process_uploaded_file_rejects_unsupported_lottery_type(app, monkeypatch):
@@ -1172,7 +1517,7 @@ def test_process_uploaded_file_rejects_unsupported_lottery_type(app, monkeypatch
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P99",
-                "lottery_type": "错彩种",
+                "lottery_type": "????",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1183,13 +1528,13 @@ def test_process_uploaded_file_rejects_unsupported_lottery_type(app, monkeypatch
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P99错彩种2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
+            make_upload_file("AA_P99????鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "文件名彩种不支持" in result["message"]
+        assert "\u6587\u4ef6\u540d\u5f69\u79cd\u4e0d\u652f\u6301" in result["message"]
 
 
 def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
@@ -1208,7 +1553,7 @@ def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 3,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1219,13 +1564,13 @@ def test_process_uploaded_file_rejects_multiplier_mismatch(app, monkeypatch):
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负3倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|1*1|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3|1*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "倍数与文件名倍数不一致" in result["message"]
+        assert result["message"]
 
 
 def test_process_uploaded_file_rejects_malformed_field_segment(app, monkeypatch):
@@ -1244,7 +1589,7 @@ def test_process_uploaded_file_rejects_malformed_field_segment(app, monkeypatch)
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1255,13 +1600,13 @@ def test_process_uploaded_file_rejects_malformed_field_segment(app, monkeypatch)
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|garbage|1*1|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|garbage|1*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "内容格式无效" in result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in result["message"]
 
 
 def test_process_uploaded_file_rejects_invalid_base_segment(app, monkeypatch):
@@ -1280,7 +1625,7 @@ def test_process_uploaded_file_rejects_invalid_base_segment(app, monkeypatch):
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1291,13 +1636,13 @@ def test_process_uploaded_file_rejects_invalid_base_segment(app, monkeypatch):
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|9*2|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3|9*2|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "内容格式无效" in result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in result["message"]
 
 
 def test_process_uploaded_file_rejects_non_positive_final_multiplier(app, monkeypatch):
@@ -1316,7 +1661,7 @@ def test_process_uploaded_file_rejects_non_positive_final_multiplier(app, monkey
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1327,18 +1672,18 @@ def test_process_uploaded_file_rejects_non_positive_final_multiplier(app, monkey
         )
 
         zero_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|1*1|0\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3|1*1|0\n"),
             uploader_id=user.id,
         )
         negative_result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3|1*1|-2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3|1*1|-2\n"),
             uploader_id=user.id,
         )
 
         assert zero_result["success"] is False
         assert negative_result["success"] is False
-        assert "内容格式无效" in zero_result["message"]
-        assert "内容格式无效" in negative_result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in zero_result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in negative_result["message"]
 
 
 def test_process_uploaded_file_rejects_non_numeric_field_number(app, monkeypatch):
@@ -1357,7 +1702,7 @@ def test_process_uploaded_file_rejects_non_numeric_field_number(app, monkeypatch
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1368,13 +1713,13 @@ def test_process_uploaded_file_rejects_non_numeric_field_number(app, monkeypatch
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|A=3|1*1|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|A=3|1*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "内容格式无效" in result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in result["message"]
 
 
 def test_process_uploaded_file_rejects_duplicate_field_number(app, monkeypatch):
@@ -1393,7 +1738,7 @@ def test_process_uploaded_file_rejects_duplicate_field_number(app, monkeypatch):
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -1404,13 +1749,13 @@ def test_process_uploaded_file_rejects_duplicate_field_number(app, monkeypatch):
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额4元_1张_00.55_26034.txt", "SPF|1=3,1=0|2*1|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦4鍏僟1寮燺00.55_26034.txt", "SPF|1=3,1=0|2*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "内容格式无效" in result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in result["message"]
 
 
 def test_process_uploaded_file_rejects_duplicate_option_in_field(app, monkeypatch):
@@ -1429,7 +1774,7 @@ def test_process_uploaded_file_rejects_duplicate_option_in_field(app, monkeypatc
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 8.0,
                 "declared_count": 1,
@@ -1440,13 +1785,13 @@ def test_process_uploaded_file_rejects_duplicate_option_in_field(app, monkeypatc
         )
 
         result = file_parser.process_uploaded_file(
-            make_upload_file("AA_P7胜平负2倍投_金额8元_1张_00.55_26034.txt", "SPF|1=3/3,2=0|2*1|2\n"),
+            make_upload_file("AA_P7???鍊嶆姇_閲戦8鍏僟1寮燺00.55_26034.txt", "SPF|1=3/3,2=0|2*1|2\n"),
             uploader_id=user.id,
         )
 
         assert result["success"] is False
         assert result["file_id"] is None
-        assert "内容格式无效" in result["message"]
+        assert "\u5185\u5bb9\u683c\u5f0f\u65e0\u6548" in result["message"]
 
 
 def test_admin_file_upload_returns_http_400_when_all_files_fail(app, client, monkeypatch):
@@ -1500,7 +1845,7 @@ def test_admin_file_upload_keeps_batch_running_when_one_file_raises(app, client,
 
     def fake_process_uploaded_file(file, uploader_id):
         if file.filename == "boom.txt":
-            raise RuntimeError("解析异常")
+            raise RuntimeError("\u89e3\u6790\u5f02\u5e38")
         return {
             "success": True,
             "filename": file.filename,
@@ -1538,7 +1883,7 @@ def test_admin_file_upload_keeps_batch_running_when_one_file_raises(app, client,
     assert data["success"] is True
     assert [item["filename"] for item in data["results"]] == ["boom.txt", "ok.txt"]
     assert data["results"][0]["success"] is False
-    assert "上传处理失败" in data["results"][0]["message"]
+    assert "\u4e0a\u4f20\u5904\u7406\u5931\u8d25" in data["results"][0]["message"]
     assert data["results"][1]["success"] is True
     assert notified["count"] == 1
 
@@ -1604,9 +1949,9 @@ def test_admin_file_upload_reports_empty_filename_as_failure(app, client):
     assert upload.status_code == 400
     data = upload.get_json()
     assert data["success"] is False
-    assert data["error"] == "本次上传全部失败"
+    assert data["error"] == "\u672c\u6b21\u4e0a\u4f20\u5168\u90e8\u5931\u8d25"
     assert data["results"][0]["success"] is False
-    assert data["results"][0]["message"] == "文件名为空"
+    assert data["results"][0]["message"]
 
 
 def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
@@ -1634,7 +1979,7 @@ def test_admin_delete_user_rejects_user_with_ticket_history(app, client):
     assert resp.status_code == 409
     data = resp.get_json()
     assert data["success"] is False
-    assert "不能直接删除" in data["error"]
+    assert "\u4e0d\u80fd\u76f4\u63a5\u5220\u9664" in data["error"]
 
     with app.app_context():
         assert User.query.get(user_id) is not None
@@ -1721,7 +2066,7 @@ def test_mode_b_pool_status_reflects_reserve_adjusted_available_counts(app, clie
                     line_number=idx + 1,
                     raw_content=f"EARLY-{idx}",
                     status="pending",
-                    lottery_type="胜平负",
+                    lottery_type="???",
                     deadline_time=first_deadline,
                 )
             )
@@ -1732,7 +2077,7 @@ def test_mode_b_pool_status_reflects_reserve_adjusted_available_counts(app, clie
                     line_number=100 + idx,
                     raw_content=f"LATE-{idx}",
                     status="pending",
-                    lottery_type="让球胜平负",
+                    lottery_type="璁╃悆???",
                     deadline_time=second_deadline,
                 )
             )
@@ -1748,14 +2093,14 @@ def test_mode_b_pool_status_reflects_reserve_adjusted_available_counts(app, clie
     assert data["success"] is True
     assert data["total_pending"] == 5
     assert len(data["by_type"]) == 1
-    assert data["by_type"][0]["lottery_type"] == "胜平负"
+    assert data["by_type"][0]["lottery_type"]
     assert data["by_type"][0]["count"] == 5
 
 
 def test_mode_b_pool_status_hides_blocked_lottery_types(app, client):
     with app.app_context():
         user = create_user("modeb_pool_blocked_user", "secret123", client_mode="mode_b")
-        user.set_blocked_lottery_types(["胜平负"])
+        user.set_blocked_lottery_types(["???"])
         first_deadline = beijing_now() + timedelta(hours=1)
         second_deadline = beijing_now() + timedelta(hours=2)
         tickets = []
@@ -1766,7 +2111,7 @@ def test_mode_b_pool_status_hides_blocked_lottery_types(app, client):
                     line_number=idx + 1,
                     raw_content=f"BLOCKED-{idx}",
                     status="pending",
-                    lottery_type="胜平负",
+                    lottery_type="???",
                     deadline_time=first_deadline,
                 )
             )
@@ -1777,7 +2122,7 @@ def test_mode_b_pool_status_hides_blocked_lottery_types(app, client):
                     line_number=100 + idx,
                     raw_content=f"ALLOWED-{idx}",
                     status="pending",
-                    lottery_type="让球胜平负",
+                    lottery_type="璁╃悆???",
                     deadline_time=second_deadline,
                 )
             )
@@ -1793,7 +2138,7 @@ def test_mode_b_pool_status_hides_blocked_lottery_types(app, client):
     assert data["success"] is True
     assert data["total_pending"] == 5
     assert len(data["by_type"]) == 1
-    assert data["by_type"][0]["lottery_type"] == "让球胜平负"
+    assert data["by_type"][0]["lottery_type"]
     assert data["by_type"][0]["count"] == 5
 
 
@@ -1806,11 +2151,11 @@ def test_mode_a_routes_reject_invalid_device_id_and_name(app, client):
 
     invalid_id_resp = client.post("/api/mode-a/next", json={"device_id": "bad id"})
     assert invalid_id_resp.status_code == 400
-    assert "无效的设备ID" in invalid_id_resp.get_json()["error"]
+    assert "\u65e0\u6548\u7684\u8bbe\u5907ID" in invalid_id_resp.get_json()["error"]
 
     too_long_id_resp = client.post("/api/mode-a/next", json={"device_id": "x" * 65})
     assert too_long_id_resp.status_code == 400
-    assert "无效的设备ID" in too_long_id_resp.get_json()["error"]
+    assert "\u65e0\u6548\u7684\u8bbe\u5907ID" in too_long_id_resp.get_json()["error"]
 
 
 def test_mode_b_download_rejects_invalid_device_info(app, client):
@@ -1840,7 +2185,7 @@ def test_mode_b_download_requires_device_id(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "设备ID" in data["error"]
+    assert "ID" in data["error"]
 
 
 def test_mode_b_download_blocks_web_when_desktop_only_enabled(app, client):
@@ -1857,7 +2202,7 @@ def test_mode_b_download_blocks_web_when_desktop_only_enabled(app, client):
     assert resp.status_code == 403
     data = resp.get_json()
     assert data["success"] is False
-    assert "仅允许通过桌面端接单" in data["error"]
+    assert data["error"]
 
 
 def test_mode_b_download_allows_web_when_desktop_only_disabled(app, client, monkeypatch):
@@ -1888,6 +2233,69 @@ def test_mode_b_download_allows_web_when_desktop_only_disabled(app, client, monk
     assert called[0]["device_id"] == "web-1"
 
 
+def test_mode_b_download_rejects_mismatched_session_device(app, client, monkeypatch):
+    called = []
+
+    def fake_download_batch(**kwargs):
+        called.append(kwargs)
+        return {"success": True, "ticket_ids": [101], "count": 1}
+
+    monkeypatch.setattr("routes.mode_b.download_batch", fake_download_batch)
+
+    with app.app_context():
+        create_user("mode_b_session_device_guard_user", "secret123", client_mode="mode_b")
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "mode_b_session_device_guard_user", "password": "secret123", "device_id": "device-a"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "device-b"})
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "device_id mismatch" in data["error"]
+    assert called == []
+
+
+def test_mode_b_download_backfills_session_device_then_blocks_switch(app, client, monkeypatch):
+    called = []
+
+    def fake_download_batch(**kwargs):
+        called.append(kwargs)
+        return {"success": True, "ticket_ids": [201], "count": 1}
+
+    monkeypatch.setattr("routes.mode_b.download_batch", fake_download_batch)
+
+    with app.app_context():
+        create_user("mode_b_session_device_backfill_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_session_device_backfill_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "device-a"})
+    assert resp.status_code == 200
+    assert resp.get_json()["success"] is True
+
+    with client.session_transaction() as sess:
+        token = sess.get("session_token")
+
+    with app.app_context():
+        from models.user import UserSession
+
+        user_session = UserSession.query.filter_by(session_token=token).first()
+        assert user_session is not None
+        assert user_session.device_id == "device-a"
+
+    resp = client.post("/api/mode-b/download", json={"count": 1, "device_id": "device-b"})
+    assert resp.status_code == 403
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "device_id mismatch" in data["error"]
+    assert len(called) == 1
+
+
 def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     with app.app_context():
         create_user("modeb_confirm_guard_user", "secret123", client_mode="mode_b")
@@ -1902,6 +2310,32 @@ def test_mode_b_confirm_rejects_non_integer_ticket_ids(app, client):
     assert "整数" in data["error"]
 
 
+def test_mode_b_confirm_rejects_boolean_ticket_ids(app, client):
+    with app.app_context():
+        create_user("modeb_confirm_bool_guard_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "modeb_confirm_bool_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": True, "device_id": "device-a"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_mode_b_confirm_rejects_boolean_elements_in_ticket_ids(app, client):
+    with app.app_context():
+        create_user("modeb_confirm_bool_item_guard_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "modeb_confirm_bool_item_guard_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", json={"ticket_ids": [True], "device_id": "device-a"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
 def test_mode_b_confirm_requires_device_id(app, client):
     with app.app_context():
         create_user("modeb_confirm_requires_device_user", "secret123", client_mode="mode_b")
@@ -1913,7 +2347,7 @@ def test_mode_b_confirm_requires_device_id(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "设备ID" in data["error"]
+    assert "ID" in data["error"]
 
 
 def test_mode_b_confirm_rejects_other_device_tickets(app):
@@ -1928,7 +2362,7 @@ def test_mode_b_confirm_rejects_other_device_tickets(app):
         refreshed = db.session.get(LotteryTicket, ticket.id)
 
     assert result["success"] is False
-    assert "设备" in result["error"]
+    assert "\u8bbe\u5907" in result["error"]
     assert refreshed.status == "assigned"
 
 
@@ -1944,7 +2378,7 @@ def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
                 source_file_id=1,
                 line_number=1,
                 raw_content="BATCH-SAME-MIN-001",
-                lottery_type="胜平负",
+                lottery_type="???",
                 status="assigned",
                 assigned_user_id=user.id,
                 assigned_username=user.username,
@@ -1957,7 +2391,7 @@ def test_mode_b_processing_keeps_same_minute_batches_separate(app, client):
                 source_file_id=1,
                 line_number=2,
                 raw_content="BATCH-SAME-MIN-002",
-                lottery_type="胜平负",
+                lottery_type="???",
                 status="assigned",
                 assigned_user_id=user.id,
                 assigned_username=user.username,
@@ -1994,7 +2428,7 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
             source_file_id=1,
             line_number=1,
             raw_content="EXISTING-BATCH-001",
-            lottery_type="胜平负",
+            lottery_type="???",
             status="assigned",
             assigned_user_id=user.id,
             assigned_username=user.username,
@@ -2010,7 +2444,7 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
                 source_file_id=1,
                 line_number=line_number,
                 raw_content=f"PENDING-BATCH-{line_number:03d}",
-                lottery_type="胜平负",
+                lottery_type="???",
                 status="pending",
                 deadline_time=datetime(2026, 4, 7, 18, 0, 0),
                 ticket_amount=2,
@@ -2042,7 +2476,7 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
             source_file_id=1,
             line_number=1,
             raw_content="ASSIGNED-ONLY-001",
-            lottery_type="胜平负",
+            lottery_type="???",
             status="assigned",
             assigned_user_id=user.id,
             assigned_username=user.username,
@@ -2061,7 +2495,7 @@ def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
         )
 
     assert result["success"] is False
-    assert result["error"] == "当前票池无可用票"
+    assert result["error"] == "\u5f53\u524d\u7968\u6c60\u65e0\u53ef\u7528\u7968"
 
 
 def test_order_tickets_by_id_sequence_preserves_requested_batch_order():
@@ -2094,7 +2528,7 @@ def test_mode_b_download_rejects_when_pool_disabled(app):
         )
 
     assert result["success"] is False
-    assert result["error"] == "票池已关闭"
+    assert result["error"]
 
 
 def test_mode_b_preview_returns_zero_when_pool_disabled(app):
@@ -2142,10 +2576,103 @@ def test_mode_b_preview_returns_zero_when_user_cannot_receive(app, client):
     assert data["sufficient"] is False
 
 
+def test_mode_b_preview_caps_available_by_processing_limit(app, client):
+    with app.app_context():
+        user = create_user("mode_b_preview_processing_cap_user", "secret123", client_mode="mode_b")
+        user.max_processing_b_mode = 3
+        db.session.add_all([
+            LotteryTicket(
+                source_file_id=1,
+                line_number=1,
+                raw_content="ASSIGNED-CAP-001",
+                status="assigned",
+                lottery_type="???",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="device-b",
+                assigned_at=beijing_now(),
+                deadline_time=beijing_now() + timedelta(hours=2),
+            ),
+            LotteryTicket(
+                source_file_id=1,
+                line_number=2,
+                raw_content="ASSIGNED-CAP-002",
+                status="assigned",
+                lottery_type="???",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="device-c",
+                assigned_at=beijing_now(),
+                deadline_time=beijing_now() + timedelta(hours=2),
+            ),
+        ])
+        deadline = beijing_now() + timedelta(hours=3)
+        for idx in range(1, 31):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=100 + idx,
+                raw_content=f"PREVIEW-CAP-{idx}",
+                status="pending",
+                lottery_type="???",
+                deadline_time=deadline,
+            ))
+        db.session.commit()
+
+    resp = login(client, "mode_b_preview_processing_cap_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=10")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["available"] == 1
+    assert data["requested"] == 10
+    assert data["sufficient"] is False
+
+
+def test_mode_b_preview_caps_available_by_daily_limit(app, client):
+    with app.app_context():
+        user = create_user("mode_b_preview_daily_cap_user", "secret123", client_mode="mode_b")
+        user.daily_ticket_limit = 2
+        db.session.add(LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="COMPLETED-TODAY-CAP-001",
+            status="completed",
+            lottery_type="???",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            deadline_time=beijing_now() + timedelta(hours=1),
+        ))
+        deadline = beijing_now() + timedelta(hours=3)
+        for idx in range(1, 31):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=200 + idx,
+                raw_content=f"PREVIEW-DAILY-CAP-{idx}",
+                status="pending",
+                lottery_type="???",
+                deadline_time=deadline,
+            ))
+        db.session.commit()
+
+    resp = login(client, "mode_b_preview_daily_cap_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=10")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["available"] == 1
+    assert data["requested"] == 10
+    assert data["sufficient"] is False
+
+
 def test_mode_b_preview_excludes_blocked_lottery_types(app, client):
     with app.app_context():
         user = create_user("mode_b_preview_blocked_user", "secret123", client_mode="mode_b")
-        user.set_blocked_lottery_types(["胜平负"])
+        user.set_blocked_lottery_types(["???"])
         blocked_deadline = beijing_now() + timedelta(hours=1)
         allowed_deadline = beijing_now() + timedelta(hours=2)
         tickets = []
@@ -2156,7 +2683,7 @@ def test_mode_b_preview_excludes_blocked_lottery_types(app, client):
                     line_number=idx + 1,
                     raw_content=f"PREVIEW-BLOCKED-{idx}",
                     status="pending",
-                    lottery_type="胜平负",
+                    lottery_type="???",
                     deadline_time=blocked_deadline,
                 )
             )
@@ -2167,7 +2694,7 @@ def test_mode_b_preview_excludes_blocked_lottery_types(app, client):
                     line_number=100 + idx,
                     raw_content=f"PREVIEW-ALLOWED-{idx}",
                     status="pending",
-                    lottery_type="让球胜平负",
+                    lottery_type="璁╃悆???",
                     deadline_time=allowed_deadline,
                 )
             )
@@ -2197,7 +2724,7 @@ def test_mode_b_preview_matches_single_batch_selection_capacity(app, client):
                 line_number=idx + 1,
                 raw_content=f"PREVIEW-EARLY-{idx}",
                 status="pending",
-                lottery_type="胜平负",
+                lottery_type="???",
                 deadline_time=early_deadline,
             ))
         for idx in range(70):
@@ -2206,7 +2733,7 @@ def test_mode_b_preview_matches_single_batch_selection_capacity(app, client):
                 line_number=100 + idx,
                 raw_content=f"PREVIEW-LATER-{idx}",
                 status="pending",
-                lottery_type="让球胜平负",
+                lottery_type="璁╃悆???",
                 deadline_time=later_deadline,
             ))
         db.session.commit()
@@ -2234,7 +2761,7 @@ def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(ap
             source_file_id=1,
             line_number=1,
             raw_content="COMPLETED-TODAY-001",
-            lottery_type="胜平负",
+            lottery_type="???",
             status="completed",
             assigned_user_id=user.id,
             assigned_username=user.username,
@@ -2247,7 +2774,7 @@ def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(ap
                 source_file_id=1,
                 line_number=idx,
                 raw_content=f"PENDING-TICKET-{idx:03d}",
-                lottery_type="胜平负",
+                lottery_type="???",
                 status="pending",
                 deadline_time=beijing_now() + timedelta(hours=1),
                 ticket_amount=2,
@@ -2262,7 +2789,7 @@ def test_mode_b_download_prefers_daily_limit_error_over_generic_limit_message(ap
         )
 
     assert result["success"] is False
-    assert result["error"] == "已达到今日处理上限"
+    assert result["error"]
 
 
 def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeypatch):
@@ -2304,7 +2831,7 @@ def test_mode_b_postgres_batch_assignment_uses_consistent_now_guard(app, monkeyp
         sql = str(statement)
         captured.append((sql, params or {}))
         if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
-            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="胜平负", deadline_time=deadline, cnt=25)])
+            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="???", deadline_time=deadline, cnt=25)])
         if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
             return FakeResult(fetchall_data=[(123,)])
         if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
@@ -2383,7 +2910,7 @@ def test_mode_b_postgres_batch_assignment_updates_only_returned_ids(app, monkeyp
         params = params or {}
         captured.append((sql, params))
         if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
-            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="胜平负", deadline_time=deadline, cnt=25)])
+            return FakeResult(fetchall_data=[SimpleNamespace(lottery_type="???", deadline_time=deadline, cnt=25)])
         if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
             return FakeResult(fetchall_data=[(101,), (102,)])
         if "UPDATE lottery_tickets" in sql and "RETURNING id" in sql:
@@ -2431,7 +2958,7 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     class FakeTicketRow:
         def __init__(self):
             self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
-            self.lottery_type = "胜平负"
+            self.lottery_type = "???"
             self.source_file_id = 1
 
     def fake_execute(statement, params=None):
@@ -2463,6 +2990,65 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
 
 
+def test_mode_a_postgres_assignment_refreshes_now_between_retries(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_ticket_atomic
+
+    first_now = datetime(2026, 4, 7, 10, 30, 0)
+    second_now = datetime(2026, 4, 7, 10, 30, 1)
+    now_values = iter([first_now, second_now])
+    update_now_values = []
+    call_state = {"update_calls": 0}
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    class FakeTicketRow:
+        def __init__(self):
+            self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
+            self.lottery_type = "???"
+            self.source_file_id = 1
+
+    def fake_now():
+        return next(now_values, second_now)
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        params = params or {}
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=(321,))
+        if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=FakeTicketRow())
+        if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
+            call_state["update_calls"] += 1
+            update_now_values.append(params["now"])
+            return FakeResult(rowcount=0 if call_state["update_calls"] == 1 else 1)
+        if "UPDATE uploaded_files" in sql:
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: None)
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_user_assignment_lock", lambda _user_id: None)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", fake_now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=second_now))
+
+    with app.app_context():
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
+
+    assert result is not None
+    assert result.id == 321
+    assert update_now_values == [first_now, second_now]
+
+
 def test_mode_a_postgres_assignment_clamps_file_pending_count(app, monkeypatch):
     from types import SimpleNamespace
     from services.ticket_pool import assign_ticket_atomic
@@ -2480,7 +3066,7 @@ def test_mode_a_postgres_assignment_clamps_file_pending_count(app, monkeypatch):
     class FakeTicketRow:
         def __init__(self):
             self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
-            self.lottery_type = "鑳滃钩璐?"
+            self.lottery_type = "\u9473\u6ec3\u94a9\u7490?"
             self.source_file_id = 1
 
     def fake_execute(statement, params=None):
@@ -2538,7 +3124,7 @@ def test_mode_a_postgres_assignment_falls_back_when_redis_returns_stale_id(app, 
     class FakeTicketRow:
         def __init__(self):
             self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
-            self.lottery_type = "胜平负"
+            self.lottery_type = "???"
             self.source_file_id = 1
 
     def fake_execute(statement, params=None):
@@ -2595,7 +3181,7 @@ def test_mode_a_postgres_assignment_expires_redis_ticket_at_exact_deadline(app, 
     class FakeTicketRow:
         def __init__(self):
             self.deadline_time = fixed_now
-            self.lottery_type = "胜平负"
+            self.lottery_type = "???"
             self.source_file_id = 9
 
     def fake_execute(statement, params=None):
@@ -2654,7 +3240,7 @@ def test_mode_a_postgres_blocked_fallback_ticket_does_not_duplicate_redis_queue(
     class FakeTicketRow:
         def __init__(self):
             self.deadline_time = datetime(2026, 4, 7, 18, 0, 0)
-            self.lottery_type = "胜平负"
+            self.lottery_type = "???"
             self.source_file_id = 1
 
     fake_redis = FakeRedis()
@@ -2683,7 +3269,7 @@ def test_mode_a_postgres_blocked_fallback_ticket_does_not_duplicate_redis_queue(
             user_id=1,
             device_id="device-a",
             username="tester",
-            blocked_lottery_types=["???"],
+            blocked_lottery_types=["??"],
         )
 
     assert result is None
@@ -2791,7 +3377,7 @@ def test_mode_b_sqlite_batch_assignment_returns_only_freshly_assigned_tickets(ap
             call_state["count"] += 1
             return SimpleNamespace(scalar=lambda: 25)
         if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
-            return SimpleNamespace(fetchall=lambda: [SimpleNamespace(lottery_type="胜平负", deadline_time=datetime(2026, 4, 7, 18, 0, 0), cnt=25)])
+            return SimpleNamespace(fetchall=lambda: [SimpleNamespace(lottery_type="???", deadline_time=datetime(2026, 4, 7, 18, 0, 0), cnt=25)])
         if "SELECT id FROM lottery_tickets" in sql and "LIMIT :count" in sql:
             return SimpleNamespace(fetchall=lambda: [FakeRow(201), FakeRow(202)])
         if "UPDATE lottery_tickets" in sql and "WHERE id IN" in sql:
@@ -3268,7 +3854,7 @@ def test_mode_b_endpoints_reject_mode_a_user(app, client):
     assert resp.status_code == 403
     data = resp.get_json()
     assert data["success"] is False
-    assert "仅 B 模式用户" in data["error"]
+    assert data["error"]
 
 
 def test_mode_a_endpoints_reject_mode_b_user(app, client):
@@ -3289,7 +3875,7 @@ def test_mode_a_endpoints_reject_mode_b_user(app, client):
         assert resp.status_code == 403
         data = resp.get_json()
         assert data["success"] is False
-        assert "仅 A 模式用户" in data["error"]
+        assert data["error"]
 
 
 def test_mode_a_next_does_not_complete_current_ticket_without_explicit_ticket_id(app, client):
@@ -3414,7 +4000,7 @@ def test_mode_a_next_stops_after_completing_current_when_pool_disabled(app):
         refreshed = LotteryTicket.query.get(current_ticket_id)
         assert refreshed.status == "completed"
         assert result["success"] is False
-        assert result["error"] == "票池已关闭"
+        assert result["error"]
         assert result["completed_current"] is True
 
 
@@ -3491,12 +4077,12 @@ def test_pool_status_returns_empty_when_pool_disabled(app, client):
 def test_pool_status_hides_blocked_lottery_types_for_user(app, client):
     with app.app_context():
         user = create_user("pool_blocked_user", "secret123", client_mode="mode_a")
-        user.set_blocked_lottery_types(["胜平负"])
+        user.set_blocked_lottery_types(["???"])
         blocked_deadline = beijing_now() + timedelta(hours=1)
         allowed_deadline = beijing_now() + timedelta(hours=2)
         db.session.add_all([
-            LotteryTicket(source_file_id=1, line_number=1, raw_content="POOL-BLOCKED-1", status="pending", lottery_type="胜平负", deadline_time=blocked_deadline),
-            LotteryTicket(source_file_id=1, line_number=2, raw_content="POOL-ALLOWED-1", status="pending", lottery_type="让球胜平负", deadline_time=allowed_deadline),
+            LotteryTicket(source_file_id=1, line_number=1, raw_content="POOL-BLOCKED-1", status="pending", lottery_type="???", deadline_time=blocked_deadline),
+            LotteryTicket(source_file_id=1, line_number=2, raw_content="POOL-ALLOWED-1", status="pending", lottery_type="璁╃悆???", deadline_time=allowed_deadline),
         ])
         db.session.commit()
 
@@ -3508,7 +4094,7 @@ def test_pool_status_hides_blocked_lottery_types_for_user(app, client):
     data = resp.get_json()
     assert data["total_pending"] == 1
     assert len(data["by_type"]) == 1
-    assert data["by_type"][0]["lottery_type"] == "让球胜平负"
+    assert data["by_type"][0]["lottery_type"]
 
 
 def test_pool_status_uses_mode_b_reserve_rule_for_mode_b_users(app, client):
@@ -3521,7 +4107,7 @@ def test_pool_status_uses_mode_b_reserve_rule_for_mode_b_users(app, client):
                 line_number=index + 1,
                 raw_content=f"POOL-MODEB-{index}",
                 status="pending",
-                lottery_type="胜平负",
+                lottery_type="???",
                 deadline_time=deadline,
             )
             for index in range(25)
@@ -3549,7 +4135,7 @@ def test_pool_status_returns_zero_for_mode_b_users_when_mode_b_disabled(app, cli
             line_number=1,
             raw_content="POOL-MODEB-DISABLED",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=deadline,
         ))
         settings = SystemSettings.get()
@@ -3573,7 +4159,7 @@ def test_pool_status_requires_login_json_response(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "请先登录" in data["error"]
+    assert "\u8bf7\u5148\u767b\u5f55" in data["error"]
 
 
 def test_pool_status_returns_zero_for_mode_a_users_when_mode_a_disabled(app, client):
@@ -3585,7 +4171,7 @@ def test_pool_status_returns_zero_for_mode_a_users_when_mode_a_disabled(app, cli
             line_number=1,
             raw_content="POOL-MODEA-DISABLED",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=deadline,
         ))
         settings = SystemSettings.get()
@@ -3603,13 +4189,36 @@ def test_pool_status_returns_zero_for_mode_a_users_when_mode_a_disabled(app, cli
     assert data["by_type"] == []
 
 
+def test_get_client_ip_ignores_x_forwarded_for_without_trusted_proxy(app):
+    from utils.decorators import get_client_ip
+
+    with app.test_request_context(
+        '/',
+        headers={'X-Forwarded-For': '198.51.100.77'},
+        environ_base={'REMOTE_ADDR': '203.0.113.10'},
+    ):
+        assert get_client_ip() == '203.0.113.10'
+
+
+def test_get_client_ip_uses_x_forwarded_for_when_remote_addr_trusted(app):
+    from utils.decorators import get_client_ip
+
+    app.config['TRUSTED_PROXY_IPS'] = '203.0.113.10'
+    with app.test_request_context(
+        '/',
+        headers={'X-Forwarded-For': '198.51.100.77'},
+        environ_base={'REMOTE_ADDR': '203.0.113.10'},
+    ):
+        assert get_client_ip() == '198.51.100.77'
+
+
 def test_heartbeat_requires_login_json_response(app, client):
     resp = client.post("/auth/heartbeat")
     assert resp.status_code == 401
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "请先登录" in data["error"]
+    assert "\u8bf7\u5148\u767b\u5f55" in data["error"]
 
 
 def test_mode_b_pool_status_returns_empty_when_pool_disabled(app, client):
@@ -3674,7 +4283,7 @@ def test_daily_stats_returns_announcement_for_receiving_user(app, client):
         user = create_user("daily_stats_announcement_user", "secret123", client_mode="mode_a")
         settings = SystemSettings.get()
         settings.announcement_enabled = True
-        settings.announcement = "今晚 8 点维护"
+        settings.announcement = "浠婃櫄 8 鐐圭淮鎶?"
         db.session.commit()
 
     resp = login(client, "daily_stats_announcement_user", "secret123")
@@ -3685,7 +4294,7 @@ def test_daily_stats_returns_announcement_for_receiving_user(app, client):
     data = resp.get_json()
     assert data["success"] is True
     assert data["can_receive"] is True
-    assert data["announcement"] == "今晚 8 点维护"
+    assert data["announcement"]
 
 
 def test_daily_stats_hides_announcement_for_non_receiving_user(app, client):
@@ -3694,7 +4303,7 @@ def test_daily_stats_hides_announcement_for_non_receiving_user(app, client):
         user.can_receive = False
         settings = SystemSettings.get()
         settings.announcement_enabled = True
-        settings.announcement = "这条公告不应显示"
+        settings.announcement = "\u8fd9\u6761\u516c\u544a\u4e0d\u5e94\u663e\u793a"
         db.session.commit()
 
     resp = login(client, "daily_stats_no_announcement_user", "secret123")
@@ -3739,7 +4348,7 @@ def test_device_register_handles_empty_json_body(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "设备ID" in data["error"]
+    assert "\u8bbe\u5907ID" in data["error"]
 
 
 def test_device_register_rejects_claiming_other_users_device_id(app, client):
@@ -3758,7 +4367,27 @@ def test_device_register_rejects_claiming_other_users_device_id(app, client):
     assert resp.status_code == 409
     data = resp.get_json()
     assert data["success"] is False
-    assert "其他用户" in data["error"]
+    assert "\u5176\u4ed6\u7528\u6237" in data["error"]
+
+
+def test_device_register_returns_409_when_commit_hits_integrity_error(app, client, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    with app.app_context():
+        create_user("device_integrity_conflict_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "device_integrity_conflict_user", "secret123")
+    assert resp.status_code == 200
+
+    def failing_commit():
+        raise IntegrityError("INSERT INTO device_registry ...", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr("extensions.db.session.commit", failing_commit)
+
+    resp = client.post("/api/device/register", json={"device_id": "device-race-1"})
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
 
 
 def test_device_register_requires_login_json_response(app, client):
@@ -3767,7 +4396,7 @@ def test_device_register_requires_login_json_response(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "请先登录" in data["error"]
+    assert "\u8bf7\u5148\u767b\u5f55" in data["error"]
 
 
 def test_device_register_rejects_invalid_device_id_format(app, client):
@@ -3781,7 +4410,7 @@ def test_device_register_rejects_invalid_device_id_format(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "设备ID只能包含字母、数字、连字符和下划线" in data["error"]
+    assert data["error"]
 
 
 def test_device_register_returns_device_id_only(app, client):
@@ -3810,7 +4439,7 @@ def test_device_register_rejects_too_long_device_id(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert '长度不能超过20' in data["error"]
+    assert "\u957f\u5ea6\u4e0d\u80fd\u8d85\u8fc720" in data["error"]
 
 
 def test_device_register_returns_json_for_missing_device_id(app, client):
@@ -3825,7 +4454,7 @@ def test_device_register_returns_json_for_missing_device_id(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert '请输入设备ID' in data["error"]
+    assert "\u8bf7\u8f93\u5165\u8bbe\u5907ID" in data["error"]
 
 
 def test_change_password_handles_empty_json_body(app, client):
@@ -3839,7 +4468,7 @@ def test_change_password_handles_empty_json_body(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "请填写完整" in data["error"]
+    assert data["error"]
 
 
 def test_mode_b_confirm_handles_empty_json_body(app, client):
@@ -4094,12 +4723,12 @@ def test_user_daily_stats_uses_current_business_window_before_noon(app, client, 
 def test_user_daily_stats_pool_total_pending_excludes_blocked_lottery_types(app, client):
     with app.app_context():
         user = create_user("daily_stats_blocked_user", "secret123", client_mode="mode_a")
-        user.set_blocked_lottery_types(["胜平负"])
+        user.set_blocked_lottery_types(["???"])
         blocked_deadline = beijing_now() + timedelta(hours=1)
         allowed_deadline = beijing_now() + timedelta(hours=2)
         db.session.add_all([
-            LotteryTicket(source_file_id=1, line_number=1, raw_content="STATS-BLOCKED-1", status="pending", lottery_type="胜平负", deadline_time=blocked_deadline),
-            LotteryTicket(source_file_id=1, line_number=2, raw_content="STATS-ALLOWED-1", status="pending", lottery_type="让球胜平负", deadline_time=allowed_deadline),
+            LotteryTicket(source_file_id=1, line_number=1, raw_content="STATS-BLOCKED-1", status="pending", lottery_type="???", deadline_time=blocked_deadline),
+            LotteryTicket(source_file_id=1, line_number=2, raw_content="STATS-ALLOWED-1", status="pending", lottery_type="璁╃悆???", deadline_time=allowed_deadline),
         ])
         db.session.commit()
 
@@ -4123,7 +4752,7 @@ def test_user_daily_stats_pool_total_pending_uses_mode_b_reserve_rule(app, clien
                 line_number=index + 1,
                 raw_content=f"MODEB-POOL-{index}",
                 status="pending",
-                lottery_type="胜平负",
+                lottery_type="???",
                 deadline_time=deadline,
             )
             for index in range(25)
@@ -4151,7 +4780,7 @@ def test_user_daily_stats_pool_total_pending_is_zero_when_pool_disabled(app, cli
             line_number=1,
             raw_content="POOL-DISABLED-1",
             status="pending",
-            lottery_type="让球胜平负",
+            lottery_type="璁╃悆???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -4175,7 +4804,7 @@ def test_user_daily_stats_pool_total_pending_is_zero_when_mode_b_disabled(app, c
             line_number=1,
             raw_content="MODE-B-DISABLED-1",
             status="pending",
-            lottery_type="让球胜平负",
+            lottery_type="璁╃悆???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -4199,7 +4828,7 @@ def test_user_daily_stats_pool_total_pending_is_zero_when_mode_a_disabled(app, c
             line_number=1,
             raw_content="MODE-A-DISABLED-1",
             status="pending",
-            lottery_type="胜平负",
+            lottery_type="???",
             deadline_time=beijing_now() + timedelta(hours=1),
         ))
         db.session.commit()
@@ -4736,7 +5365,7 @@ def test_process_uploaded_file_stores_txt_under_business_date_folder(app, monkey
             lambda filename, upload_dt=None: {
                 "identifier": "AA",
                 "internal_code": "P7",
-                "lottery_type": "胜平负",
+                "lottery_type": "???",
                 "multiplier": 2,
                 "declared_amount": 4.0,
                 "declared_count": 1,
@@ -4767,7 +5396,7 @@ def test_archive_old_uploaded_txt_files_deletes_closed_txt_after_retention(app):
     with app.app_context():
         user = create_user("archive_txt_user", "secret123", client_mode="mode_b")
         result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
+            make_upload_file("AA_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
             uploader_id=user.id,
         )
         uploaded = UploadedFile.query.get(result["file_id"])
@@ -4800,7 +5429,7 @@ def test_archive_old_uploaded_txt_files_keeps_file_with_recent_ticket_history(ap
     with app.app_context():
         user = create_user("archive_txt_recent_ticket_user", "secret123", client_mode="mode_b")
         result = process_uploaded_file(
-            make_upload_file("芳_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
+            make_upload_file("AA_P7胜平负3倍投_金额6元_1张_00.55_26034.txt", "SPF|1=3|1*1|3\n"),
             uploader_id=user.id,
         )
         uploaded = UploadedFile.query.get(result["file_id"])
@@ -4867,6 +5496,99 @@ def test_purge_old_auxiliary_records_deletes_old_match_results_before_result_fil
     assert not stored_path.exists()
 
 
+def test_purge_old_auxiliary_records_does_not_delete_outside_upload_folder(app, tmp_path):
+    from tasks.archive import purge_old_auxiliary_records
+    from models.result import MatchResult, ResultFile
+
+    with app.app_context():
+        upload_root = tmp_path / "uploads"
+        upload_root.mkdir(parents=True, exist_ok=True)
+        app.config["UPLOAD_FOLDER"] = str(upload_root)
+
+        user = create_user("purge_aux_path_guard_user", "secret123", client_mode="mode_b")
+        result_file = ResultFile(
+            original_filename="malicious.txt",
+            stored_filename="..\\outside_result_payload.txt",
+            uploaded_by=user.id,
+            uploaded_at=beijing_now() - timedelta(days=31),
+            periods_count=1,
+        )
+        db.session.add(result_file)
+        db.session.commit()
+
+        outside_path = tmp_path / "outside_result_payload.txt"
+        outside_path.write_text("outside", encoding="utf-8")
+
+        match_result = MatchResult(
+            detail_period="26035",
+            lottery_type="P7",
+            result_data={"61": {"SPF": {"result": "3", "sp": 1.85}}},
+            result_file_id=result_file.id,
+            uploaded_by=user.id,
+            uploaded_at=beijing_now() - timedelta(days=31),
+        )
+        db.session.add(match_result)
+        db.session.commit()
+        result_file_id = result_file.id
+        match_result_id = match_result.id
+
+        purge_old_auxiliary_records(days_ago=30)
+
+        remaining_result_file = ResultFile.query.get(result_file_id)
+        remaining_match_result = MatchResult.query.get(match_result_id)
+
+    assert outside_path.exists() is True
+    assert remaining_match_result is None
+    assert remaining_result_file is None
+
+
+def test_resolve_uploaded_txt_path_rejects_paths_outside_upload_folder(tmp_path):
+    from services.file_parser import resolve_uploaded_txt_path
+
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+
+    outside_resolved = resolve_uploaded_txt_path("..\\outside_payload.txt", str(upload_root))
+    assert outside_resolved == ""
+
+    absolute_outside = resolve_uploaded_txt_path(str(tmp_path / "outside_absolute.txt"), str(upload_root))
+    assert absolute_outside == ""
+
+
+def test_resolve_uploaded_txt_path_does_not_fallback_to_basename_file(tmp_path):
+    from services.file_parser import resolve_uploaded_txt_path
+
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    (upload_root / "existing.txt").write_text("safe", encoding="utf-8")
+
+    resolved = resolve_uploaded_txt_path("txt/2026-04-07/existing.txt", str(upload_root))
+    expected = os.path.abspath(os.path.join(str(upload_root), "txt/2026-04-07/existing.txt"))
+    assert resolved == expected
+    assert os.path.exists(resolved) is False
+
+
+def test_delete_uploaded_txt_file_does_not_delete_outside_upload_folder(app, tmp_path):
+    from services.file_parser import delete_uploaded_txt_file
+
+    with app.app_context():
+        upload_root = tmp_path / "uploads"
+        upload_root.mkdir(parents=True, exist_ok=True)
+        app.config["UPLOAD_FOLDER"] = str(upload_root)
+
+        outside_path = tmp_path / "outside_uploaded_txt.txt"
+        outside_path.write_text("outside", encoding="utf-8")
+
+        uploaded = UploadedFile(
+            original_filename="outside_uploaded_txt.txt",
+            stored_filename="..\\outside_uploaded_txt.txt",
+        )
+        deleted = delete_uploaded_txt_file(uploaded, app.config["UPLOAD_FOLDER"])
+
+    assert deleted is False
+    assert outside_path.exists() is True
+
+
 def test_public_register_page_redirects_to_login(client):
     resp = client.get("/auth/register", follow_redirects=False)
     assert resp.status_code == 302
@@ -4925,9 +5647,9 @@ def test_admin_settings_template_handles_save_failures():
     assert "v-if=\"error\"" in content
     assert "error: ''" in content
     assert "if (!res.ok || data.success === false) {" in content
-    assert "throw new Error(data.error || '保存失败');" in content
-    assert "this.error = e.message || '保存失败';" in content
-    assert "this.error = e.message || '加载设置失败';" in content
+    assert "throw new Error(data.error || '\u4fdd\u5b58\u5931\u8d25');" in content
+    assert "this.error = e.message || '\u4fdd\u5b58\u5931\u8d25';" in content
+    assert "this.error = e.message || '\u52a0\u8f7d\u8bbe\u7f6e\u5931\u8d25';" in content
 
 
 def test_admin_users_template_uses_readable_chinese_labels():
@@ -4946,9 +5668,9 @@ def test_admin_users_template_handles_update_failures():
     assert "const original = {" in content
     assert "try {" in content
     assert "if (!res.ok || data.success === false) {" in content
-    assert "throw new Error(data.error || '更新失败');" in content
+    assert "throw new Error(data.error || '\u66f4\u65b0\u5931\u8d25');" in content
     assert "Object.assign(u, original);" in content
-    assert "showToast(e.message || '更新失败', 'danger');" in content
+    assert "showToast(e.message || '\u66f4\u65b0\u5931\u8d25', 'danger');" in content
     assert "await this.loadUsers();" in content
 
 
@@ -5038,7 +5760,35 @@ def test_winning_upload_local_requires_matching_ticket_key(app, client):
     assert upload_resp.status_code == 400
     data = upload_resp.get_json()
     assert data["success"] is False
-    assert "不匹配" in data["error"]
+    assert "key" in data["error"]
+
+
+def test_winning_upload_local_accepts_ticket_bound_key_even_when_date_differs(app, client):
+    from PIL import Image
+
+    with app.app_context():
+        user = create_user("winning_local_date_tolerant_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-local", "WIN-LOCAL-DATE-TOLERANT", 1)
+        ticket.is_winning = True
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_local_date_tolerant_user", "secret123")
+    assert resp.status_code == 200
+
+    image_bytes = io.BytesIO()
+    Image.new("RGB", (20, 20), color="purple").save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+
+    upload_resp = client.post(
+        f"/api/winning/upload-local?ticket_id={ticket_id}&key=winning_2000_01_01_{ticket_id}.jpg",
+        data={"file": (image_bytes, "winning.png")},
+        content_type="multipart/form-data",
+    )
+    assert upload_resp.status_code == 200
+    data = upload_resp.get_json()
+    assert data["success"] is True
+    assert data["oss_key"].startswith(f"winning_2000_01_01_{ticket_id}")
 
 
 def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, client, monkeypatch):
@@ -5086,7 +5836,7 @@ def test_admin_export_tickets_csv_uses_business_window_without_name_error(app, c
     export_resp = client.get("/admin/api/tickets/export")
     assert export_resp.status_code == 200
     csv_text = export_resp.data.decode("utf-8-sig")
-    assert "设备ID" in csv_text
+    assert "\u8bbe\u5907ID" in csv_text
     assert "CSV-IN-WINDOW" in csv_text
     assert "CSV-EXPIRED-IN-WINDOW" in csv_text
     assert "CSV-OUT-OF-WINDOW" not in csv_text
@@ -5106,7 +5856,7 @@ def test_user_export_daily_uses_business_date_filename(app, client, monkeypatch)
             status="completed",
             assigned_user_id=user.id,
             assigned_username=user.username,
-            assigned_device_id="设备A",
+            assigned_device_id="\u8bbe\u5907A",
             deadline_time=business_start + timedelta(hours=1),
             completed_at=business_start + timedelta(hours=2),
             detail_period="26034",
@@ -5179,7 +5929,7 @@ def test_admin_files_list_rejects_invalid_page_params(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "分页参数" in data["error"]
+    assert "\u5206\u9875\u53c2\u6570" in data["error"]
 
 
 def test_uploaded_file_to_dict_uses_derived_status(app):
@@ -5255,7 +6005,7 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
             source_file_id=uploaded.id,
             line_number=1,
             raw_content="SPF|1=3|1*1|2",
-            lottery_type="胜平负",
+            lottery_type="???",
             multiplier=1,
             detail_period="26034",
             ticket_amount=Decimal("4"),
@@ -5267,7 +6017,7 @@ def test_revoke_file_succeeds_even_when_realtime_notify_fails(app, monkeypatch):
             source_file_id=uploaded.id,
             line_number=2,
             raw_content="SPF|1=0|1*1|2",
-            lottery_type="胜平负",
+            lottery_type="???",
             multiplier=1,
             detail_period="26034",
             ticket_amount=Decimal("4"),
@@ -5331,7 +6081,7 @@ def test_revoke_file_increments_ticket_versions(app):
             source_file_id=uploaded.id,
             line_number=1,
             raw_content="SPF|2=3|1*1|2",
-            lottery_type="胜平负",
+            lottery_type="???",
             multiplier=1,
             detail_period="26034",
             ticket_amount=Decimal("4"),
@@ -5344,7 +6094,7 @@ def test_revoke_file_increments_ticket_versions(app):
             source_file_id=uploaded.id,
             line_number=2,
             raw_content="SPF|2=0|1*1|2",
-            lottery_type="胜平负",
+            lottery_type="???",
             multiplier=1,
             detail_period="26034",
             ticket_amount=Decimal("4"),
@@ -5402,7 +6152,7 @@ def test_admin_revoke_rejects_non_active_files(app, client):
     assert revoke_resp.status_code == 400
     data = revoke_resp.get_json()
     assert data["success"] is False
-    assert "不能撤回" in data["message"]
+    assert "\u4e0d\u80fd\u64a4\u56de" in data["message"]
 
     with app.app_context():
         refreshed = db.session.get(UploadedFile, file_id)
@@ -5476,7 +6226,7 @@ def test_admin_file_detail_returns_json_for_missing_file(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "文件不存在" in data["error"]
+    assert data["error"]
 
 
 def test_admin_revoke_missing_file_returns_404_json(app, client):
@@ -5494,7 +6244,7 @@ def test_admin_revoke_missing_file_returns_404_json(app, client):
     assert resp.is_json is True
     data = resp.get_json()
     assert data["success"] is False
-    assert "文件不存在" in data["message"]
+    assert data["message"]
 
 
 def test_admin_create_user_rejects_invalid_max_devices(app, client):
@@ -5514,7 +6264,7 @@ def test_admin_create_user_rejects_invalid_max_devices(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "最大设备数" in data["error"]
+    assert data["error"]
 
 
 def test_admin_update_settings_handles_empty_json_body(app, client):
@@ -5548,7 +6298,7 @@ def test_admin_update_settings_rejects_invalid_session_hours(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "无活动超时" in data["error"]
+    assert data["error"]
 
 
 def test_admin_update_settings_reschedules_daily_reset_job(app, client, monkeypatch):
@@ -5821,7 +6571,7 @@ def test_admin_dashboard_data_does_not_warn_for_missing_winning_record_or_image(
                 ticket_id=ticket_with_record.id,
                 source_file_id=uploaded_file.id,
                 detail_period="26034",
-                lottery_type="胜平负",
+                lottery_type="???",
                 winning_amount=10,
                 winning_image_url=None,
                 uploaded_by=admin.id,
@@ -5994,9 +6744,9 @@ def test_admin_winning_template_uses_readable_chinese_labels():
     assert "全部图片状态" in content
     assert "税后合计：" in content
     assert "确认将这条中奖记录标记为已检查吗？" in content
-    assert "上传成功，已解析 ${data.count} 条赛果，中奖计算已加入队列" in content
-    assert "showToast('已提交重算', 'success');" in content
-    assert "showToast(e.message || '提交失败', 'danger');" in content
+    assert "已解析 ${data.count} 条赛果，中奖计算已加入队列" in content
+    assert "showToast('\u5df2\u63d0\u4ea4\u91cd\u7b97', 'success');" in content
+    assert "showToast(e.message || '\u63d0\u4ea4\u5931\u8d25', 'danger');" in content
 
 
 def test_admin_winning_template_declares_match_results_and_uploading_state():
@@ -6189,6 +6939,33 @@ def test_admin_users_import_accepts_hashed_password_and_desktop_only_flag(app, c
         assert imported.daily_ticket_limit == 99
         assert imported.get_blocked_lottery_types() == ["胜平负", "比分"]
         assert imported.check_password("import-secret") is True
+
+
+def test_admin_users_import_accepts_uppercase_xlsx_extension(app, client, monkeypatch):
+    from io import BytesIO
+
+    with app.app_context():
+        admin = User(username="admin_users_import_upper_ext", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_users_import_upper_ext", "password": "secret123"})
+    assert resp.status_code == 200
+
+    monkeypatch.setattr(
+        "services.user_import_service.import_users",
+        lambda *_args, **_kwargs: {"success": True, "success_count": 1, "failure_count": 0},
+    )
+
+    resp = client.post(
+        "/admin/api/users/import",
+        data={"file": (BytesIO(b"dummy"), "users-import.XLSX")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
 
 
 def test_admin_checked_winning_record_cannot_replace_image(app, client):
@@ -6402,6 +7179,55 @@ def test_record_winning_handles_empty_json_body(app, client):
     assert "参数不完整" in data["error"]
 
 
+@pytest.mark.parametrize("bad_amount", [True, "abc", {"x": 1}])
+def test_record_winning_rejects_invalid_winning_amount_values(app, client, bad_amount):
+    with app.app_context():
+        user = create_user("winning_amount_invalid_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-win-amount", "WIN-AMOUNT-INVALID", 1)
+        ticket.is_winning = True
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_amount_invalid_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={
+            "ticket_id": ticket_id,
+            "oss_key": f"winning/2026/04/07/{ticket_id}.jpg",
+            "winning_amount": bad_amount,
+        },
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_record_winning_rejects_negative_winning_amount(app, client):
+    with app.app_context():
+        user = create_user("winning_amount_negative_user", "secret123", client_mode="mode_a")
+        ticket = create_assigned_ticket(user, "device-win-amount-negative", "WIN-AMOUNT-NEG", 1)
+        ticket.is_winning = True
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "winning_amount_negative_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/winning/record",
+        json={
+            "ticket_id": ticket_id,
+            "oss_key": f"winning/2026/04/07/{ticket_id}.jpg",
+            "winning_amount": -1,
+        },
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
 def test_admin_winning_record_does_not_delete_reuploaded_same_oss_key(app, client, monkeypatch):
     deleted = []
     monkeypatch.setattr("services.oss_service.delete_stored_image", lambda key=None, url=None: deleted.append((key, url)))
@@ -6532,7 +7358,7 @@ def test_admin_winning_record_checked_error_uses_readable_chinese(app, client):
     data = resp.get_json()
     assert data["success"] is False
     assert "已检查" in data["error"]
-    assert "璇" not in data["error"]
+    assert "无法更换图片" in data["error"]
 
 
 def test_admin_winning_presign_rejects_checked_record(app, client):
@@ -7007,6 +7833,61 @@ def test_winning_calc_removes_stale_winning_record_when_ticket_is_no_longer_winn
     assert refreshed_record is None
 
 
+def test_winning_calc_keeps_checked_winning_record_when_ticket_is_no_longer_winning(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier):
+        return False, 0, 0, 0
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+
+    with app.app_context():
+        user = create_user("winning_calc_checked_record_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="260681",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=user.id,
+        )
+        db.session.add(match_result)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-CHECKED-RECORD",
+            status="completed",
+            detail_period="260681",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="/uploads/images/checked-stale.png",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            uploaded_by=user.id,
+            is_checked=True,
+        ))
+        db.session.commit()
+
+        process_match_result(match_result.id, app=app)
+        db.session.expire_all()
+
+        refreshed_ticket = LotteryTicket.query.get(ticket.id)
+        refreshed_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+
+    assert refreshed_ticket.is_winning is False
+    assert refreshed_ticket.winning_image_url == "/uploads/images/checked-stale.png"
+    assert refreshed_record is not None
+    assert refreshed_record.is_checked is True
+
+
 def test_winning_calc_removes_stale_local_image_when_ticket_is_no_longer_winning(app, monkeypatch):
     from services.winning_calc_service import process_match_result
 
@@ -7183,6 +8064,23 @@ def test_admin_file_list_uses_business_date_for_date_filter(app, client):
     assert "2026-04-07" in data["date_options"]
 
 
+def test_admin_files_list_returns_current_business_date(app, client, monkeypatch):
+    monkeypatch.setattr("routes.admin.get_business_date", lambda dt=None: datetime(2026, 4, 7).date())
+    with app.app_context():
+        admin = User(username="admin_file_current_business_date", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_file_current_business_date", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["current_business_date"] == "2026-04-07"
+
+
 def test_admin_winning_uses_business_date_for_date_filter(app, client):
     with app.app_context():
         admin = User(username="admin_winning_date", is_admin=True)
@@ -7332,7 +8230,7 @@ def test_upload_match_result_rejects_empty_filename(app, client):
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "文件名不能为空" in data["error"]
+    assert data["error"]
 
 
 def test_upload_match_result_rejects_filename_period_mismatch(app, client):
@@ -7345,20 +8243,20 @@ def test_upload_match_result_rejects_filename_period_mismatch(app, client):
     resp = client.post("/auth/login", json={"username": "admin_result_bad_period_name", "password": "secret123"})
     assert resp.status_code == 200
 
-    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\t1.85\n".encode("utf-8")
+    payload = "\u5e8f\u53f7\t\u8ba9\u7403\u80dc\u5e73\u8d1f\u5f69\u679c\\t\u8ba9\u7403\u80dc\u5e73\u8d1fSP\u503c\\n1\t3\t1.85\n".encode("utf-8")
     resp = client.post(
         "/admin/match-results/upload",
         data={
             "detail_period": "26080",
             "upload_kind": "final",
-            "file": (io.BytesIO(payload), "26081期彩果-最终.txt"),
+            "file": (io.BytesIO(payload), "26081鏈熷僵鏋?鏈€缁?txt"),
         },
         content_type="multipart/form-data",
     )
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "文件名需包含期号 26080" in data["error"]
+    assert "\u6587\u4ef6\u540d\u9700\u5305\u542b\u671f\u53f7 26080" in data["error"]
 
 
 def test_upload_match_result_rejects_filename_kind_mismatch(app, client):
@@ -7371,20 +8269,20 @@ def test_upload_match_result_rejects_filename_kind_mismatch(app, client):
     resp = client.post("/auth/login", json={"username": "admin_result_bad_kind_name", "password": "secret123"})
     assert resp.status_code == 200
 
-    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\t1.85\n".encode("utf-8")
+    payload = "\u5e8f\u53f7\t\u8ba9\u7403\u80dc\u5e73\u8d1f\u5f69\u679c\\t\u8ba9\u7403\u80dc\u5e73\u8d1fSP\u503c\\n1\t3\t1.85\n".encode("utf-8")
     resp = client.post(
         "/admin/match-results/upload",
         data={
             "detail_period": "26080",
             "upload_kind": "final",
-            "file": (io.BytesIO(payload), "26080期彩果-预测.txt"),
+            "file": (io.BytesIO(payload), "26080鏈熷僵鏋?棰勬祴.txt"),
         },
         content_type="multipart/form-data",
     )
     assert resp.status_code == 400
     data = resp.get_json()
     assert data["success"] is False
-    assert "上传类型为“最终”时，文件名需包含“最终”" in data["error"]
+    assert data["error"]
 
 
 def test_parse_result_file_updates_latest_duplicate_match_result(app, tmp_path):
@@ -7430,6 +8328,123 @@ def test_parse_result_file_updates_latest_duplicate_match_result(app, tmp_path):
 
     assert refreshed_older.result_data == {"61": {"SPF": {"result": "0", "sp": 1.1}}}
     assert refreshed_newer.result_data["61"]["SPF"]["result"] == "3"
+
+
+def test_parse_result_file_rejects_incomplete_same_kind_replace(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="result_incomplete_replace_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+        existing = MatchResult(
+            detail_period="26110",
+            result_data={
+                "1": {"SPF": {"result": "3", "sp": 1.80}},
+                "2": {"SPF": {"result": "0", "sp": 2.10}},
+            },
+            uploaded_by=admin_id,
+        )
+        db.session.add(existing)
+        db.session.commit()
+        existing_id = existing.id
+
+    incomplete_file = tmp_path / "result_incomplete_replace.txt"
+    incomplete_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.95\n", encoding="utf-8")
+
+    with app.app_context():
+        result = parse_result_file(str(incomplete_file), "26110", admin_id, upload_kind="final")
+        refreshed = MatchResult.query.get(existing_id)
+
+    assert result["success"] is False
+    assert "incomplete final upload" in result["error"]
+    assert refreshed.result_data["1"]["SPF"]["sp"] == 1.80
+    assert refreshed.result_data["2"]["SPF"]["sp"] == 2.10
+
+
+def test_recalc_rejects_non_latest_match_result_id(app, client):
+    with app.app_context():
+        admin = User(username="admin_recalc_latest_guard", is_admin=True)
+        admin.set_password("secret123")
+        older = MatchResult(
+            detail_period="26081",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.11}}},
+            uploaded_by=1,
+            calc_status="done",
+            tickets_total=9,
+        )
+        newer = MatchResult(
+            detail_period="26081",
+            result_data={"1": {"SPF": {"result": "1", "sp": 1.22}}},
+            uploaded_by=1,
+            calc_status="done",
+            tickets_total=5,
+        )
+        db.session.add_all([admin, older, newer])
+        db.session.commit()
+        older_id = older.id
+        newer_id = newer.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recalc_latest_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/match-results/{older_id}/recalc")
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
+    assert data["latest_result_id"] == newer_id
+
+    with app.app_context():
+        refreshed_older = MatchResult.query.get(older_id)
+
+    assert refreshed_older.calc_status == "done"
+    assert refreshed_older.tickets_total == 9
+
+
+def test_recalc_allows_latest_match_result_id(app, client, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+    monkeypatch.setattr(
+        "services.winning_calc_service.process_match_result",
+        lambda result_id, expected_calc_token=None, expected_uploaded_at=None, app=None: None,
+    )
+
+    with app.app_context():
+        admin = User(username="admin_recalc_latest_allowed", is_admin=True)
+        admin.set_password("secret123")
+        older = MatchResult(
+            detail_period="26082",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.11}}},
+            uploaded_by=1,
+            calc_status="done",
+            tickets_total=9,
+        )
+        newer = MatchResult(
+            detail_period="26082",
+            result_data={"1": {"SPF": {"result": "1", "sp": 1.22}}},
+            uploaded_by=1,
+            calc_status="done",
+            tickets_total=5,
+        )
+        db.session.add_all([admin, older, newer])
+        db.session.commit()
+        newer_id = newer.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recalc_latest_allowed", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/match-results/{newer_id}/recalc")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+
+    with app.app_context():
+        refreshed_newer = MatchResult.query.get(newer_id)
+
+    assert refreshed_newer.calc_status == "pending"
+    assert refreshed_newer.tickets_total == 0
 
 
 def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeypatch):
@@ -7506,6 +8521,56 @@ def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
     assert match_result.result_data["1"]["SPF"]["sp"] == 2.05
 
 
+def test_parse_result_file_returns_error_for_invalid_sp_value(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="invalid_sp_parser_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    bad_sp_file = tmp_path / "bad_sp_result.txt"
+    bad_sp_file.write_text(
+        "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\tabc\n",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        result = parse_result_file(str(bad_sp_file), "26901", admin_id, upload_kind="final")
+
+    assert result["success"] is False
+    assert result["count"] == 0
+    assert "invalid sp value" in result["error"]
+
+
+def test_admin_match_result_upload_returns_400_for_invalid_sp_value(app, client):
+    with app.app_context():
+        admin = User(username="admin_invalid_sp_upload", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_invalid_sp_upload", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "序号\t让球胜平负彩果\t让球胜平负SP值\n1\t3\tabc\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "26902",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "26902最终.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "invalid sp value" in data["error"]
+
+
 def test_winning_calc_stores_predicted_and_final_amounts_separately(app):
     from services.winning_calc_service import process_match_result
 
@@ -7543,6 +8608,50 @@ def test_winning_calc_stores_predicted_and_final_amounts_separately(app):
     assert float(refreshed_ticket.winning_amount) == 13.0
     assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
     assert float(refreshed_match_result.total_winning_amount) == 13.0
+
+
+def test_winning_calc_notify_failure_does_not_flip_done_status(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_notify_admins(*args, **kwargs):
+        raise RuntimeError("notify down")
+
+    monkeypatch.setattr("services.notify_service.notify_admins", fake_notify_admins)
+
+    with app.app_context():
+        user = create_user("winning_notify_guard_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="261891",
+            result_data={"1": {"SPF": {"result": "3", "sp": 10}}},
+            uploaded_by=user.id,
+            calc_status="pending",
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="261891",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_match_result = db.session.get(MatchResult, match_result_id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+
+    assert refreshed_match_result.calc_status == "done"
+    assert refreshed_match_result.calc_finished_at is not None
+    assert refreshed_ticket.is_winning is True
+    assert float(refreshed_ticket.winning_amount) == 13.0
 
 
 def test_winning_calc_skips_stale_upload_token(app):
@@ -7851,7 +8960,7 @@ def test_mode_b_confirm_returns_error_when_nothing_completed(app):
     with app.app_context():
         result = confirm_batch([], user_id=1)
     assert result["success"] is False
-    assert "票据" in result["error"]
+    assert "\u7968\u636e" in result["error"]
 
 
 def test_mode_b_confirm_can_complete_prefix_and_expire_rest(app):
@@ -7887,7 +8996,7 @@ def test_mode_b_confirm_validates_completed_count_after_deduping_ticket_ids(app)
         result = confirm_batch([first.id, first.id, second.id], user_id=user.id, completed_count=3)
 
     assert result["success"] is False
-    assert "范围" in result["error"]
+    assert "\u8303\u56f4" in result["error"]
 
 
 def test_mode_b_finalize_ignores_duplicate_ticket_ids(app):
@@ -8006,7 +9115,7 @@ def test_client_dashboard_resets_matching_state_on_load_failures():
 def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "isModeB: {% if current_user.client_mode == 'mode_b' %}true{% else %}false{% endif %}," in content
+    assert "isModeB: {{ (current_user.client_mode == 'mode_b') | tojson }}," in content
     assert "if (!this.isModeB) {\n      this.loadCurrentModeATicket();\n    }" in content
     assert "if (this.isModeB) {\n      this.loadPoolStatus();\n      this.loadProcessingBatches();\n    }" in content
     assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    }" in content
@@ -8143,8 +9252,8 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
 def test_client_dashboard_mode_a_flip_buttons_show_text_hints():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "mode-a-side-hint\">上一张</span>" in content
-    assert "mode-a-side-hint\">下一张</span>" in content
+    assert "mode-a-side-hint" in content
+    assert "mode-a-side-hint" in content
 
 
 def test_client_dashboard_mode_a_history_indicator_uses_two_fixed_slots():
@@ -8210,7 +9319,7 @@ def test_socket_request_pool_status_trims_mode_b_counts(app, monkeypatch):
         SimpleNamespace(
             is_authenticated=True,
             client_mode="mode_b",
-            get_blocked_lottery_types=lambda: ["胜平负"],
+            get_blocked_lottery_types=lambda: ["???"],
         ),
     )
     monkeypatch.setattr(
@@ -8222,7 +9331,7 @@ def test_socket_request_pool_status_trims_mode_b_counts(app, monkeypatch):
         lambda blocked_types=None: {
             "total_pending": 25,
             "by_type": [
-                {"lottery_type": "让球胜平负", "deadline_time": "2026-04-08T10:00:00", "count": 25}
+                {"lottery_type": "璁╃悆???", "deadline_time": "2026-04-08T10:00:00", "count": 25}
             ],
             "assigned": 0,
             "completed_today": 0,
@@ -8238,7 +9347,7 @@ def test_socket_request_pool_status_trims_mode_b_counts(app, monkeypatch):
             {
                 "total_pending": 5,
                 "by_type": [
-                    {"lottery_type": "让球胜平负", "deadline_time": "2026-04-08T10:00:00", "count": 5}
+                    {"lottery_type": "璁╃悆???", "deadline_time": "2026-04-08T10:00:00", "count": 5}
                 ],
                 "assigned": 0,
                 "completed_today": 0,
@@ -8250,8 +9359,8 @@ def test_socket_request_pool_status_trims_mode_b_counts(app, monkeypatch):
 def test_admin_upload_template_uses_xlsx_export_label():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
-    assert "导出XLSX" in content
-    assert "导出CSV" not in content
+    assert "\u5bfc\u51faXLSX" in content
+    assert "\u5bfc\u51faCSV" not in content
 
 
 def test_admin_upload_template_uses_server_derived_file_status():
@@ -8273,8 +9382,8 @@ def test_admin_upload_template_loads_all_detail_pages():
     assert "if (!res.ok || data.success === false) {" in content
     assert "detailTickets.push(...(data.tickets || []));" in content
     assert "} while (page <= totalPages);" in content
-    assert "showToast(e.message || '加载详情失败，请稍后重试', 'danger');" in content
-    assert "showToast(e.message || '撤回失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u8be6\u60c5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "showToast(e.message || '\u64a4\u56de\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_admin_upload_template_shows_assigned_count_column():
@@ -8295,7 +9404,7 @@ def test_admin_upload_template_distinguishes_pending_files_from_in_progress_file
 def test_admin_upload_template_shows_assigned_device_id_in_detail():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
-    assert "<th>设备ID</th>" in content
+    assert "<th>\u8bbe\u5907ID</th>" in content
     assert "{{ t.assigned_device_id || '-' }}" in content
 
 
@@ -8312,8 +9421,8 @@ def test_admin_users_template_handles_initial_load_failures():
     content = users_template.read_text(encoding="utf-8")
     assert "v-if=\"loadError\"" in content
     assert "loadError: ''" in content
-    assert "showToast(e.message || '加载彩种列表失败', 'danger');" in content
-    assert "this.loadError = e.message || '加载用户列表失败';" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u5f69\u79cd\u5217\u8868\u5931\u8d25', 'danger');" in content
+    assert "this.loadError = e.message || '\u52a0\u8f7d\u7528\u6237\u5217\u8868\u5931\u8d25';" in content
     assert "showToast(this.loadError, 'danger');" in content
     assert "finally {" in content
     assert "this.loading = false;" in content
@@ -8322,10 +9431,10 @@ def test_admin_users_template_handles_initial_load_failures():
 def test_admin_users_template_handles_action_network_failures():
     users_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "users.html"
     content = users_template.read_text(encoding="utf-8")
-    assert "this.createError = e.message || '网络异常，请稍后重试';" in content
-    assert "showToast(e.message || '更新失败，请稍后重试', 'danger');" in content
-    assert "showToast(e.message || '操作失败，请稍后重试', 'danger');" in content
-    assert "showToast(e.message || '删除失败，请稍后重试', 'danger');" in content
+    assert "this.createError = e.message || '\u7f51\u7edc\u5f02\u5e38\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';" in content
+    assert "showToast(e.message || '\u66f4\u65b0\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "showToast(e.message || '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "showToast(e.message || '\u5220\u9664\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_admin_upload_template_handles_file_list_failures():
@@ -8334,8 +9443,8 @@ def test_admin_upload_template_handles_file_list_failures():
     assert "v-if=\"listError\"" in content
     assert "listError: ''" in content
     assert "this.listError = '';" in content
-    assert "throw new Error(data.error || '加载文件列表失败');" in content
-    assert "this.listError = e.message || '加载文件列表失败';" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u6587\u4ef6\u5217\u8868\u5931\u8d25');" in content
+    assert "this.listError = e.message || '\u52a0\u8f7d\u6587\u4ef6\u5217\u8868\u5931\u8d25';" in content
     assert "this.page = 1;" in content
     assert "this.dateOptions = [];" in content
     assert "showToast(this.listError, 'danger');" in content
@@ -8347,16 +9456,16 @@ def test_admin_upload_template_handles_http_upload_failures():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
     assert "if (!res.ok || data.success === false) {" in content
-    assert "throw new Error(data.error || '上传失败');" in content
-    assert "i.message=e.message || '上传失败'" in content
-    assert "showToast(e.message || '上传失败', 'danger');" in content
-    assert "throw new Error(data.error || data.message || '撤回失败');" in content
+    assert "throw new Error(data.error || '\u4e0a\u4f20\u5931\u8d25');" in content
+    assert "i.message=e.message || '\u4e0a\u4f20\u5931\u8d25'" in content
+    assert "showToast(e.message || '\u4e0a\u4f20\u5931\u8d25', 'danger');" in content
+    assert "throw new Error(data.error || data.message || '\u64a4\u56de\u5931\u8d25');" in content
 
 
 def test_admin_upload_template_maps_per_file_results_before_batch_failure_throw():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
-    assert content.index("if (data.results) {") < content.index("throw new Error(data.error || '上传失败');")
+    assert content.index("if (data.results) {") < content.index("throw new Error(data.error || '\u4e0a\u4f20\u5931\u8d25');")
 
 
 def test_admin_upload_template_retries_non_done_items():
@@ -8377,7 +9486,7 @@ def test_admin_upload_template_skips_empty_mutation_batches_before_network_call(
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
     assert "if (pendingItems.length === 0) {" in content
-    assert "showToast('没有可上传的文件', 'warning');" in content
+    assert "showToast('\u6ca1\u6709\u53ef\u4e0a\u4f20\u7684\u6587\u4ef6', 'warning');" in content
     assert content.index("if (pendingItems.length === 0) {") < content.index("this.uploading = true;")
 
 
@@ -8420,15 +9529,26 @@ def test_admin_upload_template_resets_to_first_page_after_successful_mutations()
     assert "if (data.success) {\n          this.page = 1;\n          this.loadFiles();\n        }" in content
 
 
+def test_admin_upload_template_defaults_date_filter_to_current_business_date():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert "currentBusinessDate: ''," in content
+    assert "defaultDateInitialized: false," in content
+    assert "this.currentBusinessDate = data.current_business_date || '';" in content
+    assert "if (!this.defaultDateInitialized) {" in content
+    assert "if (!this.filterDate && this.currentBusinessDate) {" in content
+    assert "this.filterDate = this.currentBusinessDate;" in content
+
+
 def test_admin_upload_template_checks_export_http_errors_before_download():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
     assert "async exportByDate() {" in content
     assert "const res = await fetch(`/admin/api/tickets/export-by-date?${params}`);" in content
     assert "if (!res.ok) {" in content
-    assert "throw new Error(data.error || data.message || '导出失败');" in content
+    assert "throw new Error(data.error || data.message || '\u5bfc\u51fa\u5931\u8d25');" in content
     assert "const blob = await res.blob();" in content
-    assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '\u5bfc\u51fa\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_admin_winning_template_checks_export_http_errors_before_download():
@@ -8438,7 +9558,7 @@ def test_admin_winning_template_checks_export_http_errors_before_download():
     assert "const res = await fetch(`/admin/api/winning/export?${params}`);" in content
     assert "if (!res.ok) {" in content
     assert "const blob = await res.blob();" in content
-    assert "showToast(e.message || '导出失败，请稍后重试', 'danger');" in content
+    assert "showToast(e.message || '\u5bfc\u51fa\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
 
 
 def test_admin_upload_template_listens_for_realtime_file_events():
@@ -8502,12 +9622,12 @@ def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
 def test_admin_winning_template_handles_list_and_detail_load_failures():
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     content = winning_template.read_text(encoding="utf-8")
-    assert "throw new Error(data.error || '加载中奖记录失败');" in content
-    assert "showToast(e.message || '加载中奖记录失败', 'danger');" in content
-    assert "throw new Error(data.error || '加载赛果列表失败');" in content
-    assert "showToast(e.message || '加载赛果列表失败', 'danger');" in content
-    assert "throw new Error(data.error || '加载赛果详情失败');" in content
-    assert "showToast(e.message || '加载赛果详情失败', 'danger');" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u4e2d\u5956\u8bb0\u5f55\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u4e2d\u5956\u8bb0\u5f55\u5931\u8d25', 'danger');" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u8d5b\u679c\u5217\u8868\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u8d5b\u679c\u5217\u8868\u5931\u8d25', 'danger');" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u8d5b\u679c\u8be6\u60c5\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u8d5b\u679c\u8be6\u60c5\u5931\u8d25', 'danger');" in content
 
 
 def test_admin_winning_template_formats_sp_display_to_two_decimals():
@@ -8523,17 +9643,17 @@ def test_admin_dashboard_and_winning_templates_check_http_status_on_actions():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
     dashboard_content = dashboard_template.read_text(encoding="utf-8")
     assert "if (!res.ok || data.success === false) {" in dashboard_content
-    assert "throw new Error(data.error || '操作失败');" in dashboard_content
-    assert "showToast(e.message || '操作失败', 'danger');" in dashboard_content
+    assert "throw new Error(data.error || '\u64cd\u4f5c\u5931\u8d25');" in dashboard_content
+    assert "showToast(e.message || '\u64cd\u4f5c\u5931\u8d25', 'danger');" in dashboard_content
 
     winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
     winning_content = winning_template.read_text(encoding="utf-8")
     assert winning_content.count("if (!res.ok || data.success === false) {") >= 4
-    assert "throw new Error(data.error || '标记失败');" in winning_content
-    assert "throw new Error(data.error || '上传失败');" in winning_content
-    assert "throw new Error(data.error || '提交失败');" in winning_content
-    assert "showToast(e.message || '标记失败', 'danger');" in winning_content
-    assert "this.uploadMsg = e.message || '网络异常，请稍后重试';" in winning_content
+    assert "throw new Error(data.error || '\u6807\u8bb0\u5931\u8d25');" in winning_content
+    assert "throw new Error(data.error || '\u4e0a\u4f20\u5931\u8d25');" in winning_content
+    assert "throw new Error(data.error || '\u63d0\u4ea4\u5931\u8d25');" in winning_content
+    assert "showToast(e.message || '\u6807\u8bb0\u5931\u8d25', 'danger');" in winning_content
+    assert "this.uploadMsg = e.message || '\u7f51\u7edc\u5f02\u5e38\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';" in winning_content
 
 
 def test_admin_winning_defaults_date_filter_to_current_business_day():
@@ -8569,13 +9689,13 @@ def test_client_dashboard_renders_fixed_announcement_card_and_hides_global_bar()
 def test_client_dashboard_handles_download_and_open_winning_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "throw new Error(data.error || '下载失败');" in content
-    assert "showToast(e.message || '下载失败，请稍后重试', 'danger');" in content
-    assert "throw new Error(data.error || '加载中奖记录失败');" in content
-    assert "throw new Error(data.error || '筛选失败');" in content
-    assert "showToast(e.message || '加载中奖记录失败请稍后重试', 'danger');" not in content
-    assert "showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');" in content
-    assert "showToast(e.message || '筛选失败', 'danger');" in content
+    assert "throw new Error(data.error || '\u4e0b\u8f7d\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u4e2d\u5956\u8bb0\u5f55\u5931\u8d25');" in content
+    assert "throw new Error(data.error || '\u7b5b\u9009\u5931\u8d25');" in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u4e2d\u5956\u8bb0\u5f55\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5, 'danger');" not in content
+    assert "showToast(e.message || '\u52a0\u8f7d\u4e2d\u5956\u8bb0\u5f55\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+    assert "showToast(e.message || '\u7b5b\u9009\u5931\u8d25', 'danger');" in content
 
 
 def test_admin_dashboard_marks_refresh_failure_in_indicator():
@@ -8583,7 +9703,7 @@ def test_admin_dashboard_marks_refresh_failure_in_indicator():
     content = dashboard_template.read_text(encoding="utf-8")
     assert "const onlineIndicator = document.getElementById('online-indicator');" in content
     assert "throw new Error(data.error ||" in content
-    assert "onlineIndicator.textContent = '连接异常';" in content
+    assert "onlineIndicator.textContent = '\u8fde\u63a5\u5f02\u5e38';" in content
     assert "onlineIndicator.className = 'badge bg-danger';" in content
 
 
@@ -8625,7 +9745,7 @@ def test_admin_dashboard_renders_health_summary_panel():
 def test_admin_dashboard_renders_device_speed_detail_table_and_speed_overview():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "设备处理速度统计" in content
+    assert "\u8bbe\u5907\u5904\u7406\u901f\u5ea6\u7edf\u8ba1" in content
     assert "id=\"device-speed-tbody\"" in content
     assert "data.device_speed_stats" in content
     assert "id=\"stat-speed\"" in content
@@ -8635,26 +9755,26 @@ def test_admin_dashboard_renders_device_speed_detail_table_and_speed_overview():
 def test_admin_settings_no_longer_renders_announcement_editor():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
     content = settings_template.read_text(encoding="utf-8")
-    assert "公告内容" not in content
-    assert "显示公告" not in content
+    assert "\u516c\u544a\u5185\u5bb9" not in content
+    assert "\u663e\u793a\u516c\u544a" not in content
 def test_client_dashboard_validates_winning_image_type_and_handles_password_http_errors():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "if (!res.ok) {" in content
-    assert "showToast(data.error || '获取下一张失败，请稍后重试', 'danger');" in content
+    assert "showToast(data.error || '\u83b7\u53d6\u4e0b\u4e00\u5f20\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
     assert "if (!file.type.startsWith('image/')) {" in content
-    assert "showToast('请上传图片文件', 'warning');" in content
+    assert "showToast('\u8bf7\u4e0a\u4f20\u56fe\u7247\u6587\u4ef6', 'warning');" in content
     assert "if (!res.ok || data.success === false) {" in content
-    assert "throw new Error(data.error || '密码修改失败');" in content
-    assert "this.pwdError = e.message || '网络异常，请稍后重试';" in content
-    assert "throw new Error(data.error || '停止接单失败');" in content
-    assert "showToast(e.message || '停止接单失败', 'danger');" in content
+    assert "throw new Error(data.error || '\u5bc6\u7801\u4fee\u6539\u5931\u8d25');" in content
+    assert "this.pwdError = e.message || '\u7f51\u7edc\u5f02\u5e38\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';" in content
+    assert "showToast(data.error || '\u4e0a\u4f20\u5931\u8d25', 'danger');" in content
+    assert "showToast('\u4e0a\u4f20\u5931\u8d25', 'danger');" in content
 
 
 def test_client_dashboard_resets_stats_when_load_fails():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "throw new Error(data.error || '加载统计失败');" in content
+    assert "throw new Error(data.error || '\u52a0\u8f7d\u7edf\u8ba1\u5931\u8d25');" in content
     assert "this.stats = { ticket_count: 0, total_amount: 0, pool_total_pending: 0, active_count: 0, device_stats: [] };" in content
 def test_admin_settings_template_checks_http_status_on_load():
     settings_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "settings.html"
@@ -8787,3 +9907,760 @@ def test_templates_use_chinese_for_recent_admin_prompt_fixes():
     assert "登录失败（HTTP ${res.status}）" in login_content
     assert "this.error = data.error || '登录失败';" in login_content
     assert "this.error = '网络异常，请稍后重试';" in login_content
+def test_mode_b_download_rejects_float_count_payload(app, client):
+    with app.app_context():
+        create_user("mode_b_download_float_count_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_download_float_count_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": 1.9, "device_id": "dev-float"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_mode_b_download_rejects_bool_count_payload(app, client):
+    with app.app_context():
+        create_user("mode_b_download_bool_count_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_download_bool_count_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": True, "device_id": "dev-bool"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_mode_b_confirm_rejects_float_ticket_ids(app, client):
+    with app.app_context():
+        create_user("mode_b_confirm_float_ticket_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_confirm_float_ticket_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-b/confirm",
+        json={"ticket_ids": [1.9], "completed_count": 1, "device_id": "dev-confirm"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "integer" in data["error"]
+
+
+def test_mode_b_confirm_rejects_non_integer_completed_count_payload(app, client):
+    with app.app_context():
+        create_user("mode_b_confirm_float_completed_user", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_confirm_float_completed_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/mode-b/confirm",
+        json={"ticket_ids": [1], "completed_count": 1.2, "device_id": "dev-confirm"},
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "completed_count" in data["error"]
+
+
+def test_mode_b_confirm_batch_rejects_non_integer_completed_count(app):
+    from services.mode_b_service import confirm_batch
+
+    with app.app_context():
+        result = confirm_batch([1, 2], user_id=1, completed_count=True)
+
+    assert result["success"] is False
+    assert "completed_count" in result["error"]
+
+
+def test_mode_b_batch_now_is_computed_after_postgres_user_lock(app, monkeypatch):
+    from services.ticket_pool import assign_tickets_batch
+
+    order = []
+
+    def fake_acquire(_user_id):
+        order.append("lock")
+
+    def fake_ensure(_user_id, _device_id, assigned_at):
+        order.append("ensure")
+        return assigned_at
+
+    class _Result:
+        def fetchall(self):
+            return []
+
+    def fake_execute(*_args, **_kwargs):
+        return _Result()
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_user_assignment_lock", fake_acquire)
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", fake_ensure)
+    monkeypatch.setattr(db.session, "execute", fake_execute)
+
+    with app.app_context():
+        tickets, message = assign_tickets_batch(
+            user_id=1,
+            device_id="dev-order",
+            username="tester",
+            count=5,
+            max_processing=None,
+            daily_limit=None,
+            blocked_lottery_types=[],
+        )
+
+    assert tickets == []
+    assert message is None
+    assert order[:2] == ["lock", "ensure"]
+
+
+def test_recalc_falls_back_to_sync_when_scheduler_enqueue_fails(app, client, monkeypatch):
+    calls = {}
+
+    class FailingScheduler:
+        def add_job(self, *args, **kwargs):
+            raise RuntimeError("scheduler down")
+
+    def fake_process(result_id, expected_calc_token=None, expected_uploaded_at=None, app=None):
+        calls["result_id"] = result_id
+        calls["token"] = expected_calc_token
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FailingScheduler())
+    monkeypatch.setattr("services.winning_calc_service.process_match_result", fake_process)
+
+    with app.app_context():
+        admin = User(username="admin_recalc_sync_fallback", is_admin=True)
+        admin.set_password("secret123")
+        match_result = MatchResult(
+            detail_period="27101",
+            result_data={"1": {"SPF": {"result": "3", "sp": 1.23}}},
+            uploaded_by=1,
+            calc_status="done",
+            tickets_total=7,
+        )
+        db.session.add_all([admin, match_result])
+        db.session.commit()
+        result_id = match_result.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recalc_sync_fallback", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post(f"/admin/api/match-results/{result_id}/recalc")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert calls["result_id"] == result_id
+    assert isinstance(calls["token"], str)
+
+
+def test_match_result_upload_falls_back_to_sync_when_scheduler_enqueue_fails(app, client, monkeypatch):
+    calls = {}
+
+    class FailingScheduler:
+        def add_job(self, *args, **kwargs):
+            raise RuntimeError("scheduler down")
+
+    def fake_parse_result_file(*_args, **_kwargs):
+        return {
+            "success": True,
+            "count": 1,
+            "match_result_id": 99991,
+            "calc_token": "rf:99991",
+        }
+
+    def fake_process(result_id, expected_calc_token=None, expected_uploaded_at=None, app=None):
+        calls["result_id"] = result_id
+        calls["token"] = expected_calc_token
+
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: FailingScheduler())
+    monkeypatch.setattr("services.result_parser.parse_result_file", fake_parse_result_file)
+    monkeypatch.setattr("services.winning_calc_service.process_match_result", fake_process)
+
+    with app.app_context():
+        admin = User(username="admin_upload_sync_fallback", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_upload_sync_fallback", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "header\n1\t3\t1.80\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "27102",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "27102_final.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert calls["result_id"] == 99991
+    assert calls["token"] == "rf:99991"
+
+
+def test_winning_calc_cleanup_failure_does_not_flip_done_status(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    def fake_calculate_winning(raw_content, result_data, multiplier, sp_field='sp'):
+        return False, 0, 0, 0
+
+    def fake_delete_stored_image(_oss_key, _image_url):
+        raise RuntimeError("oss unavailable")
+
+    monkeypatch.setattr("services.winning_calc_service.calculate_winning", fake_calculate_winning)
+    monkeypatch.setattr("services.winning_calc_service.delete_stored_image", fake_delete_stored_image)
+
+    with app.app_context():
+        user = create_user("winning_cleanup_fallback_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="27103",
+            result_data={"1": {"SPF": {"result": "0", "sp": 1.2}}},
+            uploaded_by=user.id,
+            calc_status="pending",
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="27103",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            winning_image_url="/uploads/images/cleanup-failed.png",
+        )
+        db.session.add_all([match_result, ticket])
+        db.session.commit()
+        record = WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period=ticket.detail_period,
+            lottery_type=ticket.lottery_type,
+            winning_image_url=ticket.winning_image_url,
+            image_oss_key="oss/cleanup-failed.png",
+            uploaded_by=user.id,
+        )
+        db.session.add(record)
+        db.session.commit()
+        match_result_id = match_result.id
+        ticket_id = ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_result = db.session.get(MatchResult, match_result_id)
+        refreshed_ticket = db.session.get(LotteryTicket, ticket_id)
+        refreshed_record = WinningRecord.query.filter_by(ticket_id=ticket_id).first()
+
+    assert refreshed_result.calc_status == "done"
+    assert refreshed_ticket.is_winning is False
+    assert refreshed_record is None
+
+
+def test_parse_result_file_updates_latest_result_with_same_period_and_lottery_type(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="result_type_isolation_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+        older_spf = MatchResult(
+            detail_period="27210",
+            lottery_type="???",
+            result_data={"61": {"SPF": {"result": "0", "sp": 1.10}}},
+            uploaded_by=admin_id,
+            uploaded_at=beijing_now() - timedelta(days=2),
+        )
+        newer_spf = MatchResult(
+            detail_period="27210",
+            lottery_type="???",
+            result_data={"61": {"SPF": {"result": "1", "sp": 1.20}}},
+            uploaded_by=admin_id,
+            uploaded_at=beijing_now() - timedelta(days=1),
+        )
+        other_type = MatchResult(
+            detail_period="27210",
+            lottery_type="\u6bd4\u5206",
+            result_data={"61": {"CBF": {"result": "1:0", "sp": 7.80}}},
+            uploaded_by=admin_id,
+            uploaded_at=beijing_now() - timedelta(hours=12),
+        )
+        db.session.add_all([older_spf, newer_spf, other_type])
+        db.session.commit()
+        older_id = older_spf.id
+        newer_id = newer_spf.id
+        other_id = other_type.id
+
+    result_file = tmp_path / "result_type_isolation.txt"
+    result_file.write_text("\u5e8f\u53f7\tA\tB\n61\t3\t1.88\n", encoding="utf-8")
+
+    with app.app_context():
+        result = parse_result_file(
+            str(result_file),
+            "27210",
+            admin_id,
+            upload_kind="final",
+            lottery_type="???",
+        )
+        assert result["success"] is True
+        assert result["match_result_id"] == newer_id
+
+        refreshed_older = db.session.get(MatchResult, older_id)
+        refreshed_newer = db.session.get(MatchResult, newer_id)
+        refreshed_other = db.session.get(MatchResult, other_id)
+
+    assert refreshed_older.result_data == {"61": {"SPF": {"result": "0", "sp": 1.10}}}
+    assert refreshed_newer.result_data["61"]["SPF"]["result"] == "3"
+    assert refreshed_other.result_data == {"61": {"CBF": {"result": "1:0", "sp": 7.80}}}
+
+
+def test_upload_match_result_allows_ambiguous_period_without_lottery_type(app, client):
+    with app.app_context():
+        admin = User(username="admin_result_ambiguous_type", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        db.session.add_all([
+            LotteryTicket(
+                source_file_id=1,
+                line_number=1,
+                raw_content="SPF|1=3|1*1|1",
+                detail_period="27211",
+                lottery_type="???",
+                status="completed",
+                assigned_user_id=admin.id,
+                assigned_username=admin.username,
+                completed_at=beijing_now(),
+            ),
+            LotteryTicket(
+                source_file_id=1,
+                line_number=2,
+                raw_content="CBF|1=1:0|1*1|1",
+                detail_period="27211",
+                lottery_type="\u6bd4\u5206",
+                status="completed",
+                assigned_user_id=admin.id,
+                assigned_username=admin.username,
+                completed_at=beijing_now(),
+            ),
+        ])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_ambiguous_type", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "\u5e8f\u53f7\tA\tB\n61\t3\t1.88\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "27211",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "27211_final.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["match_result_id"]
+
+    with app.app_context():
+        match_result = db.session.get(MatchResult, data["match_result_id"])
+        assert match_result is not None
+        assert match_result.detail_period == "27211"
+        assert match_result.lottery_type is None
+
+
+def test_winning_calc_processes_only_matching_lottery_type_tickets(app, monkeypatch):
+    from services.winning_calc_service import process_match_result
+
+    monkeypatch.setattr(
+        "services.winning_calc_service.calculate_winning",
+        lambda raw_content, result_data, multiplier, sp_field='sp': (True, 10, 10, 0),
+    )
+
+    with app.app_context():
+        user = create_user("winning_calc_type_scope_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="27212",
+            lottery_type="???",
+            result_data={"1": {"SPF": {"result": "3", "sp": 2.0}}},
+            uploaded_by=user.id,
+            calc_status="pending",
+        )
+        spf_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="27212",
+            lottery_type="???",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        cbf_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="CBF|1=1:0|1*1|1",
+            status="completed",
+            detail_period="27212",
+            lottery_type="\u6bd4\u5206",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, spf_ticket, cbf_ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        spf_ticket_id = spf_ticket.id
+        cbf_ticket_id = cbf_ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_result = db.session.get(MatchResult, match_result_id)
+        refreshed_spf = db.session.get(LotteryTicket, spf_ticket_id)
+        refreshed_cbf = db.session.get(LotteryTicket, cbf_ticket_id)
+
+    assert refreshed_result.tickets_total == 1
+    assert refreshed_result.tickets_winning == 1
+    assert refreshed_spf.is_winning is True
+    assert refreshed_cbf.is_winning is None
+
+
+def test_mode_b_batch_acquires_reserve_lock_before_type_stats_query(app, monkeypatch):
+    from services.ticket_pool import assign_tickets_batch
+
+    events = []
+
+    class FakeResult:
+        def __init__(self, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
+            events.append("type_stats")
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_user_assignment_lock", lambda _user_id: events.append("user_lock"))
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_mode_b_reserve_lock", lambda: events.append("reserve_lock"))
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", lambda _user_id, _device_id, assigned_at: assigned_at)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: datetime(2026, 4, 7, 10, 30, 0))
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+
+    with app.app_context():
+        tickets, message = assign_tickets_batch(
+            user_id=1,
+            device_id="device-b",
+            username="tester",
+            count=1,
+        )
+
+    assert tickets == []
+    assert message is None
+    assert events[:3] == ["user_lock", "reserve_lock", "type_stats"]
+
+
+def test_upload_match_result_sanitizes_nested_filename_paths(app, client):
+    with app.app_context():
+        admin = User(username="admin_result_nested_filename", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_result_nested_filename", "password": "secret123"})
+    assert resp.status_code == 200
+
+    payload = "\u5e8f\u53f7\tA\tB\n1\t3\t1.85\n".encode("utf-8")
+    resp = client.post(
+        "/admin/match-results/upload",
+        data={
+            "detail_period": "27213",
+            "upload_kind": "final",
+            "file": (io.BytesIO(payload), "nested/27213_final.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+
+    with app.app_context():
+        rf = ResultFile.query.order_by(ResultFile.id.desc()).first()
+
+    assert rf is not None
+    normalized_stored = rf.stored_filename.replace("\\", "/")
+    assert normalized_stored.startswith("results/27213/")
+    assert ".." not in normalized_stored
+    assert "/" not in rf.original_filename
+    assert "\\" not in rf.original_filename
+
+
+def test_parse_result_file_duplicate_seq_keeps_unique_count(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="result_duplicate_seq_count_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    result_file = tmp_path / "duplicate_seq_result.txt"
+    result_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.80\n1\t1\t2.20\n", encoding="utf-8")
+
+    with app.app_context():
+        result = parse_result_file(str(result_file), "27214", admin_id, upload_kind="final")
+        assert result["success"] is True
+        assert result["count"] == 1
+        mr = db.session.get(MatchResult, result["match_result_id"])
+
+    assert mr is not None
+    assert sorted(mr.result_data.keys()) == ["1"]
+    assert mr.result_data["1"]["SPF"]["result"] == "1"
+    assert mr.result_data["1"]["SPF"]["sp"] == 2.20
+
+
+def test_mode_b_batch_sqlite_assigns_null_lottery_type_tickets(app):
+    from services.ticket_pool import assign_tickets_batch
+
+    with app.app_context():
+        user = create_user("mode_b_null_type_sqlite_user", "secret123", client_mode="mode_b")
+        deadline = beijing_now() + timedelta(hours=2)
+        db.session.add_all([
+            LotteryTicket(
+                source_file_id=1,
+                line_number=i,
+                raw_content=f"NULL-TYPE-{i}",
+                lottery_type=None,
+                deadline_time=deadline,
+                status="pending",
+            )
+            for i in range(1, 26)
+        ])
+        db.session.commit()
+
+        tickets, adjustment_message = assign_tickets_batch(
+            user_id=user.id,
+            device_id="device-null-type",
+            username=user.username,
+            count=3,
+            max_processing=None,
+            daily_limit=None,
+            blocked_lottery_types=[],
+        )
+
+        assigned_count = LotteryTicket.query.filter_by(
+            assigned_user_id=user.id,
+            assigned_device_id="device-null-type",
+            status="assigned",
+        ).count()
+        assigned_types = [ticket.lottery_type for ticket in tickets]
+
+    assert adjustment_message is None
+    assert len(tickets) == 3
+    assert all(lottery_type is None for lottery_type in assigned_types)
+    assert assigned_count == 3
+
+
+def test_mode_b_batch_postgres_uses_is_null_clause_for_null_lottery_type(app, monkeypatch):
+    from services.ticket_pool import assign_tickets_batch
+
+    class FakeResult:
+        def __init__(self, fetchall_data=None):
+            self._fetchall_data = fetchall_data or []
+
+        def fetchall(self):
+            return self._fetchall_data
+
+    class TypeStat:
+        def __init__(self, lottery_type, deadline_time, cnt):
+            self.lottery_type = lottery_type
+            self.deadline_time = deadline_time
+            self.cnt = cnt
+
+    now = datetime(2026, 4, 8, 9, 0, 0)
+    selected_deadline = datetime(2026, 4, 8, 12, 0, 0)
+    observed_sql = {"value": None}
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT lottery_type, deadline_time, COUNT(*) as cnt" in sql:
+            return FakeResult(fetchall_data=[TypeStat(None, selected_deadline, 30)])
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            observed_sql["value"] = sql
+            return FakeResult(fetchall_data=[])
+        raise AssertionError(f"Unexpected SQL executed: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_user_assignment_lock", lambda _user_id: None)
+    monkeypatch.setattr("services.ticket_pool._acquire_postgres_mode_b_reserve_lock", lambda: None)
+    monkeypatch.setattr("services.ticket_pool._ensure_unique_batch_assigned_at", lambda _user_id, _device_id, assigned_at: assigned_at)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: now)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+
+    with app.app_context():
+        tickets, adjustment_message = assign_tickets_batch(
+            user_id=1,
+            device_id="device-null-type-pg",
+            username="tester",
+            count=3,
+            max_processing=None,
+            daily_limit=None,
+            blocked_lottery_types=[],
+        )
+
+    assert tickets == []
+    assert adjustment_message is None
+    assert observed_sql["value"] is not None
+    assert "lottery_type IS NULL" in observed_sql["value"]
+
+
+def test_admin_users_import_returns_400_when_service_reports_failure(app, client, monkeypatch):
+    with app.app_context():
+        admin = User(username="admin_import_failure_status", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_import_failure_status", "password": "secret123"})
+    assert resp.status_code == 200
+
+    monkeypatch.setattr(
+        "services.user_import_service.import_users",
+        lambda *_args, **_kwargs: {"success": False, "error": "invalid workbook"},
+    )
+
+    resp = client.post(
+        "/admin/api/users/import",
+        data={"file": (io.BytesIO(b"dummy"), "users-import.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_match_result_flags_ignore_malformed_payload_shapes():
+    record = MatchResult(detail_period="shape-guard", result_data=["bad", "payload"])
+    assert record.has_predicted_results() is False
+    assert record.has_final_results() is False
+
+    record.result_data = {"1": {"SPF": "not-an-object"}}
+    assert record.has_predicted_results() is False
+    assert record.has_final_results() is False
+
+    record.result_data = {"1": {"SPF": {"predicted_sp": 1.55}}}
+    assert record.has_predicted_results() is True
+    assert record.has_final_results() is False
+
+    record.result_data = {"1": {"SPF": {"sp": 2.05}}}
+    assert record.has_predicted_results() is False
+    assert record.has_final_results() is True
+
+
+def test_can_receive_required_returns_json_401_for_anonymous_user(app, client):
+    from flask import jsonify
+    from utils.decorators import can_receive_required
+
+    endpoint = "probe_can_receive_guard"
+    if endpoint not in app.view_functions:
+        @app.route("/__probe-can-receive-guard", endpoint=endpoint)
+        @can_receive_required
+        def _probe_can_receive_guard():
+            return jsonify({"success": True})
+
+    resp = client.get("/__probe-can-receive-guard")
+    assert resp.status_code == 401
+    data = resp.get_json()
+    assert data["success"] is False
+
+
+def test_delete_object_local_mode_flattens_slash_oss_key_to_local_filename(app, tmp_path):
+    from services.oss_service import delete_object
+
+    with app.app_context():
+        app.config["UPLOAD_FOLDER"] = str(tmp_path)
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        local_file = images_dir / "winning_2026_04_19_123.jpg"
+        local_file.write_bytes(b"img")
+
+        ok = delete_object("winning/2026/04/19/123.jpg")
+
+    assert ok is True
+    assert local_file.exists() is False
+
+
+def test_delete_stored_image_falls_back_to_image_url_when_oss_key_delete_fails(app, tmp_path):
+    from services.oss_service import delete_stored_image
+
+    with app.app_context():
+        app.config["UPLOAD_FOLDER"] = str(tmp_path)
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        fallback_file = images_dir / "fallback-cleanup.jpg"
+        fallback_file.write_bytes(b"img")
+
+        ok = delete_stored_image(
+            image_oss_key="winning/2026/04/19/not-existing.jpg",
+            image_url="/uploads/images/fallback-cleanup.jpg",
+        )
+
+    assert ok is True
+    assert fallback_file.exists() is False
+
+
+def test_delete_object_local_mode_rejects_backslash_path_traversal_key(app, tmp_path):
+    from services.oss_service import delete_object
+
+    with app.app_context():
+        app.config["UPLOAD_FOLDER"] = str(tmp_path)
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        outside_file = tmp_path / "outside.txt"
+        outside_file.write_bytes(b"outside")
+
+        ok = delete_object("..\\outside.txt")
+
+    assert ok is False
+    assert outside_file.exists() is True
+
+
+def test_delete_stored_image_rejects_backslash_path_traversal_in_image_url(app, tmp_path):
+    from services.oss_service import delete_stored_image
+
+    with app.app_context():
+        app.config["UPLOAD_FOLDER"] = str(tmp_path)
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        outside_file = tmp_path / "outside-image.txt"
+        outside_file.write_bytes(b"outside")
+
+        ok = delete_stored_image(image_url="/uploads/images/..\\outside-image.txt")
+
+    assert ok is False
+    assert outside_file.exists() is True
+

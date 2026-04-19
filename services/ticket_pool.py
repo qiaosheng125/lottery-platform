@@ -53,6 +53,19 @@ def _acquire_postgres_user_assignment_lock(user_id: int) -> None:
     )
 
 
+def _acquire_postgres_mode_b_reserve_lock() -> None:
+    """Serialize global mode-b reserve calculations across concurrent users."""
+    if not _is_postgres():
+        return
+    bind = db.session.get_bind()
+    if bind is None or bind.dialect.name != 'postgresql':
+        return
+    db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, :lock_id)"),
+        {'ns': 1002, 'lock_id': 1},
+    )
+
+
 def _get_ticket_by_id(ticket_id: int):
     try:
         ticket = db.session.get(LotteryTicket, ticket_id)
@@ -131,8 +144,6 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
         blocked_lottery_types: 禁止接收的彩种列表，None或空列表表示不限制
     """
     rc = _get_redis()
-    now = beijing_now()
-    lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
 
     blocked_types = blocked_lottery_types or []
 
@@ -145,12 +156,15 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 business_start = get_today_noon()
                 today_count = _count_today_completed(user_id, business_start)
                 if today_count >= daily_limit:
+                    db.session.rollback()
                     return None
 
             blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
 
             max_attempts = 10
             for _ in range(max_attempts):
+                current_now = beijing_now()
+                lock_until = current_now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
                 # 先找一张 pending 票的 id（排除禁止的彩种）
                 row = db.session.execute(
                     text(f"""
@@ -161,9 +175,10 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                         ORDER BY id
                         LIMIT 1
                     """),
-                    {'now': now, **blocked_params}
+                    {'now': current_now, **blocked_params}
                 ).fetchone()
                 if not row:
+                    db.session.rollback()
                     return None
                 ticket_id = row[0]
                 # 原子 UPDATE：只有 status='pending' 时才成功
@@ -182,7 +197,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                     {
                         'user_id': user_id, 'username': username,
                         'device_id': device_id,
-                        'now': now, 'lock_until': lock_until, 'id': ticket_id,
+                        'now': current_now, 'lock_until': lock_until, 'id': ticket_id,
                     }
                 ).rowcount
                 if not updated:
@@ -202,6 +217,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 )
                 db.session.commit()
                 return _get_ticket_by_id(ticket_id)
+            db.session.rollback()
             return None
 
     # ── PostgreSQL production path ────────────────────────────────
@@ -213,13 +229,14 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
         business_start = get_today_noon()
         today_count = _count_today_completed(user_id, business_start)
         if today_count >= daily_limit:
+            db.session.rollback()
             return None
 
     blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
 
     MAX_ATTEMPTS = 10
 
-    def _fetch_pending_ticket_id_from_db():
+    def _fetch_pending_ticket_id_from_db(current_now: datetime):
         result = db.session.execute(
             text(f"""
                 SELECT id FROM lottery_tickets
@@ -230,11 +247,13 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             """),
-            {'now': now, **blocked_params}
+            {'now': current_now, **blocked_params}
         ).fetchone()
         return result[0] if result else None
 
     for _ in range(MAX_ATTEMPTS):
+        current_now = beijing_now()
+        lock_until = current_now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
         redis_ticket_id = None
         if rc:
             try:
@@ -248,10 +267,11 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
         if redis_ticket_id is not None:
             candidate_ids.append((redis_ticket_id, True))
 
-        fallback_ticket_id = _fetch_pending_ticket_id_from_db()
+        fallback_ticket_id = _fetch_pending_ticket_id_from_db(current_now)
         if fallback_ticket_id is not None and fallback_ticket_id not in [candidate_id for candidate_id, _ in candidate_ids]:
             candidate_ids.append((fallback_ticket_id, False))
         if not candidate_ids:
+            db.session.rollback()
             return None
 
         for ticket_id, from_redis in candidate_ids:
@@ -268,7 +288,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 if not ticket:
                     continue
 
-                if ticket.deadline_time and ticket.deadline_time <= now:
+                if ticket.deadline_time and ticket.deadline_time <= current_now:
                     db.session.execute(
                         text("UPDATE lottery_tickets SET status='expired', version = version + 1 WHERE id=:id"),
                         {'id': ticket_id}
@@ -312,7 +332,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                     {
                         'user_id': user_id, 'username': username,
                         'device_id': device_id,
-                        'now': now, 'lock_until': lock_until, 'id': ticket_id,
+                        'now': current_now, 'lock_until': lock_until, 'id': ticket_id,
                     }
                 ).rowcount
 
@@ -338,6 +358,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 current_app.logger.error(f"assign_ticket_atomic error for id {ticket_id}: {e}")
                 return None
 
+    db.session.rollback()
     return None
 
 
@@ -417,14 +438,14 @@ def assign_tickets_batch(
     Returns:
         (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
     """
-    now = _ensure_unique_batch_assigned_at(user_id, device_id, beijing_now())
-    lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
     RESERVE = 20  # B模式至少保留20张给A模式/管理员上传缓冲
 
     blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
         with _sqlite_assign_lock:
+            now = _ensure_unique_batch_assigned_at(user_id, device_id, beijing_now())
+            lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
             adjustment_message = None
 
             # 检查每日上限（并发安全，在锁内）
@@ -433,6 +454,7 @@ def assign_tickets_batch(
                 business_start = get_today_noon()
                 today_count = _count_today_completed(user_id, business_start)
                 if today_count >= daily_limit:
+                    db.session.rollback()
                     return [], '已达到今日处理上限'
                 daily_remaining = daily_limit - today_count
                 if count > daily_remaining:
@@ -447,6 +469,7 @@ def assign_tickets_batch(
                 ).scalar() or 0
 
                 if current_processing >= max_processing:
+                    db.session.rollback()
                     return [], None  # 已达上限，返回空列表
 
                 # 自动调整请求数量为剩余额度
@@ -463,6 +486,7 @@ def assign_tickets_batch(
             ).scalar() or 0
             available = max(0, total_pending - RESERVE)
             if available <= 0:
+                db.session.rollback()
                 return [], None
             actual_count = min(count, available)
 
@@ -480,6 +504,7 @@ def assign_tickets_batch(
             ).fetchall()
 
             if not type_stats:
+                db.session.rollback()
                 return [], None
 
             # 选择彩种逻辑
@@ -517,19 +542,24 @@ def assign_tickets_batch(
             actual_count = min(actual_count, selected_count)
 
             # 从选中的彩种分配票
+            lottery_type_clause = "lottery_type IS NULL" if selected_type is None else "lottery_type = :lottery_type"
+            params = {'now': now, 'deadline_time': selected_deadline, 'count': actual_count}
+            if selected_type is not None:
+                params['lottery_type'] = selected_type
             rows = db.session.execute(
-                text("""
+                text(f"""
                     SELECT id FROM lottery_tickets
                     WHERE status = 'pending'
                       AND deadline_time > :now
-                      AND lottery_type = :lottery_type
+                      AND {lottery_type_clause}
                       AND deadline_time = :deadline_time
                     ORDER BY id
                     LIMIT :count
                 """),
-                {'now': now, 'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
+                params
             ).fetchall()
             if not rows:
+                db.session.rollback()
                 return [], None
             ids = [r[0] for r in rows]
             # 原子 UPDATE：WHERE status='pending' 防止重复分配
@@ -588,6 +618,9 @@ def assign_tickets_batch(
 
     adjustment_message = None
     _acquire_postgres_user_assignment_lock(user_id)
+    _acquire_postgres_mode_b_reserve_lock()
+    now = _ensure_unique_batch_assigned_at(user_id, device_id, beijing_now())
+    lock_until = now + timedelta(minutes=current_app.config.get('TICKET_LOCK_MINUTES', 30))
 
     # PostgreSQL: 检查每日上限
     if daily_limit is not None:
@@ -595,6 +628,7 @@ def assign_tickets_batch(
         business_start = get_today_noon()
         today_count = _count_today_completed(user_id, business_start)
         if today_count >= daily_limit:
+            db.session.rollback()
             return [], '已达到今日处理上限'
         daily_remaining = daily_limit - today_count
         if count > daily_remaining:
@@ -608,6 +642,7 @@ def assign_tickets_batch(
         ).scalar() or 0
 
         if current_processing >= max_processing:
+            db.session.rollback()
             return [], None
 
         remaining = max_processing - current_processing
@@ -631,12 +666,14 @@ def assign_tickets_batch(
     ).fetchall()
 
     if not type_stats:
+        db.session.rollback()
         return [], None
 
     # 计算可用票数（扣除保留）
     total_pending = sum(r.cnt for r in type_stats)
     available = max(0, total_pending - RESERVE)
     if available <= 0:
+        db.session.rollback()
         return [], None
     actual_count = min(count, available)
 
@@ -669,21 +706,26 @@ def assign_tickets_batch(
             selected_deadline = first_deadline
 
     # 从选中的彩种分配票
+    lottery_type_clause = "lottery_type IS NULL" if selected_type is None else "lottery_type = :lottery_type"
+    params = {'now': now, 'deadline_time': selected_deadline, 'count': actual_count}
+    if selected_type is not None:
+        params['lottery_type'] = selected_type
     rows = db.session.execute(
-        text("""
+        text(f"""
             SELECT id FROM lottery_tickets
             WHERE status = 'pending'
               AND deadline_time > :now
-              AND lottery_type = :lottery_type
+              AND {lottery_type_clause}
               AND deadline_time = :deadline_time
             ORDER BY id
             FOR UPDATE SKIP LOCKED
             LIMIT :count
         """),
-        {'now': now, 'lottery_type': selected_type, 'deadline_time': selected_deadline, 'count': actual_count}
+        params
     ).fetchall()
 
     if not rows:
+        db.session.rollback()
         return [], None
 
     ids = [r[0] for r in rows]
@@ -1090,6 +1132,7 @@ def get_mode_b_preview_available(blocked_lottery_types: List[str] = None) -> int
         ).fetchall()
 
     if not type_stats:
+        db.session.rollback()
         return 0
 
     total_pending = sum(r.cnt for r in type_stats)

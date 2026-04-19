@@ -7,6 +7,7 @@ import hashlib
 import re
 import threading
 from contextlib import contextmanager
+from typing import Optional
 
 from extensions import db
 from models.result import MatchResult
@@ -37,8 +38,9 @@ _period_locks_guard = threading.Lock()
 _period_locks = {}
 
 
-def _period_advisory_lock_key(detail_period: str) -> int:
-    digest = hashlib.blake2b(detail_period.encode('utf-8'), digest_size=8).digest()
+def _period_advisory_lock_key(detail_period: str, lottery_type: Optional[str] = None) -> int:
+    scope = f"{detail_period}::{lottery_type or '*'}"
+    digest = hashlib.blake2b(scope.encode('utf-8'), digest_size=8).digest()
     key = int.from_bytes(digest, byteorder='big', signed=False)
     if key >= (1 << 63):
         key -= (1 << 64)
@@ -46,20 +48,21 @@ def _period_advisory_lock_key(detail_period: str) -> int:
 
 
 @contextmanager
-def _period_upload_lock(detail_period: str):
+def _period_upload_lock(detail_period: str, lottery_type: Optional[str] = None):
     bind = db.session.get_bind()
     dialect = getattr(bind, 'dialect', None) if bind else None
     dialect_name = (getattr(dialect, 'name', '') or '').lower()
     if dialect_name == 'postgresql':
         db.session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"),
-            {'lock_key': _period_advisory_lock_key(detail_period)},
+            {'lock_key': _period_advisory_lock_key(detail_period, lottery_type)},
         )
         yield
         return
 
+    lock_key = (detail_period, lottery_type or '*')
     with _period_locks_guard:
-        lock = _period_locks.setdefault(detail_period, threading.Lock())
+        lock = _period_locks.setdefault(lock_key, threading.Lock())
     lock.acquire()
     try:
         yield
@@ -74,7 +77,10 @@ def _safe_get(cols, idx):
 def _parse_sp_value(raw_value: str):
     if raw_value == '':
         return None
-    return float(raw_value)
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'invalid sp value: {raw_value}') from exc
 
 
 def _parse_result_line(cols: list) -> dict:
@@ -159,12 +165,40 @@ def _merge_result_data(existing_data: dict, parsed_data: dict, upload_kind: str)
     return merged
 
 
+def _collect_upload_kind_keys(result_data: dict, upload_kind: str) -> set[tuple[str, str]]:
+    sp_key = UPLOAD_KIND_TO_SP_KEY[upload_kind]
+    keys = set()
+    for seq_no, field_map in (result_data or {}).items():
+        seq = str(seq_no)
+        for play_code, play_data in (field_map or {}).items():
+            if not isinstance(play_data, dict):
+                continue
+            if play_data.get(sp_key) is None:
+                continue
+            keys.add((seq, play_code))
+    return keys
+
+
+def _collect_parsed_keys(parsed_data: dict) -> set[tuple[str, str]]:
+    keys = set()
+    for seq_no, field_map in (parsed_data or {}).items():
+        seq = str(seq_no)
+        for play_code, play_data in (field_map or {}).items():
+            if not isinstance(play_data, dict):
+                continue
+            if play_data.get('sp') is None:
+                continue
+            keys.add((seq, play_code))
+    return keys
+
+
 def parse_result_file(
     file_path: str,
     detail_period: str,
     uploader_id: int,
     result_file_id: int = None,
     upload_kind: str = 'final',
+    lottery_type: Optional[str] = None,
 ) -> dict:
     """
     Parse a result file and update the latest MatchResult for the period.
@@ -186,34 +220,59 @@ def parse_result_file(
     count = 0
     header_keyword = '\u5e8f\u53f7'
 
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line or header_keyword in line:
-            continue
+    try:
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or header_keyword in line:
+                continue
 
-        cols = line.split('\t')
-        if len(cols) < 2:
-            cols = re.split(r'\s+', line)
-        if not cols:
-            continue
+            cols = line.split('\t')
+            if len(cols) < 2:
+                cols = re.split(r'\s+', line)
+            if not cols:
+                continue
 
-        seq_no = _extract_seq_no(cols[0])
-        if not seq_no:
-            continue
+            seq_no = _extract_seq_no(cols[0])
+            if not seq_no:
+                continue
 
-        field_data = _parse_result_line(cols)
-        if field_data:
-            parsed_data[seq_no] = field_data
-            count += 1
+            field_data = _parse_result_line(cols)
+            if field_data:
+                parsed_data[seq_no] = field_data
+    except ValueError as exc:
+        return {'success': False, 'error': str(exc), 'count': 0}
 
     if not parsed_data:
         return {'success': False, 'error': '\u672a\u80fd\u89e3\u6790\u4efb\u4f55\u8d5b\u679c\u6570\u636e', 'count': 0}
+    count = len(parsed_data)
 
-    with _period_upload_lock(detail_period):
-        existing = MatchResult.query.filter_by(detail_period=detail_period).order_by(
+    with _period_upload_lock(detail_period, lottery_type):
+        existing_query = MatchResult.query.filter(MatchResult.detail_period == detail_period)
+        if lottery_type is None:
+            existing_query = existing_query.filter(MatchResult.lottery_type.is_(None))
+        else:
+            existing_query = existing_query.filter(MatchResult.lottery_type == lottery_type)
+
+        existing = existing_query.order_by(
             MatchResult.uploaded_at.desc(),
             MatchResult.id.desc(),
         ).first()
+
+        if existing:
+            existing_keys = _collect_upload_kind_keys(existing.result_data or {}, upload_kind)
+            incoming_keys = _collect_parsed_keys(parsed_data)
+            if existing_keys and not existing_keys.issubset(incoming_keys):
+                missing_keys = sorted(existing_keys - incoming_keys)
+                missing_preview = ', '.join(f'{seq}:{play}' for seq, play in missing_keys[:5])
+                db.session.rollback()
+                return {
+                    'success': False,
+                    'error': (
+                        f'incomplete {upload_kind} upload: missing '
+                        f'{len(missing_keys)} existing entries ({missing_preview})'
+                    ),
+                    'count': 0,
+                }
 
         base_data = _clear_upload_kind(existing.result_data if existing else {}, upload_kind)
         merged_data = _merge_result_data(base_data, parsed_data, upload_kind)
@@ -235,6 +294,7 @@ def parse_result_file(
         else:
             match_result = MatchResult(
                 detail_period=detail_period,
+                lottery_type=lottery_type,
                 result_data=merged_data,
                 result_file_id=result_file_id,
                 uploaded_by=uploader_id,

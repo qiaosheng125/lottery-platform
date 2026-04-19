@@ -10,3 +10,5 @@ worker_class = os.environ.get(
 workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
 keepalive = int(os.environ.get("GUNICORN_KEEPALIVE", "5"))
+# Web workers must not run background scheduler jobs.
+raw_env = ["DISABLE_SCHEDULER=1"]

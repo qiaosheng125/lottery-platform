@@ -75,6 +75,16 @@ def get_public_url(oss_key: str) -> str:
     return f"/uploads/images/{filename}"
 
 
+def _safe_local_image_name(name: str) -> str:
+    normalized = (name or '').strip().replace('\\', '/')
+    basename = normalized.rsplit('/', 1)[-1].strip()
+    if not basename or basename in {'.', '..'}:
+        return ''
+    if '/' in basename or '\\' in basename:
+        return ''
+    return basename
+
+
 def delete_object(oss_key: str) -> bool:
     if _oss_configured():
         try:
@@ -87,27 +97,47 @@ def delete_object(oss_key: str) -> bool:
     # 本地模式：删除本地文件
     try:
         upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
-        path = os.path.join(upload_folder, 'images', oss_key)
-        if os.path.exists(path):
-            os.remove(path)
-        return True
+        normalized_key = (oss_key or '').replace('\\', '/')
+        candidates = []
+        flattened = normalized_key.replace('/', '_')
+        flattened_name = _safe_local_image_name(flattened)
+        if flattened_name:
+            candidates.append(flattened_name)
+        basename = normalized_key.rsplit('/', 1)[-1]
+        basename_name = _safe_local_image_name(basename)
+        if basename_name and basename_name not in candidates:
+            candidates.append(basename_name)
+
+        for candidate in candidates:
+            path = os.path.join(upload_folder, 'images', candidate)
+            if os.path.exists(path):
+                os.remove(path)
+                return True
+        return False
     except Exception:
         return False
 
 
 def delete_stored_image(image_oss_key: str = None, image_url: str = None) -> bool:
+    deleted_by_key = False
     if image_oss_key:
-        return delete_object(image_oss_key)
+        deleted_by_key = delete_object(image_oss_key)
+        if deleted_by_key:
+            return True
 
     if image_url and image_url.startswith('/uploads/images/'):
         try:
             upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
             filename = image_url.rsplit('/', 1)[-1]
-            path = os.path.join(upload_folder, 'images', filename)
+            safe_name = _safe_local_image_name(filename)
+            if not safe_name:
+                return deleted_by_key
+            path = os.path.join(upload_folder, 'images', safe_name)
             if os.path.exists(path):
                 os.remove(path)
-            return True
+                return True
+            return deleted_by_key
         except Exception:
             return False
 
-    return False
+    return deleted_by_key

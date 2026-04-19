@@ -62,16 +62,24 @@ class MatchResult(db.Model):
     # No unique constraint on detail_period — multiple uploads allowed, latest wins
 
     def has_predicted_results(self):
-        for field_map in (self.result_data or {}).values():
-            for play_data in (field_map or {}).values():
-                if play_data.get('predicted_sp') is not None:
+        if not isinstance(self.result_data, dict):
+            return False
+        for field_map in self.result_data.values():
+            if not isinstance(field_map, dict):
+                continue
+            for play_data in field_map.values():
+                if isinstance(play_data, dict) and play_data.get('predicted_sp') is not None:
                     return True
         return False
 
     def has_final_results(self):
-        for field_map in (self.result_data or {}).values():
-            for play_data in (field_map or {}).values():
-                if play_data.get('sp') is not None:
+        if not isinstance(self.result_data, dict):
+            return False
+        for field_map in self.result_data.values():
+            if not isinstance(field_map, dict):
+                continue
+            for play_data in field_map.values():
+                if isinstance(play_data, dict) and play_data.get('sp') is not None:
                     return True
         return False
 
@@ -79,6 +87,7 @@ class MatchResult(db.Model):
         return {
             'id': self.id,
             'detail_period': self.detail_period,
+            'lottery_type': self.lottery_type,
             'result_data': self.result_data,
             'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
             'calc_status': self.calc_status,

@@ -1,9 +1,10 @@
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from extensions import db
 from models.device import DeviceRegistry
-from utils.decorators import login_required_json
+from utils.decorators import login_required_json, parse_json_object
 
 
 device_bp = Blueprint('device', __name__)
@@ -13,8 +14,16 @@ device_bp = Blueprint('device', __name__)
 @login_required_json
 @login_required
 def register_device():
-    data = request.get_json(silent=True) or {}
-    device_id = (data.get('device_id') or '').strip()
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
+    raw_device_id = data.get('device_id')
+    if raw_device_id is None:
+        device_id = ''
+    elif isinstance(raw_device_id, str):
+        device_id = raw_device_id.strip()
+    else:
+        return jsonify({'success': False, 'error': 'invalid device_id type'}), 400
     client_info = data.get('client_info', {})
 
     if not device_id:
@@ -38,5 +47,9 @@ def register_device():
         )
         db.session.add(device)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': '璇ヨ澶嘔D宸茶鍏朵粬鐢ㄦ埛鍗犵敤'}), 409
     return jsonify({'success': True, 'device': device.to_dict()})

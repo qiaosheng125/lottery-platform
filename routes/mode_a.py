@@ -7,13 +7,20 @@ from services.mode_a_service import (
     get_previous_ticket,
     stop_receiving,
 )
-from utils.decorators import can_receive_required, login_required_json, mode_a_required
+from utils.decorators import can_receive_required, login_required_json, mode_a_required, parse_json_object
 
 mode_a_bp = Blueprint('mode_a', __name__)
 
 
+def _normalize_device_id(raw_device_id: str) -> str:
+    if raw_device_id is None:
+        return ''
+    if not isinstance(raw_device_id, str):
+        return None
+    return raw_device_id.strip()
+
+
 def _validate_device_id(device_id: str):
-    device_id = (device_id or '').strip()
     if not device_id:
         return '缺少设备ID'
     if len(device_id) > 20 or not all(c.isalnum() or c in '-_' for c in device_id):
@@ -22,11 +29,15 @@ def _validate_device_id(device_id: str):
 
 
 def _get_device_payload():
-    data = request.get_json(silent=True) or {}
-    device_id = data.get('device_id') or request.args.get('device_id', '')
+    data, data_error = parse_json_object()
+    if data_error:
+        return None, None, None, data_error
+    device_id = _normalize_device_id(data.get('device_id') or request.args.get('device_id', ''))
+    if device_id is None:
+        return None, None, None, (jsonify({'success': False, 'error': 'invalid device_id type'}), 400)
     complete_current_ticket_id = data.get('complete_current_ticket_id')
     complete_current_ticket_action = data.get('complete_current_ticket_action') or 'completed'
-    return device_id, complete_current_ticket_id, complete_current_ticket_action
+    return device_id, complete_current_ticket_id, complete_current_ticket_action, None
 
 
 def _parse_non_negative_int(value):
@@ -45,7 +56,9 @@ def _parse_non_negative_int(value):
 @mode_a_required
 @can_receive_required
 def next_ticket():
-    device_id, complete_current_ticket_id, complete_current_ticket_action = _get_device_payload()
+    device_id, complete_current_ticket_id, complete_current_ticket_action, data_error = _get_device_payload()
+    if data_error:
+        return data_error
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
@@ -65,7 +78,7 @@ def next_ticket():
 @login_required
 @mode_a_required
 def current_ticket():
-    device_id = request.args.get('device_id', '')
+    device_id = _normalize_device_id(request.args.get('device_id', ''))
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
@@ -81,7 +94,9 @@ def current_ticket():
 @login_required
 @mode_a_required
 def stop():
-    device_id, _, complete_current_ticket_action = _get_device_payload()
+    device_id, _, complete_current_ticket_action, data_error = _get_device_payload()
+    if data_error:
+        return data_error
     error = _validate_device_id(device_id)
     if error:
         return jsonify({'success': False, 'error': error}), 400
@@ -95,7 +110,7 @@ def stop():
 @login_required
 @mode_a_required
 def previous_ticket():
-    device_id = request.args.get('device_id', '')
+    device_id = _normalize_device_id(request.args.get('device_id', ''))
     offset = _parse_non_negative_int(request.args.get('offset', 0))
     error = _validate_device_id(device_id)
     if error:

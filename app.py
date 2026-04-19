@@ -116,8 +116,19 @@ def ensure_runtime_columns(app):
                 conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}'))
 
 
-def should_start_scheduler() -> bool:
-    return os.environ.get('DISABLE_SCHEDULER', '0') != '1'
+def should_start_scheduler(config_name: str = None) -> bool:
+    # Explicit disable always wins.
+    if os.environ.get('DISABLE_SCHEDULER', '0') == '1':
+        return False
+
+    # Explicit enable is for dedicated scheduler processes.
+    if os.environ.get('ENABLE_SCHEDULER', '0') == '1':
+        return True
+
+    # Safe default: do not start scheduler in production web processes.
+    # Prefer FLASK_ENV when set, otherwise fall back to app config name.
+    effective_env = os.environ.get('FLASK_ENV') or config_name or 'development'
+    return effective_env != 'production'
 
 
 def create_app(config_name=None):
@@ -198,7 +209,7 @@ def create_app(config_name=None):
         def invalidate_current_session():
             flask_session.pop('session_token', None)
             logout_user()
-            if req.path.startswith('/api') or req.path == '/auth/heartbeat':
+            if req.path.startswith('/api') or req.path.startswith('/admin/api') or req.path == '/auth/heartbeat':
                 return jsonify({'success': False, 'error': '会话已失效，请重新登录'}), 401
             return redirect(url_for('auth.login'))
 
@@ -241,7 +252,7 @@ def create_app(config_name=None):
         return redirect(url_for('auth.login'))
 
     # Start scheduler unless a bootstrap/one-off task disables it explicitly.
-    if should_start_scheduler():
+    if should_start_scheduler(config_name):
         from tasks.scheduler import start_scheduler
         start_scheduler(app)
 

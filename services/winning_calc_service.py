@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from flask import current_app
+from sqlalchemy import or_
 
 from extensions import db
 from models.result import MatchResult
@@ -145,10 +146,18 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
         db.session.commit()
 
         try:
-            tickets = LotteryTicket.query.filter(
+            tickets_query = LotteryTicket.query.filter(
                 LotteryTicket.detail_period == match_result.detail_period,
                 LotteryTicket.status.in_(['completed', 'expired']),
-            ).all()
+            )
+            if match_result.lottery_type is not None:
+                tickets_query = tickets_query.filter(
+                    or_(
+                        LotteryTicket.lottery_type == match_result.lottery_type,
+                        LotteryTicket.lottery_type.is_(None),
+                    )
+                )
+            tickets = tickets_query.all()
 
             has_predicted_results = match_result.has_predicted_results()
             has_final_results = match_result.has_final_results()
@@ -158,8 +167,10 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
             predicted_total_amount = Decimal('0')
             cleanup_targets = []
             cleanup_record_ids = set()
+            tickets_by_id = {}
 
             for ticket in tickets:
+                tickets_by_id[ticket.id] = ticket
                 winning_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
                 try:
                     predicted_result = (False, Decimal('0'), Decimal('0'), Decimal('0'))
@@ -227,18 +238,26 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
                         active_winning_count += 1
                         active_total_amount += active_net_amount
                     else:
-                        if winning_record and winning_record.id not in cleanup_record_ids:
-                            cleanup_record_ids.add(winning_record.id)
-                            cleanup_targets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record))
-                        ticket.winning_image_url = None
+                        if winning_record and winning_record.is_checked:
+                            # Keep manually checked evidence records and linked image reference.
+                            ticket.winning_image_url = winning_record.winning_image_url
+                        else:
+                            if winning_record and winning_record.id not in cleanup_record_ids:
+                                cleanup_record_ids.add(winning_record.id)
+                                cleanup_targets.append((ticket.id, winning_record.id))
+                            ticket.winning_image_url = None
                 except Exception as exc:
                     current_app.logger.warning("Winning calc error for ticket %s: %s", ticket.id, exc)
                     ticket.is_winning = False
                     _clear_ticket_amounts(ticket, clear_predicted=True, clear_final=True)
-                    if winning_record and winning_record.id not in cleanup_record_ids:
-                        cleanup_record_ids.add(winning_record.id)
-                        cleanup_targets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record))
-                    ticket.winning_image_url = None
+                    if winning_record and winning_record.is_checked:
+                        # Keep manually checked evidence records and linked image reference.
+                        ticket.winning_image_url = winning_record.winning_image_url
+                    else:
+                        if winning_record and winning_record.id not in cleanup_record_ids:
+                            cleanup_record_ids.add(winning_record.id)
+                            cleanup_targets.append((ticket.id, winning_record.id))
+                        ticket.winning_image_url = None
 
             latest_row = db.session.query(MatchResult.result_file_id, MatchResult.uploaded_at).filter(
                     MatchResult.id == match_result_id
@@ -255,7 +274,17 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
                     )
                     return
 
-            for _oss_key, _image_url, winning_record in cleanup_targets:
+            deleted_cleanup_assets = []
+            for ticket_id, winning_record_id in cleanup_targets:
+                winning_record = db.session.get(WinningRecord, winning_record_id)
+                if not winning_record:
+                    continue
+                if winning_record.is_checked:
+                    ticket = tickets_by_id.get(ticket_id)
+                    if ticket:
+                        ticket.winning_image_url = winning_record.winning_image_url
+                    continue
+                deleted_cleanup_assets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record.id))
                 db.session.delete(winning_record)
 
             match_result.calc_status = 'done'
@@ -266,18 +295,42 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
             match_result.total_winning_amount = active_total_amount
             db.session.commit()
 
-            for oss_key, image_url, _record in cleanup_targets:
-                delete_stored_image(oss_key, image_url)
+            for oss_key, image_url, record_id in deleted_cleanup_assets:
+                try:
+                    delete_stored_image(oss_key, image_url)
+                except Exception as cleanup_exc:
+                    current_app.logger.warning(
+                        "winning image cleanup failed for result %s ticket_record %s: %s",
+                        match_result_id,
+                        record_id,
+                        cleanup_exc,
+                    )
 
-            from services.notify_service import notify_admins
+            try:
+                from services.notify_service import notify_admins
 
-            notify_admins('winning_calc_done', {
-                'period': match_result.detail_period,
-                'winning_count': active_winning_count,
-                'total_amount': float(active_total_amount),
-                'tickets_total': len(tickets),
-            })
+                notify_admins('winning_calc_done', {
+                    'period': match_result.detail_period,
+                    'winning_count': active_winning_count,
+                    'total_amount': float(active_total_amount),
+                    'tickets_total': len(tickets),
+                })
+            except Exception as notify_exc:
+                current_app.logger.warning("winning_calc_done notify error: %s", notify_exc)
         except Exception as exc:
             current_app.logger.error("process_match_result error: %s", exc)
-            match_result.calc_status = 'error'
+            db.session.rollback()
+            latest = db.session.get(MatchResult, match_result_id)
+            if latest is None:
+                return
+            if not _token_matches(token_meta, latest.result_file_id, latest.uploaded_at):
+                current_app.logger.info(
+                    "Skip stale winning calc error mark for result %s (expected=%s actual=%s)",
+                    match_result_id,
+                    token_meta,
+                    _build_calc_token(latest.result_file_id, latest.uploaded_at),
+                )
+                return
+            latest.calc_status = 'error'
+            latest.calc_finished_at = beijing_now()
             db.session.commit()

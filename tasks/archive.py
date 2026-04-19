@@ -24,6 +24,21 @@ from services.file_parser import delete_uploaded_txt_file
 from utils.time_utils import beijing_now
 
 
+def _resolve_result_file_path(upload_folder: str, stored_filename: str):
+    normalized = (stored_filename or '').replace('\\', '/').strip()
+    if not normalized:
+        return None
+
+    base_abs = os.path.abspath(upload_folder)
+    candidate_abs = os.path.abspath(os.path.join(base_abs, normalized))
+    try:
+        if os.path.commonpath([base_abs, candidate_abs]) != base_abs:
+            return None
+    except ValueError:
+        return None
+    return candidate_abs
+
+
 def _ticket_terminal_at(ticket: LotteryTicket):
     if ticket.status == 'completed':
         return ticket.completed_at
@@ -130,9 +145,14 @@ def purge_old_auxiliary_records(days_ago=30):
         if has_remaining_match_results:
             continue
 
-        stored_path = os.path.join(upload_folder, result_file.stored_filename)
-        if os.path.exists(stored_path):
+        stored_path = _resolve_result_file_path(upload_folder, result_file.stored_filename)
+        if stored_path and os.path.exists(stored_path):
             os.remove(stored_path)
+        elif not stored_path and result_file.stored_filename:
+            current_app.logger.warning(
+                'Skip deleting result file outside upload dir: %s',
+                result_file.stored_filename,
+            )
         db.session.delete(result_file)
 
     AuditLog.query.filter(AuditLog.timestamp < cutoff_date).delete(synchronize_session=False)

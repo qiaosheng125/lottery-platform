@@ -43,6 +43,8 @@ class Config:
     # Session
     SESSION_LIFETIME_HOURS = 3
     DAILY_RESET_HOUR = 12
+    # Trust X-Forwarded-For only when REMOTE_ADDR is in this comma-separated allowlist.
+    TRUSTED_PROXY_IPS = os.environ.get('TRUSTED_PROXY_IPS', '')
 
     # Ticket lock duration (minutes) - prevent network anomaly double-assignment
     TICKET_LOCK_MINUTES = 30
