@@ -82,6 +82,12 @@
           <div class="form-text">用逗号分隔多个数字</div>
         </div>
 
+        <h6 class="border-bottom pb-2 mb-3">B模式保留张数</h6>
+        <div class="mb-4">
+          <input v-model.number="s.mode_b_pool_reserve" type="number" class="form-control" min="0" max="100000">
+          <div class="form-text">票池总量会先减去该保留值，再给 B 模式展示和分配。</div>
+        </div>
+
         <button class="btn btn-primary" @click="saveSettings" :disabled="saving">
           <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
           保存设置
@@ -122,6 +128,8 @@ createApp({
       delete data.database_info;
       delete data.scheduler_status;
       this.s = data;
+      this.s.mode_b_pool_reserve = parseInt(this.s.mode_b_pool_reserve, 10);
+      if (isNaN(this.s.mode_b_pool_reserve) || this.s.mode_b_pool_reserve < 0) this.s.mode_b_pool_reserve = 20;
       this.modeBOptionsStr = (this.s.mode_b_options || []).join(',');
     } catch (e) {
       if (requestSeq !== settingsRequestSeq) return;
@@ -146,6 +154,8 @@ createApp({
       this.error = '';
       try {
         this.s.mode_b_options = this.modeBOptionsStr.split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v));
+        this.s.mode_b_pool_reserve = parseInt(this.s.mode_b_pool_reserve, 10);
+        if (isNaN(this.s.mode_b_pool_reserve) || this.s.mode_b_pool_reserve < 0) this.s.mode_b_pool_reserve = 20;
         const res = await fetch('/admin/api/settings', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

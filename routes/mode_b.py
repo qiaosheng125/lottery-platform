@@ -10,11 +10,10 @@ from services.mode_b_service import (
     get_processing_batches,
     preview_batch,
 )
-from services.ticket_pool import get_pool_status
+from services.ticket_pool import get_mode_b_pool_reserve, get_pool_status
 from utils.decorators import can_receive_required, login_required_json, mode_b_required, parse_json_object
 
 mode_b_bp = Blueprint('mode_b', __name__)
-MODE_B_POOL_RESERVE = 20
 
 
 def _validate_device_id(device_id: str):
@@ -94,7 +93,7 @@ def _enforce_bound_session_device(device_id: str):
 
 
 def _trim_status_for_mode_b(status: dict) -> dict:
-    available_total = max(0, int(status.get('total_pending') or 0) - MODE_B_POOL_RESERVE)
+    available_total = max(0, int(status.get('total_pending') or 0) - get_mode_b_pool_reserve())
     trimmed_by_type = []
     remaining = available_total
     for item in status.get('by_type') or []:

@@ -132,6 +132,28 @@ def test_ensure_runtime_columns_backfills_legacy_users_table(app):
         assert expected_columns.issubset(columns)
 
 
+def test_ensure_runtime_columns_backfills_system_settings_mode_b_pool_reserve(app):
+    with app.app_context():
+        db.drop_all()
+        with db.engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE system_settings (
+                    id INTEGER PRIMARY KEY,
+                    registration_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    pool_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    mode_a_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    mode_b_enabled BOOLEAN NOT NULL DEFAULT 1
+                )
+            """))
+
+        ensure_runtime_columns(app)
+        ensure_runtime_columns(app)
+
+        inspector = inspect(db.engine)
+        columns = {column["name"] for column in inspector.get_columns("system_settings")}
+        assert "mode_b_pool_reserve" in columns
+
+
 def test_login_json_post_stays_json_for_authenticated_user(app, client):
     with app.app_context():
         create_user("login_json_user", "secret123", client_mode="mode_a")
@@ -4159,6 +4181,37 @@ def test_pool_status_uses_mode_b_reserve_rule_for_mode_b_users(app, client):
     assert data["by_type"][0]["count"] == 5
 
 
+def test_pool_status_uses_configured_mode_b_pool_reserve(app, client):
+    with app.app_context():
+        user = create_user("pool_mode_b_custom_reserve_user", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.mode_b_pool_reserve = 10
+        deadline = beijing_now() + timedelta(hours=1)
+        tickets = [
+            LotteryTicket(
+                source_file_id=1,
+                line_number=index + 1,
+                raw_content=f"POOL-MODEB-CUSTOM-{index}",
+                status="pending",
+                lottery_type="胜平负",
+                deadline_time=deadline,
+            )
+            for index in range(25)
+        ]
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = login(client, "pool_mode_b_custom_reserve_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/pool/status")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total_pending"] == 15
+    assert len(data["by_type"]) == 1
+    assert data["by_type"][0]["count"] == 15
+
+
 def test_pool_status_returns_zero_for_mode_b_users_when_mode_b_disabled(app, client):
     with app.app_context():
         user = create_user("pool_status_mode_b_disabled", "secret123", client_mode="mode_b")
@@ -5679,6 +5732,7 @@ def test_admin_settings_template_handles_save_failures():
     content = settings_template.read_text(encoding="utf-8")
     assert "v-if=\"error\"" in content
     assert "error: ''" in content
+    assert "mode_b_pool_reserve" in content
     assert "if (!res.ok || data.success === false) {" in content
     assert "throw new Error(data.error || '\u4fdd\u5b58\u5931\u8d25');" in content
     assert "this.error = e.message || '\u4fdd\u5b58\u5931\u8d25';" in content
@@ -6374,6 +6428,42 @@ def test_admin_update_settings_normalizes_mode_b_options(app, client):
     data = resp.get_json()
     assert data["success"] is True
     assert data["settings"]["mode_b_options"] == [200, 50, 100]
+
+
+def test_admin_update_settings_accepts_mode_b_pool_reserve(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_modeb_reserve", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_modeb_reserve", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"mode_b_pool_reserve": 35})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["settings"]["mode_b_pool_reserve"] == 35
+
+    with app.app_context():
+        assert SystemSettings.get().mode_b_pool_reserve == 35
+
+
+def test_admin_update_settings_rejects_negative_mode_b_pool_reserve(app, client):
+    with app.app_context():
+        admin = User(username="admin_settings_modeb_reserve_guard", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_modeb_reserve_guard", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.put("/admin/api/settings", json={"mode_b_pool_reserve": -1})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
 
 
 def test_admin_dashboard_data_includes_normal_health_summary(app, client, monkeypatch):

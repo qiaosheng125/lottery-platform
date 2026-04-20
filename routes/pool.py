@@ -2,15 +2,14 @@ from flask import Blueprint, jsonify
 from flask_login import current_user, login_required
 
 from models.settings import SystemSettings
-from services.ticket_pool import get_pool_status
+from services.ticket_pool import get_mode_b_pool_reserve, get_pool_status
 from utils.decorators import login_required_json
 
 pool_bp = Blueprint('pool', __name__)
-MODE_B_POOL_RESERVE = 20
 
 
 def _trim_status_for_mode_b(status: dict) -> dict:
-    available_total = max(0, int(status.get('total_pending') or 0) - MODE_B_POOL_RESERVE)
+    available_total = max(0, int(status.get('total_pending') or 0) - get_mode_b_pool_reserve())
     trimmed_by_type = []
     remaining = available_total
     for item in status.get('by_type') or []:

@@ -24,10 +24,12 @@ from flask import current_app
 from extensions import db
 from models.ticket import LotteryTicket
 from models.file import UploadedFile
+from models.settings import SystemSettings
 from utils.time_utils import beijing_now
 
 # SQLite 环境下用 gevent 协程锁保证分票串行化，持锁期间其他协程可继续处理无关请求
 _sqlite_assign_lock = BoundedSemaphore(1)
+DEFAULT_MODE_B_POOL_RESERVE = 20
 
 
 def _is_postgres() -> bool:
@@ -38,6 +40,18 @@ def _is_postgres() -> bool:
 def _get_redis():
     from extensions import redis_client as rc
     return rc
+
+
+def get_mode_b_pool_reserve() -> int:
+    """Return configured B-mode pending-ticket reserve, clamped to non-negative."""
+    reserve = DEFAULT_MODE_B_POOL_RESERVE
+    try:
+        configured = getattr(SystemSettings.get(), 'mode_b_pool_reserve', None)
+        if configured is not None:
+            reserve = int(configured)
+    except Exception:
+        reserve = DEFAULT_MODE_B_POOL_RESERVE
+    return max(0, reserve)
 
 
 def _acquire_postgres_user_assignment_lock(user_id: int) -> None:
@@ -438,7 +452,7 @@ def assign_tickets_batch(
     Returns:
         (tickets, adjustment_message): 分配的票列表和调整提示消息（如果有调整）
     """
-    RESERVE = 20  # B模式至少保留20张给A模式/管理员上传缓冲
+    reserve_count = get_mode_b_pool_reserve()
 
     blocked_types = blocked_lottery_types or []
 
@@ -484,7 +498,7 @@ def assign_tickets_batch(
                 text(f"SELECT COUNT(*) FROM lottery_tickets WHERE status='pending' AND deadline_time > :now {blocked_condition}"),
                 {'now': now, **blocked_params}
             ).scalar() or 0
-            available = max(0, total_pending - RESERVE)
+            available = max(0, total_pending - reserve_count)
             if available <= 0:
                 db.session.rollback()
                 return [], None
@@ -671,7 +685,7 @@ def assign_tickets_batch(
 
     # 计算可用票数（扣除保留）
     total_pending = sum(r.cnt for r in type_stats)
-    available = max(0, total_pending - RESERVE)
+    available = max(0, total_pending - reserve_count)
     if available <= 0:
         db.session.rollback()
         return [], None
@@ -1065,7 +1079,7 @@ def get_pool_status(blocked_lottery_types: List[str] = None) -> dict:
 def get_pool_total_pending(blocked_lottery_types: List[str] = None) -> int:
     """B模式预查询：当前票池可供B模式使用的票数（总pending减去保留给A模式的20张）"""
     now = beijing_now()
-    RESERVE = 20  # 至少保留给A模式/管理员上传缓冲
+    reserve_count = get_mode_b_pool_reserve()
     blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
@@ -1076,7 +1090,7 @@ def get_pool_total_pending(blocked_lottery_types: List[str] = None) -> int:
         if blocked_types:
             query = query.filter((LotteryTicket.lottery_type == None) | (~LotteryTicket.lottery_type.in_(blocked_types)))
         total = query.count()
-        return max(0, total - RESERVE)
+        return max(0, total - reserve_count)
 
     blocked_condition, blocked_params = _build_blocked_condition(blocked_types)
     result = db.session.execute(
@@ -1088,7 +1102,7 @@ def get_pool_total_pending(blocked_lottery_types: List[str] = None) -> int:
         """),
         {'now': now, **blocked_params}
     ).scalar()
-    return max(0, (result or 0) - RESERVE)
+    return max(0, (result or 0) - reserve_count)
 
 
 def get_mode_b_preview_available(blocked_lottery_types: List[str] = None) -> int:
@@ -1097,7 +1111,7 @@ def get_mode_b_preview_available(blocked_lottery_types: List[str] = None) -> int
     using the same selection rules as assign_tickets_batch().
     """
     now = beijing_now()
-    RESERVE = 20
+    reserve_count = get_mode_b_pool_reserve()
     blocked_types = blocked_lottery_types or []
 
     if not _is_postgres():
@@ -1136,7 +1150,7 @@ def get_mode_b_preview_available(blocked_lottery_types: List[str] = None) -> int
         return 0
 
     total_pending = sum(r.cnt for r in type_stats)
-    available_total = max(0, total_pending - RESERVE)
+    available_total = max(0, total_pending - reserve_count)
     if available_total <= 0:
         return 0
 

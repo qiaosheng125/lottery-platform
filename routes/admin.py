@@ -2048,9 +2048,15 @@ def api_update_settings():
                 normalized_options.append(parsed_value)
         data['mode_b_options'] = normalized_options
 
+    if 'mode_b_pool_reserve' in data:
+        parsed_reserve = _parse_int_arg(data.get('mode_b_pool_reserve'), minimum=0)
+        if parsed_reserve is None or parsed_reserve > 100000:
+            return jsonify({'success': False, 'error': 'B模式保留张数必须在 0 到 100000 之间'}), 400
+        data['mode_b_pool_reserve'] = parsed_reserve
+
     for field in ['registration_enabled', 'pool_enabled', 'mode_a_enabled', 'mode_b_enabled',
                   'mode_b_options', 'announcement', 'announcement_enabled',
-                  'session_lifetime_hours', 'daily_reset_hour']:
+                  'session_lifetime_hours', 'daily_reset_hour', 'mode_b_pool_reserve']:
         if field in data:
             setattr(settings, field, data[field])
 

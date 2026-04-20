@@ -15,6 +15,7 @@ class SystemSettings(db.Model):
     mode_a_enabled = db.Column(db.Boolean, default=True, nullable=False)
     mode_b_enabled = db.Column(db.Boolean, default=True, nullable=False)
     mode_b_options = db.Column(db.JSON, default=lambda: [50, 100, 200, 300, 400, 500])
+    mode_b_pool_reserve = db.Column(db.Integer, default=20, nullable=False)
     session_lifetime_hours = db.Column(db.Integer, default=3, nullable=False)
     daily_reset_hour = db.Column(db.Integer, default=12, nullable=False)
 
@@ -44,6 +45,7 @@ class SystemSettings(db.Model):
             'mode_a_enabled': self.mode_a_enabled,
             'mode_b_enabled': self.mode_b_enabled,
             'mode_b_options': self.mode_b_options or [50, 100, 200, 300, 400, 500],
+            'mode_b_pool_reserve': int(self.mode_b_pool_reserve or 20),
             'session_lifetime_hours': self.session_lifetime_hours,
             'daily_reset_hour': self.daily_reset_hour,
             'announcement': self.announcement,

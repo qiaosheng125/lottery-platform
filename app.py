@@ -116,6 +116,9 @@ def ensure_runtime_columns(app):
             'predicted_winning_amount': 'NUMERIC(12, 2)',
             'predicted_winning_tax': 'NUMERIC(12, 2)',
         },
+        'system_settings': {
+            'mode_b_pool_reserve': 'INTEGER NOT NULL DEFAULT 20',
+        },
     }
 
     with db.engine.begin() as conn:
