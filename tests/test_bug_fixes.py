@@ -5988,6 +5988,83 @@ def test_admin_export_tickets_by_date_empty_uses_selected_business_date_filename
     assert "filename*=UTF-8''{empty_filename_encoded}" in content
 
 
+def test_admin_export_tickets_by_date_default_filename_uses_business_date(app, client, monkeypatch):
+    with app.app_context():
+        admin = User(username="admin_export_default_date_name", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    monkeypatch.setattr("routes.admin.get_business_date", lambda dt=None: datetime(2026, 4, 9).date())
+
+    resp = client.post("/auth/login", json={"username": "admin_export_default_date_name", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/tickets/export-by-date")
+    assert export_resp.status_code == 200
+    assert "attachment;" in export_resp.headers["Content-Disposition"]
+    assert "2026-04-09" in export_resp.headers["Content-Disposition"]
+
+
+def test_admin_export_tickets_by_date_localizes_status_labels_to_chinese(app, client):
+    from decimal import Decimal
+    from openpyxl import load_workbook
+
+    with app.app_context():
+        admin = User(username="admin_export_status_cn", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded = UploadedFile(
+            original_filename="status_source.txt",
+            stored_filename="status_source.txt",
+            status="active",
+            uploaded_at=datetime(2026, 4, 8, 13, 0, 0),
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="STATUS-LOCALIZED",
+            lottery_type="胜平负",
+            multiplier=1,
+            detail_period="26040",
+            ticket_amount=Decimal("2"),
+            status="assigned",
+            assigned_username="tester",
+            assigned_device_id="dev-status",
+            assigned_at=datetime(2026, 4, 8, 13, 5, 0),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_export_status_cn", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/tickets/export-by-date?date=2026-04-08")
+    assert export_resp.status_code == 200
+
+    workbook = load_workbook(io.BytesIO(export_resp.data))
+    worksheet = workbook.active
+    assert worksheet.cell(row=2, column=8).value == "处理中"
+
+
+def test_admin_dashboard_eta_uses_chinese_labels():
+    admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
+    content = admin_route.read_text(encoding="utf-8")
+    assert '"\\u8d85\\u8fc7 7 \\u5929"' in content
+    assert "\\u5c0f\\u65f6" in content
+    assert "\\u5206\\u949f" in content
+    assert '"over 7 days"' not in content
+
+
 def test_admin_routes_avoid_legacy_query_get_for_file_reads():
     admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
     content = admin_route.read_text(encoding="utf-8")

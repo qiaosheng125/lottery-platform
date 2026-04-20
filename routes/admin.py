@@ -547,14 +547,14 @@ def dashboard_data():
         estimated_minutes = pool['total_pending'] / total_speed
         # 娣诲姞涓婇檺淇濇姢锛堣秴杩?澶╂樉绀烘彁绀猴級
         if estimated_minutes > 10080:  # 7澶?= 10080鍒嗛挓
-            estimated_time_str = "over 7 days"
+            estimated_time_str = "\u8d85\u8fc7 7 \u5929"
         else:
             hours = int(estimated_minutes // 60)
             minutes = int(estimated_minutes % 60)
             if hours > 0:
-                estimated_time_str = f"{hours}灏忔椂{minutes}鍒嗛挓"
+                estimated_time_str = f"{hours}\u5c0f\u65f6{minutes}\u5206\u949f"
             else:
-                estimated_time_str = f"{minutes}鍒嗛挓"
+                estimated_time_str = f"{minutes}\u5206\u949f"
 
     # 浠婃棩鎵€鏈夌敤鎴峰嚭绁ㄧ粺璁★紙鍖呮嫭涓嶅湪绾跨殑锛?
     daily_stats_query = db.session.query(
@@ -876,7 +876,13 @@ def export_tickets_by_date():
     wb = Workbook()
     ws = wb.active
     ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名'])
-    status_map = {'pending': 'pending', 'assigned': 'assigned', 'completed': 'completed', 'revoked': 'revoked', 'expired': 'expired'}
+    status_map = {
+        'pending': '\u5f85\u5904\u7406',
+        'assigned': '\u5904\u7406\u4e2d',
+        'completed': '\u5df2\u5b8c\u6210',
+        'revoked': '\u5df2\u64a4\u9500',
+        'expired': '\u5df2\u8fc7\u671f',
+    }
     for t in tickets:
         ws.append([
             t.line_number,
@@ -900,7 +906,8 @@ def export_tickets_by_date():
 
     from flask import Response
     period_str = next((t.detail_period for t in tickets if t.detail_period), 'unknown_period')
-    filename = f"{date_str or 'all'}_{period_str}_tickets.xlsx"
+    export_date = date_str or str(get_business_date())
+    filename = f"{export_date}_{period_str}_tickets.xlsx"
     filename_encoded = quote(filename, encoding='utf-8')
     return Response(
         buf.read(),
