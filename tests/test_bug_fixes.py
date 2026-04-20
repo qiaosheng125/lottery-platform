@@ -18,6 +18,7 @@ from models.audit import AuditLog
 from models.settings import SystemSettings
 from models.file import UploadedFile
 from models.ticket import LotteryTicket
+from models.device import DeviceRegistry
 from models.user import User
 from models.result import MatchResult, ResultFile
 from models.archive import ArchivedLotteryTicket
@@ -914,6 +915,7 @@ def test_admin_core_json_routes_require_login_json_response(app, client):
         ("post", "/admin/api/winning/1/upload-image"),
         ("get", "/admin/api/match-results"),
         ("get", "/admin/api/match-results/1/detail"),
+        ("get", "/admin/api/match-results/1/export-comparison"),
         ("post", "/admin/api/match-results/1/recalc"),
         ("get", "/admin/api/settings"),
         ("put", "/admin/api/settings"),
@@ -948,6 +950,13 @@ def test_admin_match_result_routes_return_json_404_for_missing_result(app, clien
     assert resp.status_code == 200
 
     resp = client.get("/admin/api/match-results/999999/detail")
+    assert resp.status_code == 404
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert data["error"]
+
+    resp = client.get("/admin/api/match-results/999999/export-comparison")
     assert resp.status_code == 404
     assert resp.is_json is True
     data = resp.get_json()
@@ -8610,6 +8619,96 @@ def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeyp
     assert refreshed.tickets_total == 0
 
 
+def test_match_result_export_comparison_includes_user_and_device_rows(app, client):
+    from openpyxl import load_workbook
+
+    with app.app_context():
+        admin = User(username="admin_match_export", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        user_a = create_user("match_export_user_a", "secret123", client_mode="mode_b")
+        user_b = create_user("match_export_user_b", "secret123", client_mode="mode_b")
+
+        match_result = MatchResult(
+            detail_period="26999",
+            lottery_type=None,
+            result_data={"1": {"SPF": {"result": "3", "predicted_sp": 2.0, "sp": 2.2}}},
+            uploaded_by=admin.id,
+            calc_status="done",
+        )
+        db.session.add(match_result)
+        db.session.flush()
+
+        db.session.add_all([
+            DeviceRegistry(device_id="dev-export-a", user_id=user_a.id, client_info={"device_name": "设备A"}),
+            DeviceRegistry(device_id="dev-export-b", user_id=user_a.id, client_info={"device_name": "设备B"}),
+            DeviceRegistry(device_id="dev-export-c", user_id=user_b.id, client_info={"device_name": "设备C"}),
+        ])
+        db.session.add_all([
+            LotteryTicket(
+                source_file_id=1,
+                line_number=1,
+                raw_content="EXPORT-A-1",
+                status="completed",
+                detail_period="26999",
+                assigned_user_id=user_a.id,
+                assigned_username=user_a.username,
+                assigned_device_id="dev-export-a",
+                predicted_winning_amount=100,
+                winning_amount=120,
+            ),
+            LotteryTicket(
+                source_file_id=1,
+                line_number=2,
+                raw_content="EXPORT-A-2",
+                status="expired",
+                detail_period="26999",
+                assigned_user_id=user_a.id,
+                assigned_username=user_a.username,
+                assigned_device_id="dev-export-b",
+                predicted_winning_amount=50,
+                winning_amount=25,
+            ),
+            LotteryTicket(
+                source_file_id=1,
+                line_number=3,
+                raw_content="EXPORT-B-1",
+                status="completed",
+                detail_period="26999",
+                assigned_user_id=user_b.id,
+                assigned_username=user_b.username,
+                assigned_device_id="dev-export-c",
+                predicted_winning_amount=0,
+                winning_amount=30,
+            ),
+        ])
+        db.session.commit()
+        result_id = match_result.id
+
+    resp = client.post("/auth/login", json={"username": "admin_match_export", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get(f"/admin/api/match-results/{result_id}/export-comparison")
+    assert resp.status_code == 200
+    assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers["Content-Type"]
+
+    wb = load_workbook(io.BytesIO(resp.data))
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[0] == (
+        "层级", "编号", "彩种范围", "客户", "设备名",
+        "设备ID", "预测奖金", "最终奖金", "涨跌幅(%)"
+    )
+
+    data_rows = rows[1:]
+    assert any(r[0] == "客户" and r[3] == "match_export_user_a" and r[6] == pytest.approx(150.0, rel=1e-3) and r[7] == pytest.approx(145.0, rel=1e-3) and r[8] == pytest.approx(-3.33, rel=1e-3) for r in data_rows)
+    assert any(r[0] == "设备" and r[3] == "match_export_user_a" and r[4] == "设备A" and r[5] == "dev-export-a" and r[6] == pytest.approx(100.0, rel=1e-3) and r[7] == pytest.approx(120.0, rel=1e-3) and r[8] == pytest.approx(20.0, rel=1e-3) for r in data_rows)
+    assert any(r[0] == "设备" and r[3] == "match_export_user_a" and r[4] == "设备B" and r[5] == "dev-export-b" and r[6] == pytest.approx(50.0, rel=1e-3) and r[7] == pytest.approx(25.0, rel=1e-3) and r[8] == pytest.approx(-50.0, rel=1e-3) for r in data_rows)
+    assert any(r[0] == "客户" and r[3] == "match_export_user_b" and r[6] == pytest.approx(0.0, rel=1e-3) and r[7] == pytest.approx(30.0, rel=1e-3) and r[8] is None for r in data_rows)
+
+
 def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
     from services.result_parser import parse_result_file
 
@@ -9679,6 +9778,8 @@ def test_admin_winning_template_checks_export_http_errors_before_download():
     content = winning_template.read_text(encoding="utf-8")
     assert "async exportWinning() {" in content
     assert "const res = await fetch(`/admin/api/winning/export?${params}`);" in content
+    assert "async exportMatchResultComparison(row) {" in content
+    assert "const res = await fetch(`/admin/api/match-results/${row.id}/export-comparison`);" in content
     assert "if (!res.ok) {" in content
     assert "const blob = await res.blob();" in content
     assert "showToast(e.message || '\u5bfc\u51fa\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content

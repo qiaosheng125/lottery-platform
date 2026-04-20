@@ -14,6 +14,7 @@ from sqlalchemy import case, func, or_
 
 from extensions import db
 from models.user import User, UserSession
+from models.device import DeviceRegistry
 from models.file import UploadedFile
 from models.ticket import LotteryTicket
 from models.winning import WinningRecord
@@ -190,6 +191,15 @@ def _winning_change_percent(predicted_amount, final_amount):
     if predicted_amount in (None, 0) or final_amount is None:
         return None
     return round(((final_amount - predicted_amount) / predicted_amount) * 100, 2)
+
+
+def _resolve_device_display_name(device_id, client_info):
+    if isinstance(client_info, dict):
+        for key in ('device_name', 'deviceName', 'name', 'hostname', 'client_name'):
+            value = client_info.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return (device_id or '').strip() or '未知设备'
 
 
 def _database_display_info():
@@ -1897,6 +1907,141 @@ def api_match_result_detail(result_id):
     if not mr:
         return jsonify({'success': False, 'error': '\u8d5b\u679c\u4e0d\u5b58\u5728'}), 404
     return jsonify({'success': True, 'result_data': mr.result_data, 'detail_period': mr.detail_period})
+
+
+@admin_bp.route('/api/match-results/<int:result_id>/export-comparison')
+@login_required_json
+@login_required
+@admin_required
+def api_match_result_export_comparison(result_id):
+    import io as _io
+    from decimal import Decimal
+    from openpyxl import Workbook
+
+    match_result = db.session.get(MatchResult, result_id)
+    if not match_result:
+        return jsonify({'success': False, 'error': '\u8d5b\u679c\u4e0d\u5b58\u5728'}), 404
+
+    tickets_query = LotteryTicket.query.filter(
+        LotteryTicket.detail_period == match_result.detail_period,
+        LotteryTicket.status.in_(['completed', 'expired']),
+    )
+    if match_result.lottery_type is not None:
+        tickets_query = tickets_query.filter(
+            or_(
+                LotteryTicket.lottery_type == match_result.lottery_type,
+                LotteryTicket.lottery_type.is_(None),
+            )
+        )
+    tickets = tickets_query.all()
+
+    def to_decimal(value):
+        if value is None:
+            return Decimal('0')
+        if isinstance(value, Decimal):
+            return value
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal('0')
+
+    user_ids = {ticket.assigned_user_id for ticket in tickets if ticket.assigned_user_id is not None}
+    device_ids = {ticket.assigned_device_id for ticket in tickets if ticket.assigned_device_id}
+    registry_name_map = {}
+    if user_ids and device_ids:
+        registry_rows = DeviceRegistry.query.filter(
+            DeviceRegistry.user_id.in_(user_ids),
+            DeviceRegistry.device_id.in_(device_ids),
+        ).all()
+        for row in registry_rows:
+            registry_name_map[(row.user_id, row.device_id)] = _resolve_device_display_name(row.device_id, row.client_info)
+
+    customers = {}
+    for ticket in tickets:
+        if ticket.assigned_username:
+            username = ticket.assigned_username.strip() or '未知客户'
+        elif ticket.assigned_user_id is not None:
+            username = f"用户#{ticket.assigned_user_id}"
+        else:
+            username = '未知客户'
+
+        customer_bucket = customers.setdefault(
+            username,
+            {'predicted': Decimal('0'), 'final': Decimal('0'), 'devices': {}},
+        )
+        predicted_amount = to_decimal(ticket.predicted_winning_amount)
+        final_amount = to_decimal(ticket.winning_amount)
+        customer_bucket['predicted'] += predicted_amount
+        customer_bucket['final'] += final_amount
+
+        device_id = (ticket.assigned_device_id or '').strip()
+        if not device_id:
+            device_id = 'unknown'
+        device_name = registry_name_map.get((ticket.assigned_user_id, device_id), device_id)
+        device_bucket = customer_bucket['devices'].setdefault(
+            device_id,
+            {'device_name': device_name, 'predicted': Decimal('0'), 'final': Decimal('0')},
+        )
+        device_bucket['predicted'] += predicted_amount
+        device_bucket['final'] += final_amount
+
+    def pct(predicted: Decimal, final_amount: Decimal):
+        if predicted == 0:
+            return None
+        return round(float((final_amount - predicted) / predicted * Decimal('100')), 2)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '涨跌幅对比'
+    ws.append([
+        '层级',
+        '编号',
+        '彩种范围',
+        '客户',
+        '设备名',
+        '设备ID',
+        '预测奖金',
+        '最终奖金',
+        '涨跌幅(%)',
+    ])
+
+    for username in sorted(customers.keys()):
+        item = customers[username]
+        ws.append([
+            '客户',
+            match_result.detail_period or '',
+            match_result.lottery_type or '全部彩种',
+            username,
+            '',
+            '',
+            float(item['predicted']),
+            float(item['final']),
+            pct(item['predicted'], item['final']),
+        ])
+        for device_id, device_item in sorted(item['devices'].items(), key=lambda pair: pair[0]):
+            ws.append([
+                '设备',
+                match_result.detail_period or '',
+                match_result.lottery_type or '全部彩种',
+                username,
+                device_item['device_name'],
+                device_id,
+                float(device_item['predicted']),
+                float(device_item['final']),
+                pct(device_item['predicted'], device_item['final']),
+            ])
+
+    output = _io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"结果计算对比_{match_result.detail_period or 'unknown'}.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
 
 
 @admin_bp.route('/api/match-results/<int:result_id>/recalc', methods=['POST'])
