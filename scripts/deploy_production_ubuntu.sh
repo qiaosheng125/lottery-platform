@@ -58,6 +58,8 @@ updates = {
     "GUNICORN_WORKERS": "2",
     "GUNICORN_TIMEOUT": "120",
     "GUNICORN_KEEPALIVE": "5",
+    "ENABLE_SCHEDULER": "1",
+    "DISABLE_SCHEDULER": "0",
 }
 
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []

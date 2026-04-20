@@ -10,5 +10,22 @@ worker_class = os.environ.get(
 workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
 keepalive = int(os.environ.get("GUNICORN_KEEPALIVE", "5"))
-# Web workers must not run background scheduler jobs.
-raw_env = ["DISABLE_SCHEDULER=1"]
+
+
+def _scheduler_raw_env():
+    """
+    Keep scheduler flags configurable by EnvironmentFile/.env only.
+    When unset, do not override app-level scheduler defaults.
+    """
+    enable_scheduler = os.environ.get("ENABLE_SCHEDULER")
+    disable_scheduler = os.environ.get("DISABLE_SCHEDULER")
+
+    raw = []
+    if enable_scheduler is not None:
+        raw.append(f"ENABLE_SCHEDULER={enable_scheduler}")
+    if disable_scheduler is not None:
+        raw.append(f"DISABLE_SCHEDULER={disable_scheduler}")
+    return raw
+
+
+raw_env = _scheduler_raw_env()
