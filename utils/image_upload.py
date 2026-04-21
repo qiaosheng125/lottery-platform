@@ -4,7 +4,7 @@ import io
 ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 
 
-def prepare_uploaded_image(file_storage, max_side: int = 1200):
+def prepare_uploaded_image(file_storage, max_side: int = 2000):
     """
     Prepare an uploaded image for storage.
 
@@ -31,7 +31,7 @@ def prepare_uploaded_image(file_storage, max_side: int = 1200):
         if max(image.width, image.height) > max_side:
             image.thumbnail((max_side, max_side), image_module.LANCZOS)
         buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=80, optimize=True)
+        image.save(buf, format="JPEG", quality=92, optimize=True)
         buf.seek(0)
         return buf, "jpg"
     except Exception as exc:

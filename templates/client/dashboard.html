@@ -708,9 +708,9 @@ createApp({
       }
     },
     startNextCooldown() {
-      const COOLDOWN_MS = 7000;
+      const COOLDOWN_MS = 5000;
       this.nextCooldownUntil = Date.now() + COOLDOWN_MS;
-      this.nextCooldownSec = 7;
+      this.nextCooldownSec = 5;
       clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
         const remaining = Math.ceil((this.nextCooldownUntil - Date.now()) / 1000);
