@@ -277,13 +277,20 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
             except Exception as e:
                 current_app.logger.warning(f"Redis LPOP error: {e}")
 
+        fallback_ticket_id = _fetch_pending_ticket_id_from_db(current_now)
         candidate_ids = []
-        if redis_ticket_id is not None:
+        if fallback_ticket_id is not None:
+            # Keep assignment order deterministic with DB ORDER BY id.
+            # If Redis popped a different id, push it back so it is not lost.
+            if rc and redis_ticket_id is not None and redis_ticket_id != fallback_ticket_id:
+                try:
+                    rc.lpush('pool:pending', redis_ticket_id)
+                except Exception:
+                    pass
+            candidate_ids.append((fallback_ticket_id, False))
+        elif redis_ticket_id is not None:
             candidate_ids.append((redis_ticket_id, True))
 
-        fallback_ticket_id = _fetch_pending_ticket_id_from_db(current_now)
-        if fallback_ticket_id is not None and fallback_ticket_id not in [candidate_id for candidate_id, _ in candidate_ids]:
-            candidate_ids.append((fallback_ticket_id, False))
         if not candidate_ids:
             db.session.rollback()
             return None

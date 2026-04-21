@@ -5134,9 +5134,9 @@ def test_expire_overdue_tickets_updates_file_counters(app):
 
         refreshed = db.session.get(UploadedFile, uploaded_file.id)
         statuses = {t.status for t in LotteryTicket.query.filter_by(source_file_id=uploaded_file.id).all()}
-        assert statuses == {"expired"}
+        assert statuses == {"expired", "assigned"}
         assert refreshed.pending_count == 0
-        assert refreshed.assigned_count == 0
+        assert refreshed.assigned_count == 1
 
 
 def test_expire_overdue_tickets_removes_pending_ids_from_redis(app, monkeypatch):

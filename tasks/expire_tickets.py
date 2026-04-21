@@ -51,7 +51,7 @@ def _sync_uploaded_file_counters(source_file_ids):
 
 
 def expire_overdue_tickets():
-    """Mark overdue pending/assigned tickets as expired and sync file counters."""
+    """Mark overdue pending tickets as expired and sync file counters."""
     try:
         from services.notify_service import notify_admins
         from services.notify_service import notify_pool_update
@@ -69,7 +69,7 @@ def expire_overdue_tickets():
                     text("""
                         SELECT DISTINCT source_file_id
                         FROM lottery_tickets
-                        WHERE status IN ('pending', 'assigned')
+                        WHERE status = 'pending'
                           AND deadline_time <= :now
                           AND source_file_id IS NOT NULL
                     """),
@@ -93,7 +93,7 @@ def expire_overdue_tickets():
                     UPDATE lottery_tickets
                     SET status = 'expired',
                         version = version + 1
-                    WHERE status IN ('pending', 'assigned')
+                    WHERE status = 'pending'
                       AND deadline_time <= :now
                 """),
                 {'now': now},
@@ -102,15 +102,14 @@ def expire_overdue_tickets():
             from models.ticket import LotteryTicket
 
             tickets = LotteryTicket.query.filter(
-                LotteryTicket.status.in_(['pending', 'assigned']),
+                LotteryTicket.status == 'pending',
                 LotteryTicket.deadline_time <= now,
             ).all()
             rows = len(tickets)
             for ticket in tickets:
                 if ticket.source_file_id is not None:
                     affected_file_ids.append(ticket.source_file_id)
-                if ticket.status == 'pending':
-                    expired_pending_ticket_ids.append(ticket.id)
+                expired_pending_ticket_ids.append(ticket.id)
                 ticket.status = 'expired'
                 ticket.version += 1
 
