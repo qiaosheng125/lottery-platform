@@ -125,8 +125,8 @@
             <button
               class="mode-a-side-btn mode-a-side-btn-right"
               @click="nextTicket"
-              :disabled="loadingNext || (historyOffset === 0 && nextCooldownSec > 0)"
-              :title="historyOffset === 0 && nextCooldownSec > 0 ? ('冷却中，还需等待 ' + nextCooldownSec + ' 秒') : '下一张'"
+              :disabled="loadingNext || (historyOffset === 0 && nextCooldownSec > 0) || (currentTicket && isDeadlinePassed(currentTicket.deadline_time))"
+              :title="currentTicket && isDeadlinePassed(currentTicket.deadline_time) ? '当前票已截止，请点击停止接单' : (historyOffset === 0 && nextCooldownSec > 0 ? ('冷却中，还需等待 ' + nextCooldownSec + ' 秒') : '下一张')"
             >
               <span v-if="loadingNext" class="spinner-border spinner-border-sm"></span>
               <template v-else-if="historyOffset === 0 && nextCooldownSec > 0">
@@ -646,6 +646,10 @@ createApp({
       }
     },
     async nextTicket() {
+      if (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time)) {
+        showToast('当前票已截止，请先点击停止接单', 'warning');
+        return;
+      }
       // 如果正在浏览历史记录，“下一张”只在本地历史中前进，不请求 API（不受冷却限制）
       // 浏览历史记录时不请求 API，只有停留在最新一张时才请求下一张
       if (this.historyOffset > 0) {

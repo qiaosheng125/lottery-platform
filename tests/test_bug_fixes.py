@@ -9528,6 +9528,15 @@ def test_client_dashboard_skips_mode_a_cooldown_when_server_returns_same_ticket(
     assert "this.startNextCooldown();" in content
 
 
+def test_client_dashboard_blocks_mode_a_next_when_current_ticket_is_overdue():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert ":disabled=\"loadingNext || (historyOffset === 0 && nextCooldownSec > 0) || (currentTicket && isDeadlinePassed(currentTicket.deadline_time))\"" in content
+    assert "currentTicket && isDeadlinePassed(currentTicket.deadline_time) ? '当前票已截止，请点击停止接单'" in content
+    assert "if (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time)) {" in content
+    assert "showToast('当前票已截止，请先点击停止接单', 'warning');" in content
+
+
 def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
