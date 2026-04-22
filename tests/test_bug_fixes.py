@@ -7085,6 +7085,7 @@ def test_admin_users_export_contains_desktop_only_column_and_value(app, client):
         admin.set_password("secret123")
         user = create_user("users_export_target", "secret123", client_mode="mode_b")
         user.desktop_only_b_mode = False
+        user.can_receive = False
         user.set_blocked_lottery_types(["胜平负", "比分"])
         db.session.add(admin)
         db.session.commit()
@@ -7100,8 +7101,11 @@ def test_admin_users_export_contains_desktop_only_column_and_value(app, client):
     rows = list(ws.iter_rows(min_row=2, values_only=True))
     target_row = next(row for row in rows if row[0] == "users_export_target")
 
+    assert "密码" in header
     assert "B模式仅桌面端" in header
+    assert target_row[1].startswith("$2")
     assert target_row[9] == "否"
+    assert target_row[8] == "关闭"
     assert target_row[6] == "胜平负,比分"
 
 
@@ -7123,8 +7127,8 @@ def test_admin_users_import_accepts_hashed_password_and_desktop_only_flag(app, c
 
     wb = Workbook()
     ws = wb.active
-    ws.append(["用户名", "密码", "接单模式", "最大设备数", "B模式处理上限", "每日处理上限", "禁止彩种", "账号状态", "接单开关", "B模式仅桌面端"])
-    ws.append(["imported_hash_user", password_hash, "mode_b", 2, 88, 99, "胜平负,比分", "启用", "开启", "否"])
+    ws.append(["用户名", "密码哈希", "接单模式", "最大设备数", "B模式处理上限", "每日处理上限", "禁止彩种", "账号状态", "接单开关", "B模式仅桌面端"])
+    ws.append(["imported_hash_user", password_hash, "mode_b", 2, 88, 99, "胜平负,比分", "是", "关", "否"])
     payload = BytesIO()
     wb.save(payload)
     payload.seek(0)
@@ -7143,11 +7147,66 @@ def test_admin_users_import_accepts_hashed_password_and_desktop_only_flag(app, c
         imported = User.query.filter_by(username="imported_hash_user").first()
         assert imported is not None
         assert imported.client_mode == "mode_b"
+        assert imported.is_active is True
+        assert imported.can_receive is False
         assert imported.desktop_only_b_mode is False
         assert imported.max_processing_b_mode == 88
         assert imported.daily_ticket_limit == 99
         assert imported.get_blocked_lottery_types() == ["胜平负", "比分"]
         assert imported.check_password("import-secret") is True
+
+
+def test_admin_users_export_file_can_be_used_as_import_template(app, client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    with app.app_context():
+        admin = User(username="admin_users_roundtrip", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("users_export_source", "export-secret", client_mode="mode_b")
+        user.max_devices = 3
+        user.max_processing_b_mode = 66
+        user.daily_ticket_limit = 77
+        user.can_receive = False
+        user.desktop_only_b_mode = False
+        user.set_blocked_lottery_types(["胜平负", "比分"])
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_users_roundtrip", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/users/export")
+    assert export_resp.status_code == 200
+
+    wb = load_workbook(BytesIO(export_resp.data))
+    ws = wb.active
+    ws["A2"] = "users_export_copy"
+    payload = BytesIO()
+    wb.save(payload)
+    payload.seek(0)
+
+    import_resp = client.post(
+        "/admin/api/users/import",
+        data={"file": (payload, "users-roundtrip.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert import_resp.status_code == 200
+    data = import_resp.get_json()
+    assert data["success"] is True
+    assert data["success_count"] == 1
+
+    with app.app_context():
+        imported = User.query.filter_by(username="users_export_copy").first()
+        assert imported is not None
+        assert imported.client_mode == "mode_b"
+        assert imported.max_devices == 3
+        assert imported.max_processing_b_mode == 66
+        assert imported.daily_ticket_limit == 77
+        assert imported.can_receive is False
+        assert imported.desktop_only_b_mode is False
+        assert imported.get_blocked_lottery_types() == ["胜平负", "比分"]
+        assert imported.check_password("export-secret") is True
 
 
 def test_admin_users_import_accepts_uppercase_xlsx_extension(app, client, monkeypatch):

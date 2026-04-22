@@ -1236,7 +1236,7 @@ def api_export_users():
 
     headers = [
         '\u7528\u6237\u540d',
-        '\u5bc6\u7801\u54c8\u5e0c',
+        '\u5bc6\u7801',
         '\u63a5\u5355\u6a21\u5f0f',
         '\u6700\u5927\u8bbe\u5907\u6570',
         'B\u6a21\u5f0f\u5904\u7406\u4e0a\u9650',
@@ -1265,7 +1265,7 @@ def api_export_users():
             user.daily_ticket_limit if user.daily_ticket_limit is not None else '',
             blocked_types,
             '\u662f' if user.is_active else '\u5426',
-            '\u5f00' if user.can_receive else '\u5173',
+            '\u5f00\u542f' if user.can_receive else '\u5173\u95ed',
             '\u662f' if user.desktop_only_b_mode else '\u5426',
         ])
 
