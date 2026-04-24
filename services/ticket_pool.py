@@ -186,7 +186,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                         WHERE status = 'pending'
                           AND deadline_time > :now
                           {blocked_condition}
-                        ORDER BY id
+                        ORDER BY deadline_time, lottery_type, id
                         LIMIT 1
                     """),
                     {'now': current_now, **blocked_params}
@@ -257,7 +257,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
                 WHERE status = 'pending'
                   AND deadline_time > :now
                   {blocked_condition}
-                ORDER BY id
+                ORDER BY deadline_time, lottery_type, id
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             """),
@@ -280,7 +280,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
         fallback_ticket_id = _fetch_pending_ticket_id_from_db(current_now)
         candidate_ids = []
         if fallback_ticket_id is not None:
-            # Keep assignment order deterministic with DB ORDER BY id.
+            # Keep assignment order deterministic with DB deadline priority.
             # If Redis popped a different id, push it back so it is not lost.
             if rc and redis_ticket_id is not None and redis_ticket_id != fallback_ticket_id:
                 try:

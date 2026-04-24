@@ -3054,6 +3054,56 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
 
 
+def test_mode_a_postgres_assignment_prefers_earliest_deadline(app, monkeypatch):
+    from types import SimpleNamespace
+    from services.ticket_pool import assign_ticket_atomic
+
+    fixed_now = datetime(2026, 4, 7, 10, 30, 0)
+    select_sql = []
+
+    class FakeResult:
+        def __init__(self, *, fetchone_data=None, rowcount=1):
+            self._fetchone_data = fetchone_data
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._fetchone_data
+
+    class FakeTicketRow:
+        def __init__(self):
+            self.deadline_time = datetime(2026, 4, 7, 19, 55, 0)
+            self.lottery_type = "SPF"
+            self.source_file_id = 1
+
+    def fake_execute(statement, params=None):
+        sql = str(statement)
+        if "SELECT id FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            select_sql.append(sql)
+            assert "ORDER BY deadline_time, lottery_type, id" in sql
+            return FakeResult(fetchone_data=(321,))
+        if "SELECT * FROM lottery_tickets" in sql and "FOR UPDATE SKIP LOCKED" in sql:
+            return FakeResult(fetchone_data=FakeTicketRow())
+        if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql:
+            return FakeResult(rowcount=1)
+        if "UPDATE uploaded_files" in sql:
+            return FakeResult(rowcount=1)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool._get_redis", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+    monkeypatch.setattr("services.ticket_pool.db.session.commit", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.rollback", lambda: None)
+    monkeypatch.setattr("services.ticket_pool.db.session.get", lambda model, _id: SimpleNamespace(id=_id, assigned_at=fixed_now))
+
+    with app.app_context():
+        result = assign_ticket_atomic(user_id=1, device_id="device-a", username="tester")
+
+    assert result is not None
+    assert select_sql
+
+
 def test_mode_a_postgres_assignment_refreshes_now_between_retries(app, monkeypatch):
     from types import SimpleNamespace
     from services.ticket_pool import assign_ticket_atomic
@@ -4039,6 +4089,48 @@ def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
         assigned_next = LotteryTicket.query.get(next_ticket_id)
         assert expired_ticket.status == "expired"
         assert assigned_next.status == "assigned"
+
+
+def test_mode_a_next_prefers_earliest_deadline_even_when_later_deadline_has_smaller_id(app):
+    from services.mode_a_service import get_next_ticket
+
+    with app.app_context():
+        user = create_user("modea_deadline_priority_user", "secret123", client_mode="mode_a")
+        later_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="DEADLINE-LATER",
+            status="pending",
+            deadline_time=(beijing_now() + timedelta(hours=2, minutes=25)).replace(microsecond=0),
+            detail_period="2055",
+            lottery_type="SPF",
+        )
+        earlier_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="DEADLINE-EARLIER",
+            status="pending",
+            deadline_time=(beijing_now() + timedelta(hours=1, minutes=25)).replace(microsecond=0),
+            detail_period="1955",
+            lottery_type="SPF",
+        )
+        db.session.add_all([later_ticket, earlier_ticket])
+        db.session.commit()
+
+        result = get_next_ticket(
+            user_id=user.id,
+            device_id="device-a",
+            username=user.username,
+        )
+
+        assert result["success"] is True
+        assert result["ticket"]["id"] == earlier_ticket.id
+        assert result["ticket"]["detail_period"] == "1955"
+
+        refreshed_earlier = LotteryTicket.query.get(earlier_ticket.id)
+        refreshed_later = LotteryTicket.query.get(later_ticket.id)
+        assert refreshed_earlier.status == "assigned"
+        assert refreshed_later.status == "pending"
 
 
 def test_mode_a_next_stops_after_completing_current_when_pool_disabled(app):
