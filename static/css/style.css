@@ -433,7 +433,8 @@ body.mode-a-active {
 body.mode-a-active .row.g-3,
 body.mode-a-active .client-announcement-card,
 body.mode-a-active .client-device-stats,
-body.mode-a-active .client-quick-links {
+body.mode-a-active .client-quick-links,
+body.mode-a-active .app-navbar-logout {
   display: none !important;
 }
 

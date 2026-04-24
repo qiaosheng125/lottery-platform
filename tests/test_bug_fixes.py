@@ -9597,13 +9597,26 @@ def test_web_device_registration_uses_single_identifier_flow():
     assert "lottery_device_id" in content
 
 
+def test_mode_a_active_hides_navbar_logout_button():
+    base_template = Path(__file__).resolve().parents[1] / "templates" / "base.html"
+    style_path = Path(__file__).resolve().parents[1] / "static" / "css" / "style.css"
+
+    base_content = base_template.read_text(encoding="utf-8")
+    style_content = style_path.read_text(encoding="utf-8")
+
+    assert 'class="d-inline mb-0 app-navbar-logout"' in base_content
+    assert "body.mode-a-active .app-navbar-logout {" in style_content
+    assert "display: none !important;" in style_content
+
+
 def test_mode_a_mobile_layout_keeps_stop_action_visible():
     style_path = Path(__file__).resolve().parents[1] / "static" / "css" / "style.css"
     content = style_path.read_text(encoding="utf-8")
     assert "body.mode-a-active {" in content
     assert "overflow: hidden;" in content
     assert "body.mode-a-active .client-device-stats," in content
-    assert "body.mode-a-active .client-quick-links {" in content
+    assert "body.mode-a-active .client-quick-links," in content
+    assert "body.mode-a-active .app-navbar-logout {" in content
     assert "body.mode-a-active #mode-a {" in content
     assert "position: fixed;" in content
     assert "body.mode-a-active #mode-a .card-body {" in content
