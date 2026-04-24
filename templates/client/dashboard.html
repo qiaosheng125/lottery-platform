@@ -405,6 +405,19 @@ registerDeviceAndCheckName();
   });
 })();
 
+function syncModeALayoutMetrics() {
+  const root = document.documentElement;
+  const navbar = document.querySelector('.navbar');
+  const navbarHeight = navbar ? Math.ceil(navbar.getBoundingClientRect().height) : 0;
+  const viewportHeight = window.visualViewport
+    ? Math.ceil(window.visualViewport.height)
+    : window.innerHeight;
+
+  root.style.setProperty('--mode-a-navbar-height', `${navbarHeight}px`);
+  root.style.setProperty('--mode-a-viewport-height', `${viewportHeight}px`);
+}
+
+syncModeALayoutMetrics();
 
 const { createApp } = Vue;
 let modeACurrentTicketRequestSeq = 0;
@@ -470,6 +483,15 @@ createApp({
     if (announcementBar) {
       announcementBar.classList.add('d-none');
     }
+    this._syncModeALayoutMetrics = () => syncModeALayoutMetrics();
+    this._modeAVisualViewport = window.visualViewport || null;
+    window.addEventListener('resize', this._syncModeALayoutMetrics);
+    window.addEventListener('orientationchange', this._syncModeALayoutMetrics);
+    if (this._modeAVisualViewport) {
+      this._modeAVisualViewport.addEventListener('resize', this._syncModeALayoutMetrics);
+      this._modeAVisualViewport.addEventListener('scroll', this._syncModeALayoutMetrics);
+    }
+    this._syncModeALayoutMetrics();
     this.loadStats();
     if (!this.isModeB) {
       this.loadCurrentModeATicket();
@@ -1178,6 +1200,14 @@ createApp({
     }
     if (this._onModeAArrowKey) {
       window.removeEventListener('keydown', this._onModeAArrowKey);
+    }
+    if (this._syncModeALayoutMetrics) {
+      window.removeEventListener('resize', this._syncModeALayoutMetrics);
+      window.removeEventListener('orientationchange', this._syncModeALayoutMetrics);
+    }
+    if (this._modeAVisualViewport && this._syncModeALayoutMetrics) {
+      this._modeAVisualViewport.removeEventListener('resize', this._syncModeALayoutMetrics);
+      this._modeAVisualViewport.removeEventListener('scroll', this._syncModeALayoutMetrics);
     }
   }
 }).mount('#client-dashboard');

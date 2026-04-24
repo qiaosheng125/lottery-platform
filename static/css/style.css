@@ -4,6 +4,11 @@ body {
   background-color: #f8f9fa;
 }
 
+:root {
+  --mode-a-navbar-height: 56px;
+  --mode-a-viewport-height: 100dvh;
+}
+
 .navbar {
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
@@ -116,7 +121,7 @@ body {
 .mode-a-fullscreen-container {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 280px);
+  height: calc(var(--mode-a-viewport-height, 100dvh) - 280px);
   min-height: 360px;
   background: #fff;
   border-radius: 8px;
@@ -246,8 +251,10 @@ body {
   height: 100%;
   align-self: stretch;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
   padding: 0.5rem;
 }
 
@@ -345,7 +352,7 @@ body {
 
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
-    height: calc(100dvh - 250px);
+    height: calc(var(--mode-a-viewport-height, 100dvh) - 250px);
     min-height: 350px;
   }
 
@@ -392,7 +399,7 @@ body {
 /* 灏忓睆鎵嬫満锛?375px锛?*/
 @media (max-width: 375px) {
   .mode-a-fullscreen-container {
-    height: calc(100dvh - 220px);
+    height: calc(var(--mode-a-viewport-height, 100dvh) - 220px);
     min-height: 320px;
   }
 
@@ -418,7 +425,8 @@ body {
 
 
 body.mode-a-active {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 
@@ -431,7 +439,7 @@ body.mode-a-active .client-quick-links {
 
 body.mode-a-active #mode-a {
   position: fixed;
-  top: 56px;
+  top: var(--mode-a-navbar-height, 56px);
   left: 0;
   right: 0;
   bottom: 0;
@@ -442,6 +450,9 @@ body.mode-a-active #mode-a {
   border-right: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 body.mode-a-active #mode-a .card-header {
@@ -450,39 +461,31 @@ body.mode-a-active #mode-a .card-header {
 }
 
 body.mode-a-active #mode-a .card-body {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: auto;
   display: flex;
   flex-direction: column;
   padding: 0.35rem;
+  overflow: visible;
 }
 
 body.mode-a-active .mode-a-fullscreen-container {
-  flex: 1;
+  flex: 1 0 auto;
   height: auto;
   max-height: none;
-  min-height: 0;
+  min-height: max(320px, calc(var(--mode-a-viewport-height, 100dvh) - var(--mode-a-navbar-height, 56px) - 1rem));
   border-radius: 0;
+  overflow: visible;
 }
 
 @media (max-width: 768px) {
   .mode-a-fullscreen-container {
-    height: calc(100dvh - 220px);
+    height: calc(var(--mode-a-viewport-height, 100dvh) - 220px);
     min-height: 280px;
-  }
-
-  body.mode-a-active #mode-a {
-    top: 52px;
   }
 
   body.mode-a-active #mode-a .card-body {
     padding: 0.25rem;
-  }
-}
-
-@media (max-width: 375px) {
-  body.mode-a-active #mode-a {
-    top: 50px;
   }
 }
 

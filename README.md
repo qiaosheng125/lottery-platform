@@ -140,6 +140,7 @@ SECRET_KEY_VALUE='replace-with-a-long-random-secret' \
 
 - 当前统一口径生效日期：`2026-04-20`
 - 生产部署执行文档：`docs/cloud-deploy-ubuntu-2026-04-09.md`
+- HTTPS 证书与自动续期执行文档：`docs/https-acme-aliyun-2026-04-22.md`（当前生产：`121.196.170.150` / `zdj8.fun`）
 - 多 worker 并发验收执行文档：`docs/multi-worker-strict-acceptance-2026-04-09.md`
 - 变更汇总：`docs/project-change-summary.md`
 
