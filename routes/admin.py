@@ -460,7 +460,7 @@ def dashboard_data():
     total_speed = 0.0  # 鎬婚€熷害锛堟瘡鍒嗛挓寮犳暟锛屽彧缁熻褰撳墠鍦ㄧ嚎璁惧锛?
 
     # 璁＄畻鏈€杩?440鍒嗛挓锛?4灏忔椂锛夌殑鏃堕棿鐐癸紙鐢ㄤ簬閫熷害缁熻锛屾椂闂寸獥鍙ｆ洿闀挎洿绋冲畾锛?
-    SPEED_WINDOW_MINUTES = 1440
+    SPEED_WINDOW_MINUTES = 120
     speed_window_start = beijing_now() - timedelta(minutes=SPEED_WINDOW_MINUTES)
 
     # 浼樺寲锛氫竴娆℃€ф煡璇㈡墍鏈夊湪绾跨敤鎴风殑鏈€杩戝畬鎴愮エ锛堥伩鍏峃+1鏌ヨ锛?

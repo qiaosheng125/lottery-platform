@@ -401,7 +401,7 @@ async function forceLogout(userId) {
 
 refreshDashboard();
 loadAnnouncementSettings();
-setInterval(refreshDashboard, 5000);
+setInterval(refreshDashboard, 15 * 60 * 1000);
 
 // 心跳：每30秒更新会话活跃时间
 setInterval(() => {
