@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Liquid Glass Design System (iOS 26)"
-  short_description: "iOS 26 Liquid Glass design system — dynamic glass material with blur, reflection, and interactive morphing for SwiftUI, UIKit, and WidgetKit."
-  brand_color: "#6366F1"
-  default_prompt: "Use Liquid Glass Design System (iOS 26): iOS 26 Liquid Glass design system — dynamic glass material with blur, reflection, and interactive morphing for SwiftUI, UIKit, and WidgetKit."
-policy:
-  allow_implicit_invocation: true

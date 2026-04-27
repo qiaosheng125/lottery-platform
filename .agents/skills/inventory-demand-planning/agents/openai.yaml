@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Inventory Demand Planning"
-  short_description: ">"
-  brand_color: "#6366F1"
-  default_prompt: "Use Inventory Demand Planning: >"
-policy:
-  allow_implicit_invocation: true

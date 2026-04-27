@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Django Testing with TDD"
-  short_description: "Django testing strategies with pytest-django, TDD methodology, factory_boy, mocking, coverage, and testing Django REST Framework APIs."
-  brand_color: "#6366F1"
-  default_prompt: "Use Django Testing with TDD: Django testing strategies with pytest-django, TDD methodology, factory_boy, mocking, coverage, and testing Django REST Framework APIs."
-policy:
-  allow_implicit_invocation: true

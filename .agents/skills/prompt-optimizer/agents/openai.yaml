@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Prompt Optimizer"
-  short_description: ">-"
-  brand_color: "#6366F1"
-  default_prompt: "Use Prompt Optimizer: >-"
-policy:
-  allow_implicit_invocation: true

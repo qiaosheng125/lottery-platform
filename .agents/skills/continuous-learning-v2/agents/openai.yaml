@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Continuous Learning v2.1 - Instinct"
-  short_description: "Instinct-based learning system that observes sessions via hooks, creates atomic instincts with confidence scoring, and evolves them into skills/commands/agents. v2.1 adds project-scoped instincts to prevent cross-project contamination."
-  brand_color: "#6366F1"
-  default_prompt: "Use Continuous Learning v2.1 - Instinct: Instinct-based learning system that observes sessions via hooks, creates atomic instincts with confidence scoring, and evolves them into skills/commands/agents. v2.1 adds project-scoped instincts to prevent cross-project contamination."
-policy:
-  allow_implicit_invocation: true

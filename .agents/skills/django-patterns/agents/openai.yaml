@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Django Development Patterns"
-  short_description: "Django architecture patterns, REST API design with DRF, ORM best practices, caching, signals, middleware, and production-grade Django apps."
-  brand_color: "#6366F1"
-  default_prompt: "Use Django Development Patterns: Django architecture patterns, REST API design with DRF, ORM best practices, caching, signals, middleware, and production-grade Django apps."
-policy:
-  allow_implicit_invocation: true

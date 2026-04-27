@@ -14,6 +14,7 @@ from services.ticket_pool import get_mode_b_pool_reserve, get_pool_status
 from utils.decorators import can_receive_required, login_required_json, mode_b_required, parse_json_object
 
 mode_b_bp = Blueprint('mode_b', __name__)
+MAX_BATCH_COUNT = 1000
 
 
 def _validate_device_id(device_id: str):
@@ -70,7 +71,13 @@ def _parse_batch_count(value, default: int = 100):
         return None
     if count < 1:
         return None
+    if count > MAX_BATCH_COUNT:
+        return None
     return count
+
+
+def _batch_count_error():
+    return f'count 必须是 1 到 {MAX_BATCH_COUNT} 之间的整数'
 
 
 def _enforce_bound_session_device(device_id: str):
@@ -135,7 +142,7 @@ def pool_status():
 def preview():
     count = _parse_batch_count(request.args.get('count', 100))
     if count is None:
-        return jsonify({'success': False, 'error': 'count 必须是大于 0 的整数'}), 400
+        return jsonify({'success': False, 'error': _batch_count_error()}), 400
     result = preview_batch(count, user_id=current_user.id)
     if not current_user.can_receive:
         result = {
@@ -157,7 +164,7 @@ def download():
         return data_error
     count = _parse_batch_count(data.get('count', 100) if data else 100)
     if count is None:
-        return jsonify({'success': False, 'error': 'count 必须是大于 0 的整数'}), 400
+        return jsonify({'success': False, 'error': _batch_count_error()}), 400
 
     raw_device_id = data.get('device_id')
     if raw_device_id is None:

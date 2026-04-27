@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Modern Perl Development Patterns"
-  short_description: "Modern Perl 5.36+ idioms, best practices, and conventions for building robust, maintainable Perl applications."
-  brand_color: "#6366F1"
-  default_prompt: "Use Modern Perl Development Patterns: Modern Perl 5.36+ idioms, best practices, and conventions for building robust, maintainable Perl applications."
-policy:
-  allow_implicit_invocation: true

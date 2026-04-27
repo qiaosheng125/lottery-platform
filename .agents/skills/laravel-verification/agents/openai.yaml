@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Laravel Verification Loop"
-  short_description: "Verification loop for Laravel projects: env checks, linting, static analysis, tests with coverage, security scans, and deployment readiness."
-  brand_color: "#6366F1"
-  default_prompt: "Use Laravel Verification Loop: Verification loop for Laravel projects: env checks, linting, static analysis, tests with coverage, security scans, and deployment readiness."
-policy:
-  allow_implicit_invocation: true

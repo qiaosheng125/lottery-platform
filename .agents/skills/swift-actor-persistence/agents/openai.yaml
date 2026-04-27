@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Swift Actors for Thread-Safe Persistence"
-  short_description: "Thread-safe data persistence in Swift using actors — in-memory cache with file-backed storage, eliminating data races by design."
-  brand_color: "#6366F1"
-  default_prompt: "Use Swift Actors for Thread-Safe Persistence: Thread-safe data persistence in Swift using actors — in-memory cache with file-backed storage, eliminating data races by design."
-policy:
-  allow_implicit_invocation: true

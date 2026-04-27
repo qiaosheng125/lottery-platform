@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "SwiftUI Patterns"
-  short_description: "SwiftUI architecture patterns, state management with @Observable, view composition, navigation, performance optimization, and modern iOS/macOS UI best practices."
-  brand_color: "#6366F1"
-  default_prompt: "Use SwiftUI Patterns: SwiftUI architecture patterns, state management with @Observable, view composition, navigation, performance optimization, and modern iOS/macOS UI best practices."
-policy:
-  allow_implicit_invocation: true

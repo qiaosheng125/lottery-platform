@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Perl Security Patterns"
-  short_description: "Comprehensive Perl security covering taint mode, input validation, safe process execution, DBI parameterized queries, web security (XSS/SQLi/CSRF), and perlcritic security policies."
-  brand_color: "#6366F1"
-  default_prompt: "Use Perl Security Patterns: Comprehensive Perl security covering taint mode, input validation, safe process execution, DBI parameterized queries, web security (XSS/SQLi/CSRF), and perlcritic security policies."
-policy:
-  allow_implicit_invocation: true

@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Spring Boot Security Review"
-  short_description: "Spring Security best practices for authn/authz, validation, CSRF, secrets, headers, rate limiting, and dependency security in Java Spring Boot services."
-  brand_color: "#6366F1"
-  default_prompt: "Use Spring Boot Security Review: Spring Security best practices for authn/authz, validation, CSRF, secrets, headers, rate limiting, and dependency security in Java Spring Boot services."
-policy:
-  allow_implicit_invocation: true

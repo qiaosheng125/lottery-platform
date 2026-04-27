@@ -10,7 +10,7 @@ from urllib.parse import unquote
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, send_file, current_app
 from flask_login import login_required, current_user
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 
 from extensions import db
 from models.user import User, UserSession
@@ -215,6 +215,43 @@ def _database_display_info():
         'engine': db_uri.split(':', 1)[0] if db_uri else 'unknown',
         'path': unquote(db_uri),
     }
+
+
+def _apply_uploaded_file_status_filter(query, status_filter: str):
+    now = beijing_now()
+    is_revoked = UploadedFile.status == 'revoked'
+    is_exhausted = and_(
+        UploadedFile.status != 'revoked',
+        UploadedFile.total_tickets > 0,
+        UploadedFile.completed_count >= UploadedFile.total_tickets,
+    )
+    is_expired = and_(
+        UploadedFile.status != 'revoked',
+        or_(UploadedFile.total_tickets <= 0, UploadedFile.completed_count < UploadedFile.total_tickets),
+        UploadedFile.pending_count == 0,
+        UploadedFile.assigned_count == 0,
+        UploadedFile.deadline_time.isnot(None),
+        UploadedFile.deadline_time <= now,
+    )
+
+    if status_filter == 'revoked':
+        return query.filter(is_revoked)
+    if status_filter == 'exhausted':
+        return query.filter(is_exhausted)
+    if status_filter == 'expired':
+        return query.filter(is_expired)
+    if status_filter == 'active':
+        return query.filter(
+            UploadedFile.status != 'revoked',
+            or_(UploadedFile.total_tickets <= 0, UploadedFile.completed_count < UploadedFile.total_tickets),
+            or_(
+                UploadedFile.pending_count > 0,
+                UploadedFile.assigned_count > 0,
+                UploadedFile.deadline_time.is_(None),
+                UploadedFile.deadline_time > now,
+            ),
+        )
+    return query
 
 
 def _build_health_summary(now=None):
@@ -696,18 +733,16 @@ def api_files_list():
         reverse=True,
     )
 
-    all_files = q.all()
     if status_filter:
-        all_files = [uploaded_file for uploaded_file in all_files if uploaded_file.derived_status() == status_filter]
+        q = _apply_uploaded_file_status_filter(q, status_filter)
 
-    total = len(all_files)
+    total = q.order_by(None).count()
     pages = (total + per_page - 1) // per_page if total else 0
     if pages > 0:
         page = min(page, pages)
     else:
         page = 1
-    start = (page - 1) * per_page
-    items = all_files[start:start + per_page]
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
 
     return jsonify({
         'files': [f.to_dict() for f in items],

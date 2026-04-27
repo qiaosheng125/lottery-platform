@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Spring Boot TDD Workflow"
-  short_description: "Test-driven development for Spring Boot using JUnit 5, Mockito, MockMvc, Testcontainers, and JaCoCo. Use when adding features, fixing bugs, or refactoring."
-  brand_color: "#6366F1"
-  default_prompt: "Use Spring Boot TDD Workflow: Test-driven development for Spring Boot using JUnit 5, Mockito, MockMvc, Testcontainers, and JaCoCo. Use when adding features, fixing bugs, or refactoring."
-policy:
-  allow_implicit_invocation: true

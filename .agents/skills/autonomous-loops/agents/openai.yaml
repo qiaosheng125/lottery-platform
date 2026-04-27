@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Autonomous Loops Skill"
-  short_description: "\"Patterns and architectures for autonomous Claude Code loops — from simple sequential pipelines to RFC-driven multi-agent DAG systems.\""
-  brand_color: "#6366F1"
-  default_prompt: "Use Autonomous Loops Skill: \"Patterns and architectures for autonomous Claude Code loops — from simple sequential pipelines to RFC-driven multi-agent DAG systems.\""
-policy:
-  allow_implicit_invocation: true

@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Android Clean Architecture"
-  short_description: "Clean Architecture patterns for Android and Kotlin Multiplatform projects — module structure, dependency rules, UseCases, Repositories, and data layer patterns."
-  brand_color: "#6366F1"
-  default_prompt: "Use Android Clean Architecture: Clean Architecture patterns for Android and Kotlin Multiplatform projects — module structure, dependency rules, UseCases, Repositories, and data layer patterns."
-policy:
-  allow_implicit_invocation: true

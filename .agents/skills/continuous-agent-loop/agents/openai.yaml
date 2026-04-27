@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Continuous Agent Loop"
-  short_description: "Patterns for continuous autonomous agent loops with quality gates, evals, and recovery controls."
-  brand_color: "#6366F1"
-  default_prompt: "Use Continuous Agent Loop: Patterns for continuous autonomous agent loops with quality gates, evals, and recovery controls."
-policy:
-  allow_implicit_invocation: true

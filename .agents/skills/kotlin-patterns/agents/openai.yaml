@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Kotlin Development Patterns"
-  short_description: "Idiomatic Kotlin patterns, best practices, and conventions for building robust, efficient, and maintainable Kotlin applications with coroutines, null safety, and DSL builders."
-  brand_color: "#6366F1"
-  default_prompt: "Use Kotlin Development Patterns: Idiomatic Kotlin patterns, best practices, and conventions for building robust, efficient, and maintainable Kotlin applications with coroutines, null safety, and DSL builders."
-policy:
-  allow_implicit_invocation: true

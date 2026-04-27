@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Kotlin Exposed Patterns"
-  short_description: "JetBrains Exposed ORM patterns including DSL queries, DAO pattern, transactions, HikariCP connection pooling, Flyway migrations, and repository pattern."
-  brand_color: "#6366F1"
-  default_prompt: "Use Kotlin Exposed Patterns: JetBrains Exposed ORM patterns including DSL queries, DAO pattern, transactions, HikariCP connection pooling, Flyway migrations, and repository pattern."
-policy:
-  allow_implicit_invocation: true

@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Docker Patterns"
-  short_description: "Docker and Docker Compose patterns for local development, container security, networking, volume strategies, and multi-service orchestration."
-  brand_color: "#6366F1"
-  default_prompt: "Use Docker Patterns: Docker and Docker Compose patterns for local development, container security, networking, volume strategies, and multi-service orchestration."
-policy:
-  allow_implicit_invocation: true

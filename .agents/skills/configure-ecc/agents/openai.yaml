@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Configure Everything Claude Code (ECC)"
-  short_description: "Interactive installer for Everything Claude Code — guides users through selecting and installing skills and rules to user-level or project-level directories, verifies paths, and optionally optimizes installed files."
-  brand_color: "#6366F1"
-  default_prompt: "Use Configure Everything Claude Code (ECC): Interactive installer for Everything Claude Code — guides users through selecting and installing skills and rules to user-level or project-level directories, verifies paths, and optionally optimizes installed files."
-policy:
-  allow_implicit_invocation: true

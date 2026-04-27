@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Compose Multiplatform Patterns"
-  short_description: "Compose Multiplatform and Jetpack Compose patterns for KMP projects — state management, navigation, theming, performance, and platform-specific UI."
-  brand_color: "#6366F1"
-  default_prompt: "Use Compose Multiplatform Patterns: Compose Multiplatform and Jetpack Compose patterns for KMP projects — state management, navigation, theming, performance, and platform-specific UI."
-policy:
-  allow_implicit_invocation: true

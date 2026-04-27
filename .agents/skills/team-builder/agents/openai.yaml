@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Team Builder"
-  short_description: "Interactive agent picker for composing and dispatching parallel teams"
-  brand_color: "#6366F1"
-  default_prompt: "Use Team Builder: Interactive agent picker for composing and dispatching parallel teams"
-policy:
-  allow_implicit_invocation: true

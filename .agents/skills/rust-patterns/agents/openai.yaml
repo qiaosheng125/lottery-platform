@@ -1,7 +1,0 @@
-﻿interface:
-  display_name: "Rust Development Patterns"
-  short_description: "Idiomatic Rust patterns, ownership, error handling, traits, concurrency, and best practices for building safe, performant applications."
-  brand_color: "#6366F1"
-  default_prompt: "Use Rust Development Patterns: Idiomatic Rust patterns, ownership, error handling, traits, concurrency, and best practices for building safe, performant applications."
-policy:
-  allow_implicit_invocation: true

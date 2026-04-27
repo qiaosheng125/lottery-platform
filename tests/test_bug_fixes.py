@@ -9520,6 +9520,43 @@ def test_mode_b_download_rejects_invalid_count(app, client):
     assert '整数' in data["error"]
 
 
+def test_mode_b_preview_rejects_excessive_count(app, client):
+    with app.app_context():
+        create_user("mode_b_preview_excessive", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_preview_excessive", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-b/preview?count=1001")
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "1000" in data["error"]
+
+
+def test_mode_b_download_rejects_excessive_count_before_assignment(app, client, monkeypatch):
+    called = []
+
+    def fake_download_batch(**kwargs):
+        called.append(kwargs)
+        return {"success": True, "ticket_ids": [1], "actual_count": 1}
+
+    monkeypatch.setattr("routes.mode_b.download_batch", fake_download_batch)
+
+    with app.app_context():
+        create_user("mode_b_download_excessive", "secret123", client_mode="mode_b")
+
+    resp = login(client, "mode_b_download_excessive", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/download", json={"count": 1001, "device_id": "dev-1"})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "1000" in data["error"]
+    assert called == []
+
+
 def test_client_dashboard_handles_mode_b_confirm_failure():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
@@ -10091,6 +10128,49 @@ def test_admin_files_list_clamps_page_after_result_set_shrinks(app, client):
     data = resp.get_json()
     assert data["page"] == 2
     assert len(data["files"]) == 1
+
+
+def test_admin_files_list_uses_database_pagination_before_serialization(app, client, monkeypatch):
+    serialized_ids = []
+    original_to_dict = UploadedFile.to_dict
+
+    def tracking_to_dict(self):
+        serialized_ids.append(self.id)
+        return original_to_dict(self)
+
+    monkeypatch.setattr(UploadedFile, "to_dict", tracking_to_dict)
+
+    with app.app_context():
+        admin = User(username="admin_file_db_pagination", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.flush()
+        for i in range(5):
+            db.session.add(
+                UploadedFile(
+                    original_filename=f"db-page-{i}.txt",
+                    stored_filename=f"db-page-{i}.txt",
+                    uploaded_by=admin.id,
+                    total_tickets=1,
+                    pending_count=1,
+                    assigned_count=0,
+                    completed_count=0,
+                    uploaded_at=beijing_now() + timedelta(minutes=i),
+                )
+            )
+        db.session.commit()
+
+    resp = login(client, "admin_file_db_pagination", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/files?page=2&per_page=2")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["total"] == 5
+    assert data["pages"] == 3
+    assert data["page"] == 2
+    assert len(data["files"]) == 2
+    assert len(serialized_ids) == 2
 
 
 def test_admin_winning_template_handles_list_and_detail_load_failures():
