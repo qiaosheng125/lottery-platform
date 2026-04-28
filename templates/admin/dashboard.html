@@ -19,7 +19,7 @@
 
   <div class="row g-3 mb-3">
     <!-- Pool stats -->
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-primary">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-primary" id="stat-pending">-</div>
@@ -27,7 +27,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-success">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-success" id="stat-assigned">-</div>
@@ -35,7 +35,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-info">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-info" id="stat-completed">-</div>
@@ -43,7 +43,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-warning">
         <div class="card-body text-center">
           <div class="fs-2 fw-bold text-warning" id="stat-online">-</div>
@@ -51,7 +51,15 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
+      <div class="card border-dark">
+        <div class="card-body text-center">
+          <div class="fs-4 fw-bold text-dark" id="stat-uploaded-amount">-</div>
+          <div class="text-muted small">今日上传金额</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-secondary">
         <div class="card-body text-center">
           <div class="fs-4 fw-bold text-secondary" id="stat-speed">-</div>
@@ -59,7 +67,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-4 col-xl">
       <div class="card border-danger">
         <div class="card-body text-center">
           <div class="fs-5 fw-bold text-danger" id="stat-eta">-</div>
@@ -228,6 +236,7 @@ async function refreshDashboard() {
       document.getElementById('stat-assigned').textContent = data.pool.assigned ?? 0;
       document.getElementById('stat-completed').textContent = data.pool.completed_today ?? 0;
       document.getElementById('stat-online').textContent = (data.online_users || []).length;
+      document.getElementById('stat-uploaded-amount').textContent = '¥' + Number(data.today_uploaded_amount || 0).toFixed(0);
     }
 
     // Update speed and ETA
@@ -271,13 +280,23 @@ async function refreshDashboard() {
     // Update daily all users stats
     const dailyTbody = document.getElementById('daily-stats-tbody');
     if (data.daily_all_users && data.daily_all_users.length > 0) {
-      dailyTbody.innerHTML = data.daily_all_users.map(u => `
+      const dailyRows = data.daily_all_users.map(u => `
         <tr>
-          <td><strong>${u.username}</strong></td>
+          <td><strong>${u.username || '未知用户'}</strong></td>
           <td>${u.count}</td>
           <td>¥${u.amount.toFixed(0)}</td>
         </tr>
       `).join('');
+      const summary = data.daily_summary || {};
+      const totalCount = Number(summary.count ?? data.daily_all_users.reduce((sum, u) => sum + Number(u.count || 0), 0));
+      const totalAmount = Number(summary.amount ?? data.daily_all_users.reduce((sum, u) => sum + Number(u.amount || 0), 0));
+      dailyTbody.innerHTML = dailyRows + `
+        <tr class="table-light fw-bold">
+          <td>总计</td>
+          <td>${totalCount}</td>
+          <td>¥${totalAmount.toFixed(0)}</td>
+        </tr>
+      `;
     } else {
       dailyTbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-2">暂无数据</td></tr>';
     }

@@ -593,6 +593,14 @@ def dashboard_data():
             else:
                 estimated_time_str = f"{minutes}\u5206\u949f"
 
+    today_uploaded_amount = db.session.query(
+        func.coalesce(func.sum(UploadedFile.actual_total_amount), 0)
+    ).filter(
+        UploadedFile.uploaded_at >= today_start,
+        UploadedFile.uploaded_at < today_end,
+        UploadedFile.status != 'revoked',
+    ).scalar() or 0
+
     # 浠婃棩鎵€鏈夌敤鎴峰嚭绁ㄧ粺璁★紙鍖呮嫭涓嶅湪绾跨殑锛?
     daily_stats_query = db.session.query(
         LotteryTicket.assigned_username,
@@ -612,6 +620,10 @@ def dashboard_data():
         }
         for row in daily_stats_query
     ]
+    daily_summary = {
+        'count': sum(item['count'] for item in daily_all_users),
+        'amount': sum(item['amount'] for item in daily_all_users),
+    }
 
     try:
         health_summary = _build_health_summary()
@@ -634,6 +646,8 @@ def dashboard_data():
         'pool': pool,
         'online_users': user_stats,
         'daily_all_users': daily_all_users,
+        'daily_summary': daily_summary,
+        'today_uploaded_amount': float(today_uploaded_amount or 0),
         'device_speed_stats': device_speed_stats,
         'total_speed': round(total_speed, 2),
         'estimated_time': estimated_time_str,

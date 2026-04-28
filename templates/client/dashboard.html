@@ -465,6 +465,8 @@ createApp({
       nextCooldownUntil: 0,
       nextCooldownSec: 0,
       cooldownTimer: null,
+      modeAIncomingAlertAt: 0,
+      modeAAudioContext: null,
       // Mode B
       bCount: 100,
       bOptions: [50, 100, 200, 300, 400, 500],
@@ -529,12 +531,12 @@ createApp({
       }
       this.announcement = (event.detail && event.detail.content) || '';
     };
-    this._onPoolUpdated = () => {
+    this._onPoolUpdated = (event) => {
       if (this.isModeB) {
         this.loadPoolStatus();
         this.loadProcessingBatches();
       } else {
-        this.loadCurrentModeATicket();
+        this.handleModeAPoolUpdate(event);
       }
       this.loadStats();
     };
@@ -621,6 +623,54 @@ createApp({
       this.nextCooldownSec = 0;
       document.body.classList.remove('mode-a-active');
     },
+    ensureModeAAudioReady() {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        if (!this.modeAAudioContext) {
+          this.modeAAudioContext = new AudioContext();
+        }
+        if (this.modeAAudioContext.state === 'suspended') {
+          this.modeAAudioContext.resume().catch(() => {});
+        }
+      } catch (e) {
+        this.modeAAudioContext = null;
+      }
+    },
+    playModeAIncomingAlert() {
+      const now = Date.now();
+      if (now - this.modeAIncomingAlertAt < 3000) return;
+      this.modeAIncomingAlertAt = now;
+      try {
+        this.ensureModeAAudioReady();
+        const ctx = this.modeAAudioContext;
+        if (!ctx) return;
+        [0, 0.22].forEach((offset) => {
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const startAt = ctx.currentTime + offset;
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(880, startAt);
+          gain.gain.setValueAtTime(0.001, startAt);
+          gain.gain.exponentialRampToValueAtTime(0.18, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.18);
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + 0.18);
+        });
+      } catch (e) {}
+    },
+    handleModeAPoolUpdate(event) {
+      const detail = (event && event.detail) || {};
+      const hasPending = detail.total_pending === undefined || Number(detail.total_pending || 0) > 0;
+      if (!this.modeAActive || this.currentTicket || this.loadingNext || !hasPending) {
+        return;
+      }
+      this.playModeAIncomingAlert();
+      showToast('票池有新票，正在自动获取...', 'info');
+      this.nextTicket();
+    },
     async loadCurrentModeATicket() {
       const requestSeq = ++modeACurrentTicketRequestSeq;
       try {
@@ -654,6 +704,11 @@ createApp({
         if (requestSeq !== dailyStatsRequestSeq) return;
         this.stats = data;
         this.announcement = data.announcement || '';
+        if (!this.isModeB && this.modeAActive && !this.currentTicket && !this.loadingNext && Number(data.pool_total_pending || 0) > 0) {
+          this.playModeAIncomingAlert();
+          showToast('票池有新票，正在自动获取...', 'info');
+          this.nextTicket();
+        }
         if (data.mode_b_options && data.mode_b_options.length > 0) {
           this.bOptions = data.mode_b_options;
           // 如果当前选择的张数不在新选项里，重置为第一个可用值
@@ -673,6 +728,7 @@ createApp({
       if (this.modeAActive) {
         // 接单中时继续下一张，保持 body class
         document.body.classList.add('mode-a-active');
+        this.ensureModeAAudioReady();
         await this.nextTicket();
       } else {
         // 停止接单时移除 body class
