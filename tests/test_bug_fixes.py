@@ -4644,6 +4644,109 @@ def test_device_register_returns_json_for_missing_device_id(app, client):
     assert "\u8bf7\u8f93\u5165\u8bbe\u5907ID" in data["error"]
 
 
+def test_device_update_changes_current_session_and_registry(app, client):
+    with app.app_context():
+        user = create_user("device_update_user", "secret123", client_mode="mode_b")
+        user_id = user.id
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "device_update_user", "password": "secret123", "device_id": "device-old"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.post("/api/device/register", json={"device_id": "device-old", "client_info": {"client_type": "web"}})
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/device/update",
+        json={
+            "current_device_id": "device-old",
+            "new_device_id": "device-new",
+            "client_info": {"client_type": "web"},
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["device"]["device_id"] == "device-new"
+
+    with app.app_context():
+        from models.user import UserSession
+
+        session_record = UserSession.query.filter_by(user_id=user_id).first()
+        assert session_record.device_id == "device-new"
+        assert DeviceRegistry.query.filter_by(device_id="device-old").first() is None
+        device = DeviceRegistry.query.filter_by(device_id="device-new").first()
+        assert device is not None
+        assert device.user_id == user_id
+
+
+def test_device_update_rejects_claiming_other_users_device_id(app, client):
+    with app.app_context():
+        owner = create_user("device_update_owner", "secret123", client_mode="mode_b")
+        create_user("device_update_actor", "secret123", client_mode="mode_b")
+        db.session.add(DeviceRegistry(device_id="taken-device", user_id=owner.id))
+        db.session.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "device_update_actor", "password": "secret123", "device_id": "actor-device"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/device/update",
+        json={"current_device_id": "actor-device", "new_device_id": "taken-device"},
+    )
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "\u5176\u4ed6\u7528\u6237" in data["error"]
+
+
+def test_device_update_rejects_when_old_device_has_assigned_tickets(app, client):
+    with app.app_context():
+        user = create_user("device_update_assigned_user", "secret123", client_mode="mode_b")
+        file = UploadedFile(
+            original_filename="assigned.txt",
+            stored_filename="assigned.txt",
+            total_tickets=1,
+            assigned_count=1,
+        )
+        db.session.add(file)
+        db.session.flush()
+        db.session.add(
+            LotteryTicket(
+                source_file_id=file.id,
+                line_number=1,
+                raw_content="ticket",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="busy-device",
+                assigned_at=beijing_now(),
+                deadline_time=beijing_now() + timedelta(hours=1),
+            )
+        )
+        db.session.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"username": "device_update_assigned_user", "password": "secret123", "device_id": "busy-device"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.post(
+        "/api/device/update",
+        json={"current_device_id": "busy-device", "new_device_id": "free-device"},
+    )
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "\u5904\u7406\u4e2d" in data["error"]
+
+
 def test_change_password_handles_empty_json_body(app, client):
     with app.app_context():
         create_user("change_password_empty_body_user", "secret123", client_mode="mode_a")
@@ -9625,6 +9728,8 @@ def test_client_dashboard_uses_dynamic_device_identifier_helpers():
     assert "const currentDeviceId = () => getOrCreateDeviceId();" in content
     assert "device_id: currentDeviceId()," in content
     assert "client_type: 'web'," in content
+    assert "id=\"current-device-id-display\"" in content
+    assert "showDeviceIdPrompt('', 'edit')" in content
 
 
 def test_web_device_registration_uses_single_identifier_flow():
@@ -9632,6 +9737,10 @@ def test_web_device_registration_uses_single_identifier_flow():
     content = app_js.read_text(encoding="utf-8")
     assert "client_info: { client_type: 'web' }," in content
     assert "lottery_device_id" in content
+    assert "fetch('/api/device/update'" in content
+    assert "current_device_id: oldId || undefined" in content
+    assert "new_device_id: id" in content
+    assert "refreshDeviceIdDisplays()" in content
 
 
 def test_mode_a_active_hides_navbar_logout_button():

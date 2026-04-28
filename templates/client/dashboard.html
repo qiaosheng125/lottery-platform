@@ -50,6 +50,19 @@
     </div>
   </div>
 
+  <div class="card mb-3 client-device-id-card">
+    <div class="card-body py-2 d-flex align-items-center justify-content-between gap-2">
+      <div class="small">
+        <i class="bi bi-cpu text-primary"></i>
+        <span class="text-muted">&#24403;&#21069;&#35774;&#22791;ID</span>
+        <span id="current-device-id-display" class="fw-bold ms-1"></span>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="showDeviceIdPrompt('', 'edit')">
+        <i class="bi bi-pencil-square"></i> &#20462;&#25913;
+      </button>
+    </div>
+  </div>
+
   <div v-if="stats.device_stats && stats.device_stats.length > 1" class="card mb-3 client-device-stats">
     <div class="card-header py-2 small fw-bold">
       <i class="bi bi-phone"></i> 今日各设备出票统计
