@@ -231,6 +231,7 @@ def my_winning():
     tickets = q.order_by(LotteryTicket.completed_at.desc()).all()
 
     grouped = {}
+    total_display_winning_amount = Decimal('0')
     for t in tickets:
         business_date = str(get_business_date(t.completed_at)) if t.completed_at else 'unknown'
         predicted_amount = float(t.predicted_winning_amount) if t.predicted_winning_amount is not None else None
@@ -239,6 +240,13 @@ def my_winning():
         final_tax = float(t.winning_tax) if t.winning_tax is not None else None
         display_amount = final_amount if final_amount is not None else predicted_amount
         display_tax = final_tax if final_amount is not None else predicted_tax
+        display_amount_decimal = (
+            t.winning_amount
+            if t.winning_amount is not None
+            else t.predicted_winning_amount
+        )
+        if display_amount_decimal is not None:
+            total_display_winning_amount += Decimal(str(display_amount_decimal))
         is_predicted_display = final_amount is None and predicted_amount is not None
         grouped.setdefault(business_date, []).append({
             'ticket_id': t.id,
@@ -257,6 +265,7 @@ def my_winning():
             'display_winning_tax': display_tax,
             'is_predicted_display': is_predicted_display,
             'winning_image_url': t.winning_image_url,
+            'assigned_at': t.assigned_at.isoformat() if t.assigned_at else None,
             'completed_at': t.completed_at.isoformat() if t.completed_at else None,
             'assigned_device_id': t.assigned_device_id or '',
             'download_filename': t.download_filename or '',
@@ -271,6 +280,10 @@ def my_winning():
     return jsonify({
         'success': True,
         'grouped': grouped,
+        'summary': {
+            'record_count': len(tickets),
+            'total_display_winning_amount': float(total_display_winning_amount),
+        },
         'filter_options': {
             'dates': date_options,
             'lottery_types': type_options,

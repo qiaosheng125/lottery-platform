@@ -57,6 +57,16 @@
       <div class="alert alert-info py-2 px-3 mb-2 d-flex gap-4 align-items-center" style="font-size:.9rem">
         <span>当前筛选：<strong>{{ total }}</strong> 条</span>
         <span>税后合计：<strong class="text-success">¥{{ summaryAmount.toFixed(2) }}</strong></span>
+        <span>今日上传金额：<strong class="text-dark">¥{{ summaryUploadedAmount.toFixed(2) }}</strong></span>
+        <span>
+          盈利金额：
+          <strong :class="summaryProfitAmount >= 0 ? 'text-danger' : 'text-success'">{{ summaryProfitAmount >= 0 ? '+' : '' }}¥{{ summaryProfitAmount.toFixed(2) }}</strong>
+        </span>
+        <span>
+          盈利百分比：
+          <strong v-if="summaryProfitPercent === null" class="text-muted">--</strong>
+          <strong v-else :class="summaryProfitPercent >= 0 ? 'text-danger' : 'text-success'">{{ summaryProfitPercent >= 0 ? '+' : '' }}{{ summaryProfitPercent.toFixed(2) }}%</strong>
+        </span>
         <span>&#39044;&#27979;&#31246;&#21518;&#21512;&#35745;: <strong class="text-primary">&yen;{{ summaryPredictedAmount.toFixed(2) }}</strong></span>
         <span>
           &#27719;&#24635;&#28072;&#36300;&#24133;:
@@ -344,6 +354,7 @@ createApp({
       usernameOptions: [], winningDateOptions: [], lotteryTypeOptions: [],
       currentBusinessDate: '',
       summaryAmount: 0, summaryPredictedAmount: 0, summaryCount: 0, summaryTax: 0, summaryMissing: 0,
+      summaryUploadedAmount: 0, summaryProfitAmount: 0, summaryProfitPercent: null,
       markingCheckedId: null,
       // 上传赛果
       resultFile: null, uploadPeriod: '', uploadKind: 'final', uploading: false, uploadMsg: '', uploadSuccess: false,
@@ -465,6 +476,11 @@ createApp({
         this.summaryCount = (data.summary && data.summary.count) || 0;
         this.summaryTax = (data.summary && data.summary.tax) || 0;
         this.summaryMissing = (data.summary && data.summary.missing) || 0;
+        this.summaryUploadedAmount = (data.summary && data.summary.uploaded_amount) || 0;
+        this.summaryProfitAmount = (data.summary && data.summary.profit_amount) || 0;
+        this.summaryProfitPercent = data.summary && data.summary.profit_percent !== null && data.summary.profit_percent !== undefined
+          ? data.summary.profit_percent
+          : null;
       } catch (e) {
         if (requestSeq !== winningRecordsRequestSeq) return;
         this.records = [];
@@ -475,6 +491,9 @@ createApp({
         this.summaryCount = 0;
         this.summaryTax = 0;
         this.summaryMissing = 0;
+        this.summaryUploadedAmount = 0;
+        this.summaryProfitAmount = 0;
+        this.summaryProfitPercent = null;
         showToast(e.message || '加载中奖记录失败', 'danger');
       } finally {
         if (requestSeq !== winningRecordsRequestSeq) return;

@@ -6236,7 +6236,7 @@ def test_user_export_daily_uses_business_date_filename(app, client, monkeypatch)
 def test_admin_export_tickets_by_date_includes_device_id_column():
     admin_route = Path(__file__).resolve().parents[1] / "routes" / "admin.py"
     content = admin_route.read_text(encoding="utf-8")
-    assert "['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名']" in content
+    assert "['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '分配文件名', '完成时间', '来源文件名']" in content
     assert "t.assigned_device_id or ''" in content
 
 
@@ -6313,6 +6313,64 @@ def test_admin_export_tickets_by_date_localizes_status_labels_to_chinese(app, cl
     workbook = load_workbook(io.BytesIO(export_resp.data))
     worksheet = workbook.active
     assert worksheet.cell(row=2, column=8).value == "处理中"
+
+
+def test_admin_export_tickets_by_date_includes_download_filename(app, client):
+    from decimal import Decimal
+    from openpyxl import load_workbook
+
+    download_filename = "比分_2倍_53张_1112元_02.40_2026-0429-011309.txt"
+
+    with app.app_context():
+        admin = User(username="admin_export_download_filename", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        uploaded = UploadedFile(
+            original_filename="source_file.txt",
+            stored_filename="source_file.txt",
+            status="active",
+            uploaded_at=datetime(2026, 4, 8, 13, 0, 0),
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=0,
+            completed_count=1,
+        )
+        db.session.add(uploaded)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="EXPORT-DOWNLOAD-FILENAME",
+            lottery_type="比分",
+            multiplier=2,
+            detail_period="26040",
+            ticket_amount=Decimal("4"),
+            status="completed",
+            assigned_username="tester",
+            assigned_device_id="dev-export",
+            assigned_at=datetime(2026, 4, 8, 13, 5, 0),
+            completed_at=datetime(2026, 4, 8, 13, 10, 0),
+            download_filename=download_filename,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_export_download_filename", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/tickets/export-by-date?date=2026-04-08")
+    assert export_resp.status_code == 200
+
+    workbook = load_workbook(io.BytesIO(export_resp.data))
+    worksheet = workbook.active
+    header = [cell for cell in next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True))]
+    row = [cell for cell in next(worksheet.iter_rows(min_row=2, max_row=2, values_only=True))]
+    assert "分配文件名" in header
+    assert row[header.index("分配文件名")] == download_filename
+    assert row[header.index("来源文件名")] == "source_file.txt"
 
 
 def test_admin_dashboard_eta_uses_chinese_labels():
@@ -7222,6 +7280,17 @@ def test_admin_winning_template_declares_match_results_and_uploading_state():
     content = winning_template.read_text(encoding="utf-8")
     assert "matchResults: [], mrFilterDate: '', mrDateOptions: []" in content
     assert "uploadingImageId: null" in content
+
+
+def test_admin_winning_template_shows_uploaded_profit_summary():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "今日上传金额：" in content
+    assert "盈利金额：" in content
+    assert "盈利百分比：" in content
+    assert "summaryUploadedAmount" in content
+    assert "summaryProfitAmount" in content
+    assert "summaryProfitPercent" in content
 
 
 def test_client_dashboard_template_uses_readable_chinese_labels():
@@ -8177,6 +8246,67 @@ def test_my_winning_returns_download_filename(app, client):
     assert record["download_filename"] == "比分_2倍_53张_1112元_02.40_2026-0429-011309.txt"
 
 
+def test_my_winning_returns_assigned_time_and_filtered_summary(app, client):
+    assigned_at = beijing_now() - timedelta(hours=2)
+
+    with app.app_context():
+        user = create_user("winning_assigned_summary", "secret123", client_mode="mode_b")
+        final_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-SUMMARY-FINAL",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=assigned_at,
+            completed_at=beijing_now(),
+            is_winning=True,
+            lottery_type="胜平负",
+            winning_amount=100.12,
+        )
+        predicted_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-SUMMARY-PREDICTED",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=assigned_at + timedelta(minutes=5),
+            completed_at=beijing_now(),
+            is_winning=True,
+            lottery_type="胜平负",
+            predicted_winning_amount=20.50,
+        )
+        filtered_out_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=3,
+            raw_content="WIN-SUMMARY-OTHER",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_at=assigned_at,
+            completed_at=beijing_now(),
+            is_winning=True,
+            lottery_type="比分",
+            winning_amount=999,
+        )
+        db.session.add_all([final_ticket, predicted_ticket, filtered_out_ticket])
+        db.session.commit()
+
+    resp = login(client, "winning_assigned_summary", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my?lottery_type=胜平负")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    records = [item for items in data["grouped"].values() for item in items]
+    records_by_raw = {record["raw_content"]: record for record in records}
+    assert set(records_by_raw) == {"WIN-SUMMARY-FINAL", "WIN-SUMMARY-PREDICTED"}
+    assert records_by_raw["WIN-SUMMARY-FINAL"]["assigned_at"] == assigned_at.isoformat()
+    assert data["summary"]["record_count"] == 2
+    assert data["summary"]["total_display_winning_amount"] == 120.62
+
+
 def test_my_winning_keeps_recent_four_business_days(app, client, monkeypatch):
     business_today = datetime(2026, 4, 7, 13, 0, 0)
 
@@ -8284,6 +8414,43 @@ def test_winning_calc_includes_expired_but_excludes_revoked(app, monkeypatch):
     assert refreshed_revoked.is_winning is None
     assert refreshed_result.tickets_total == 2
     assert refreshed_result.tickets_winning == 2
+
+
+def test_winning_calculator_matches_hyphenated_score_results():
+    from decimal import Decimal
+
+    from utils.winning_calculator import calculate_winning
+
+    result_data = {
+        "1": {
+            "CBF": {"result": "1-1", "sp": 10.674},
+            "BQC": {"result": "1-1", "sp": 8.591},
+        },
+        "2": {
+            "CBF": {"result": "0-0", "sp": 13.707},
+            "BQC": {"result": "0-0", "sp": 5.799},
+        },
+    }
+
+    cbf_win, cbf_gross, cbf_net, cbf_tax = calculate_winning(
+        "CBF|1=11,2=00|2*1|2",
+        result_data,
+        2,
+    )
+    bqc_win, bqc_gross, bqc_net, bqc_tax = calculate_winning(
+        "BQC|1=11,2=00|2*1|2",
+        result_data,
+        2,
+    )
+
+    assert cbf_win is True
+    assert cbf_gross == Decimal("380.40")
+    assert cbf_net == Decimal("380.40")
+    assert cbf_tax == Decimal("0")
+    assert bqc_win is True
+    assert bqc_gross == Decimal("129.53")
+    assert bqc_net == Decimal("129.53")
+    assert bqc_tax == Decimal("0")
 
 
 def test_winning_calc_clears_stale_amounts_when_ticket_calc_errors(app, monkeypatch):
@@ -9573,6 +9740,57 @@ def test_admin_winning_api_returns_predicted_amount_and_change_percent(app, clie
     assert record["winning_change_percent"] == 20.0
 
 
+def test_admin_winning_api_returns_uploaded_profit_summary(app, client):
+    with app.app_context():
+        admin = User(username="winning_profit_summary_admin", is_admin=True)
+        admin.set_password("secret123")
+        user = create_user("winning_profit_summary_user", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="profit_source.txt",
+            stored_filename="profit_source.txt",
+            uploaded_at=datetime(2026, 4, 8, 13, 0, 0),
+            status="active",
+            total_tickets=1,
+            actual_total_amount=1000,
+        )
+        revoked_uploaded = UploadedFile(
+            original_filename="profit_revoked.txt",
+            stored_filename="profit_revoked.txt",
+            uploaded_at=datetime(2026, 4, 8, 14, 0, 0),
+            status="revoked",
+            total_tickets=1,
+            actual_total_amount=500,
+        )
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="26192",
+            lottery_type="SPF",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 8, 13, 30, 0),
+            is_winning=True,
+            winning_amount=300,
+            winning_tax=0,
+        )
+        db.session.add_all([admin, uploaded, revoked_uploaded, ticket])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "winning_profit_summary_admin", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/winning?date=2026-04-08")
+    assert resp.status_code == 200
+    summary = resp.get_json()["summary"]
+
+    assert summary["amount"] == 300.0
+    assert summary["uploaded_amount"] == 1000.0
+    assert summary["profit_amount"] == 700.0
+    assert summary["profit_percent"] == 70.0
+
+
 def test_admin_user_management_endpoints_reject_admin_targets(app, client):
     with app.app_context():
         super_admin = User(username="admin_guard_actor", is_admin=True)
@@ -9782,11 +10000,38 @@ def test_client_dashboard_reloads_processing_batches_after_download():
     assert "this.bPendingBatches.push({" not in content
 
 
+def test_client_dashboard_defaults_mode_b_count_to_smallest_option():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "bCount: 50," in content
+    assert "bCountInitialized: false," in content
+    assert "const minOption = Math.min(...this.bOptions);" in content
+    assert "if (!this.bCountInitialized) {\n            this.bCount = minOption;\n            this.bCountInitialized = true;" in content
+    assert "else if (!this.bOptions.includes(this.bCount)) {\n            this.bCount = minOption;" in content
+
+
 def test_client_dashboard_shows_winning_download_filename():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "r.download_filename" in content
     assert "文件：" in content
+
+
+def test_client_dashboard_shows_winning_assigned_time_and_summary():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "winningSummary: { record_count: 0, total_display_winning_amount: 0 }" in content
+    assert "data.summary || { record_count: 0, total_display_winning_amount: 0 }" in content
+    assert "winningSummary.total_display_winning_amount" in content
+    assert "获取时间：" in content
+    assert "r.assigned_at" in content
+    assert ".winning-card-times {\n  display: flex; align-items: center; gap: .75rem;" in content
+
+
+def test_client_dashboard_emphasizes_winning_raw_content():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "font-size: .9rem; font-weight: 700; color: #495057;" in content
 
 
 def test_client_dashboard_resets_matching_state_on_load_failures():

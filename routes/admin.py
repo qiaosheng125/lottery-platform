@@ -888,6 +888,7 @@ def export_tickets_by_date():
         LotteryTicket.assigned_username.label('assigned_username'),
         LotteryTicket.assigned_device_id.label('assigned_device_id'),
         LotteryTicket.assigned_at.label('assigned_at'),
+        LotteryTicket.download_filename.label('download_filename'),
         LotteryTicket.completed_at.label('completed_at'),
         LotteryTicket.source_file_id.label('source_file_id'),
         UploadedFile.original_filename.label('original_filename'),
@@ -905,7 +906,7 @@ def export_tickets_by_date():
         if not file_exists:
             wb = Workbook()
             ws = wb.active
-            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名'])
+            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '分配文件名', '完成时间', '来源文件名'])
             buf = _io.BytesIO()
             wb.save(buf)
             buf.seek(0)
@@ -924,7 +925,7 @@ def export_tickets_by_date():
 
     wb = Workbook()
     ws = wb.active
-    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '完成时间', '来源文件名'])
+    ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '分配文件名', '完成时间', '来源文件名'])
     status_map = {
         'pending': '\u5f85\u5904\u7406',
         'assigned': '\u5904\u7406\u4e2d',
@@ -945,6 +946,7 @@ def export_tickets_by_date():
             t.assigned_username or '',
             t.assigned_device_id or '',
             t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
+            t.download_filename or '',
             t.completed_at.strftime('%Y-%m-%d %H:%M:%S') if t.completed_at else '',
             t.original_filename or '',
         ])
@@ -1425,6 +1427,7 @@ def api_winning_list():
 
     from sqlalchemy import func
 
+    summary_date = None
     terminal_expr = func.coalesce(
         LotteryTicket.completed_at,
         LotteryTicket.deadline_time,
@@ -1439,14 +1442,16 @@ def api_winning_list():
         q = q.filter(LotteryTicket.assigned_username == username)
     if date_str:
         try:
-            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            summary_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'success': False, 'error': '鏃ユ湡鏍煎紡鏃犳晥锛岃浣跨敤 YYYY-MM-DD'}), 400
-        start_at, end_at = get_business_window(selected_date)
+        start_at, end_at = get_business_window(summary_date)
         q = q.filter(
             terminal_expr >= start_at,
             terminal_expr < end_at,
         )
+    if summary_date is None:
+        summary_date = get_business_date()
     if lottery_type:
         q = q.filter(LotteryTicket.lottery_type == lottery_type)
     if image_filter == 'uploaded':
@@ -1487,6 +1492,21 @@ def api_winning_list():
     summary_gross  = sum(float(t.winning_gross  or 0) for t in all_items)
     summary_tax    = sum(float(t.winning_tax    or 0) for t in all_items)
     summary_missing = sum(1 for t in all_items if not t.winning_image_url)
+    upload_start_at, upload_end_at = get_business_window(summary_date)
+    summary_uploaded_amount = db.session.query(
+        func.coalesce(func.sum(UploadedFile.actual_total_amount), 0)
+    ).filter(
+        UploadedFile.uploaded_at >= upload_start_at,
+        UploadedFile.uploaded_at < upload_end_at,
+        UploadedFile.status != 'revoked',
+    ).scalar() or 0
+    summary_uploaded_amount = float(summary_uploaded_amount or 0)
+    summary_profit_amount = summary_uploaded_amount - summary_amount
+    summary_profit_percent = (
+        (summary_profit_amount / summary_uploaded_amount) * 100
+        if summary_uploaded_amount > 0
+        else None
+    )
     total = len(all_items)
 
     # 鍒嗛〉鍒囩墖
@@ -1546,6 +1566,9 @@ def api_winning_list():
             'tax':    round(summary_tax,    2),
             'count':  total,
             'missing': summary_missing,
+            'uploaded_amount': round(summary_uploaded_amount, 2),
+            'profit_amount': round(summary_profit_amount, 2),
+            'profit_percent': round(summary_profit_percent, 2) if summary_profit_percent is not None else None,
         },
     })
 

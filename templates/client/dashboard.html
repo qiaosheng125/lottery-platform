@@ -350,6 +350,11 @@
             <i class="bi bi-x-circle"></i> 重置
           </button>
         </div>
+        <div class="col-auto winning-summary-pill">
+          <span class="text-muted">合计</span>
+          <strong>¥{{ Number(winningSummary.total_display_winning_amount || 0).toFixed(2) }}</strong>
+          <span class="text-muted">/ {{ winningSummary.record_count || 0 }} 条</span>
+        </div>
       </div>
     </div>
 
@@ -377,7 +382,10 @@
             <div class="winning-raw">{{ r.raw_content }}</div>
             <div v-if="r.download_filename" class="small text-muted text-break mt-1">文件：{{ r.download_filename }}</div>
             <div class="winning-card-bottom">
-              <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0, 16) : '-' }}</span>
+              <div class="winning-card-times">
+                <span class="text-muted small">获取时间：{{ r.assigned_at ? r.assigned_at.substring(0, 16).replace('T', ' ') : '-' }}</span>
+                <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0, 16).replace('T', ' ') : '-' }}</span>
+              </div>
               <div class="winning-img-actions">
                 <button v-if="r.winning_image_url" class="btn btn-xs btn-outline-info me-1" @click="previewWinningImage(r.winning_image_url)">查看图片</button>
                 <label class="btn btn-xs btn-outline-secondary mb-0" style="cursor:pointer" :class="{ 'opacity-50': uploadingWinningId === r.ticket_id }">
@@ -469,7 +477,8 @@ createApp({
       modeAIncomingAlertAt: 0,
       modeAAudioContext: null,
       // Mode B
-      bCount: 100,
+      bCount: 50,
+      bCountInitialized: false,
       bOptions: [50, 100, 200, 300, 400, 500],
       poolStatus: { total_pending: 0, by_type: [] },
       bPreview: null,
@@ -487,6 +496,7 @@ createApp({
       winningFilterDate: '',
       winningFilterType: '',
       winningFilterOptions: { dates: [], lottery_types: [] },
+      winningSummary: { record_count: 0, total_display_winning_amount: 0 },
       // 修改密码弹窗
       pwdModalVisible: false,
       pwdOld: '', pwdNew: '', pwdConfirm: '',
@@ -712,9 +722,13 @@ createApp({
         }
         if (data.mode_b_options && data.mode_b_options.length > 0) {
           this.bOptions = data.mode_b_options;
-          // 如果当前选择的张数不在新选项里，重置为第一个可用值
-          if (!this.bOptions.includes(this.bCount)) {
-            this.bCount = this.bOptions[0];
+          const minOption = Math.min(...this.bOptions);
+          // 首次加载默认选最小张数；后续只在当前值失效时重置，避免覆盖用户手动选择。
+          if (!this.bCountInitialized) {
+            this.bCount = minOption;
+            this.bCountInitialized = true;
+          } else if (!this.bOptions.includes(this.bCount)) {
+            this.bCount = minOption;
           }
         }
       } catch(e) {
@@ -1084,12 +1098,14 @@ createApp({
         if (requestSeq !== winningRecordsRequestSeq) return;
         this._winningAll = Object.values(data.grouped || {}).flat();
         this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        this.winningSummary = data.summary || { record_count: 0, total_display_winning_amount: 0 };
         this.applyWinningGrouping();
       } catch(e) {
         if (requestSeq !== winningRecordsRequestSeq) return;
         this.winningGrouped = {};
         this._winningAll = [];
         this.winningFilterOptions = { dates: [], lottery_types: [] };
+        this.winningSummary = { record_count: 0, total_display_winning_amount: 0 };
         showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');
       } finally {
         if (requestSeq !== winningRecordsRequestSeq) return;
@@ -1111,6 +1127,7 @@ createApp({
         if (requestSeq !== winningRecordsRequestSeq) return;
         this._winningAll = Object.values(data.grouped || {}).flat();
         this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        this.winningSummary = data.summary || { record_count: 0, total_display_winning_amount: 0 };
         this.applyWinningGrouping();
       } catch(e) {
         if (requestSeq !== winningRecordsRequestSeq) return;
@@ -1308,6 +1325,10 @@ createApp({
   border-bottom: 1px solid #dee2e6;
   position: sticky; top: 52px; z-index: 9;
 }
+.winning-summary-pill {
+  display: flex; align-items: center; gap: .35rem;
+  min-height: 31px; font-size: .85rem;
+}
 .winning-panel-body {
   flex: 1; overflow-y: auto; padding: 1rem;
 }
@@ -1326,12 +1347,16 @@ createApp({
 .winning-badges { display: flex; gap: .25rem; flex-wrap: wrap; }
 .winning-amount { font-weight: 700; color: #198754; font-size: .95rem; }
 .winning-raw {
-  font-family: monospace; font-size: .8rem; color: #6c757d;
+  font-family: monospace; font-size: .9rem; font-weight: 700; color: #495057;
   word-break: break-all; margin-bottom: .4rem;
 }
 .winning-card-bottom {
   display: flex; justify-content: space-between; align-items: center;
   flex-wrap: wrap; gap: .25rem;
+}
+.winning-card-times {
+  display: flex; align-items: center; gap: .75rem;
+  flex-wrap: wrap;
 }
 .winning-img-actions { display: flex; align-items: center; gap: .25rem; }
 .btn-xs { padding: .15rem .4rem; font-size: .75rem; }

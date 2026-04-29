@@ -42,6 +42,13 @@ def _get_decimal_sp(match_info: dict, sp_field: str):
     return Decimal(str(sp_value))
 
 
+def _normalize_result_option(play_code: str, value: str) -> str:
+    normalized = str(value or '').strip()
+    if play_code in {'CBF', 'BQC'}:
+        return normalized.replace('-', '')
+    return normalized
+
+
 def apply_tax(gross: Decimal) -> Tuple[Decimal, Decimal]:
     if gross > TAX_THRESHOLD:
         tax = (gross * TAX_RATE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -82,12 +89,12 @@ def calculate_winning(
                 all_win = False
                 break
 
-            actual_result = str(match_info.get('result', ''))
+            actual_result = _normalize_result_option(result_key, match_info.get('result', ''))
             if _is_postponed(actual_result):
                 combo_sp *= Decimal('1.0')
                 continue
 
-            if selected_option != actual_result:
+            if _normalize_result_option(result_key, selected_option) != actual_result:
                 all_win = False
                 break
 
