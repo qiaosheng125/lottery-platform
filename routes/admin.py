@@ -1524,6 +1524,7 @@ def api_winning_list():
             'winning_image_url': t.winning_image_url or '',
             'raw_content': t.raw_content or '',
             'ticket_amount': float(t.ticket_amount) if t.ticket_amount else 0,
+            'download_filename': t.download_filename or '',
             'status': t.status,
             'status_label': _winning_status_label(t.status),
             'completed_at': (t.completed_at.isoformat() if t.completed_at else None),

@@ -139,6 +139,11 @@ def download_batch(
     deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
 
     filename = f"{lottery_type}_{mult_str}倍_{len(tickets)}张_{int(total_amount)}元_{deadline_str}_{now_str}.txt"
+    LotteryTicket.query.filter(LotteryTicket.id.in_(ticket_ids)).update(
+        {LotteryTicket.download_filename: filename},
+        synchronize_session=False,
+    )
+    db.session.commit()
 
     # 只返回一个文件
     result = {
@@ -206,15 +211,17 @@ def get_processing_batches(user_id: int, device_id: str = None) -> list:
         deadline_str = min(deadlines).strftime('%H.%M') if deadlines else '00.00'
         assigned_at = group_tickets[0].assigned_at
         downloaded_at = assigned_at.strftime('%H:%M:%S') if assigned_at else '--:--:--'
+        stored_filename = group_tickets[0].download_filename
 
         # 还原文件名（尽量贴近原始格式）
-        filename = (
+        filename = stored_filename or (
             f"{lottery_type}_{mult_str}倍_{len(group_tickets)}张"
             f"_{int(total_amount)}元_{deadline_str}_（已接单）.txt"
         )
 
         batches.append({
             'filename': filename,
+            'download_filename': stored_filename or '',
             'ticket_ids': ticket_ids,
             'count': len(group_tickets),
             'amount': total_amount,

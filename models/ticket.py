@@ -29,6 +29,7 @@ class LotteryTicket(db.Model):
     assigned_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     assigned_username = db.Column(db.String(64), nullable=True)  # denormalized
     assigned_device_id = db.Column(db.String(64), nullable=True)
+    download_filename = db.Column(db.String(512), nullable=True)
 
     admin_upload_time = db.Column(db.DateTime, nullable=True)
     assigned_at = db.Column(db.DateTime, nullable=True)
@@ -68,6 +69,7 @@ class LotteryTicket(db.Model):
             'assigned_user_id': self.assigned_user_id,
             'assigned_username': self.assigned_username,
             'assigned_device_id': self.assigned_device_id,
+            'download_filename': self.download_filename,
             'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'is_winning': self.is_winning,

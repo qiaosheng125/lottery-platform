@@ -112,9 +112,13 @@ def ensure_runtime_columns(app):
             'predicted_total_winning_amount': "NUMERIC(14, 2) NOT NULL DEFAULT 0",
         },
         'lottery_tickets': {
+            'download_filename': 'VARCHAR(512)',
             'predicted_winning_gross': 'NUMERIC(12, 2)',
             'predicted_winning_amount': 'NUMERIC(12, 2)',
             'predicted_winning_tax': 'NUMERIC(12, 2)',
+        },
+        'archived_lottery_tickets': {
+            'download_filename': 'VARCHAR(512)',
         },
         'system_settings': {
             'mode_b_pool_reserve': 'INTEGER NOT NULL DEFAULT 20',

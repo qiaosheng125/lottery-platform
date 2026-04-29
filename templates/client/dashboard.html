@@ -375,6 +375,7 @@
             </div>
             <div v-if="r.is_predicted_display" class="small text-warning mb-1">预测奖金非最终结果，请以最终结果为准</div>
             <div class="winning-raw">{{ r.raw_content }}</div>
+            <div v-if="r.download_filename" class="small text-muted text-break mt-1">文件：{{ r.download_filename }}</div>
             <div class="winning-card-bottom">
               <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0, 16) : '-' }}</span>
               <div class="winning-img-actions">

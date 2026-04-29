@@ -155,6 +155,28 @@ def test_ensure_runtime_columns_backfills_system_settings_mode_b_pool_reserve(ap
         assert "mode_b_pool_reserve" in columns
 
 
+def test_ensure_runtime_columns_backfills_ticket_download_filename(app):
+    with app.app_context():
+        db.drop_all()
+        with db.engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE lottery_tickets (
+                    id INTEGER PRIMARY KEY,
+                    source_file_id INTEGER NOT NULL,
+                    line_number INTEGER NOT NULL,
+                    raw_content TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                )
+            """))
+
+        ensure_runtime_columns(app)
+        ensure_runtime_columns(app)
+
+        inspector = inspect(db.engine)
+        columns = {column["name"] for column in inspector.get_columns("lottery_tickets")}
+        assert "download_filename" in columns
+
+
 def test_login_json_post_stays_json_for_authenticated_user(app, client):
     with app.app_context():
         create_user("login_json_user", "secret123", client_mode="mode_a")
@@ -2528,6 +2550,48 @@ def test_mode_b_download_uses_unique_assigned_at_per_device_batch(app, monkeypat
         assigned_ticket = db.session.get(LotteryTicket, assigned_ticket_id)
         assert assigned_ticket.assigned_at > fixed_now
         assert assigned_ticket.assigned_at == fixed_now + timedelta(microseconds=1)
+
+
+def test_mode_b_download_persists_generated_filename_on_tickets(app, monkeypatch):
+    from services.mode_b_service import download_batch
+
+    fixed_now = datetime(2026, 4, 29, 1, 13, 9, 123456)
+    monkeypatch.setattr("services.mode_b_service.beijing_now", lambda: fixed_now)
+    monkeypatch.setattr("services.ticket_pool.beijing_now", lambda: fixed_now)
+
+    with app.app_context():
+        user = create_user("modeb_download_filename_user", "secret123", client_mode="mode_b")
+        settings = SystemSettings.get()
+        settings.mode_b_pool_reserve = 0
+
+        for line_number in range(1, 4):
+            db.session.add(LotteryTicket(
+                source_file_id=1,
+                line_number=line_number,
+                raw_content=f"DOWNLOAD-FILENAME-{line_number:03d}",
+                lottery_type="比分",
+                multiplier=2,
+                status="pending",
+                deadline_time=datetime(2026, 4, 29, 2, 40, 0),
+                ticket_amount=2,
+            ))
+        db.session.commit()
+
+        result = download_batch(
+            user_id=user.id,
+            device_id="device-b",
+            username=user.username,
+            count=3,
+        )
+
+        filename = result["files"][0]["filename"]
+        assigned_tickets = LotteryTicket.query.filter(
+            LotteryTicket.id.in_(result["ticket_ids"])
+        ).order_by(LotteryTicket.id).all()
+
+    assert result["success"] is True
+    assert filename == "比分_2倍_3张_6元_02.40_2026-0429-011309.txt"
+    assert {ticket.download_filename for ticket in assigned_tickets} == {filename}
 
 
 def test_mode_b_download_returns_no_pool_error_when_below_processing_limit(app):
@@ -8085,6 +8149,34 @@ def test_my_winning_returns_business_date(app, client):
     assert records[0]["business_date"]
 
 
+def test_my_winning_returns_download_filename(app, client):
+    with app.app_context():
+        user = create_user("winning_download_filename", "secret123", client_mode="mode_b")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-FILENAME-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="device-a",
+            completed_at=beijing_now(),
+            is_winning=True,
+            download_filename="比分_2倍_53张_1112元_02.40_2026-0429-011309.txt",
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = login(client, "winning_download_filename", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    record = [item for items in data["grouped"].values() for item in items][0]
+    assert record["download_filename"] == "比分_2倍_53张_1112元_02.40_2026-0429-011309.txt"
+
+
 def test_my_winning_keeps_recent_four_business_days(app, client, monkeypatch):
     business_today = datetime(2026, 4, 7, 13, 0, 0)
 
@@ -9690,6 +9782,13 @@ def test_client_dashboard_reloads_processing_batches_after_download():
     assert "this.bPendingBatches.push({" not in content
 
 
+def test_client_dashboard_shows_winning_download_filename():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "r.download_filename" in content
+    assert "文件：" in content
+
+
 def test_client_dashboard_resets_matching_state_on_load_failures():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
@@ -9859,10 +9958,10 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     assert "window.removeEventListener('keydown', this._onModeAArrowKey);" in content
     assert "if (event.key === 'ArrowLeft') {" in content
     assert "if (event.key === 'ArrowRight') {" in content
-    assert "this._onPoolUpdated = () => {" in content
+    assert "this._onPoolUpdated = (event) => {" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
-    assert "this._onPoolUpdated = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolUpdated = (event) => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.handleModeAPoolUpdate(event);\n      }\n      this.loadStats();\n    };" in content
     assert "this._onPoolDisabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
     assert "this._onPoolEnabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
 

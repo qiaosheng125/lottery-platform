@@ -259,6 +259,7 @@ def my_winning():
             'winning_image_url': t.winning_image_url,
             'completed_at': t.completed_at.isoformat() if t.completed_at else None,
             'assigned_device_id': t.assigned_device_id or '',
+            'download_filename': t.download_filename or '',
         })
 
     date_options = sorted(
