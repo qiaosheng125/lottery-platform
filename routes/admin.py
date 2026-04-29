@@ -1501,7 +1501,7 @@ def api_winning_list():
         UploadedFile.status != 'revoked',
     ).scalar() or 0
     summary_uploaded_amount = float(summary_uploaded_amount or 0)
-    summary_profit_amount = summary_uploaded_amount - summary_amount
+    summary_profit_amount = summary_amount - summary_uploaded_amount
     summary_profit_percent = (
         (summary_profit_amount / summary_uploaded_amount) * 100
         if summary_uploaded_amount > 0

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 import builtins
 from pathlib import Path
@@ -9787,8 +9787,8 @@ def test_admin_winning_api_returns_uploaded_profit_summary(app, client):
 
     assert summary["amount"] == 300.0
     assert summary["uploaded_amount"] == 1000.0
-    assert summary["profit_amount"] == 700.0
-    assert summary["profit_percent"] == 70.0
+    assert summary["profit_amount"] == -700.0
+    assert summary["profit_percent"] == -70.0
 
 
 def test_admin_user_management_endpoints_reject_admin_targets(app, client):
