@@ -330,22 +330,19 @@
       <div class="row g-2 align-items-end">
         <div class="col-auto">
           <label class="form-label small mb-1">日期</label>
-          <select class="form-select form-select-sm" v-model="winningFilterDate" style="min-width:120px">
+          <select class="form-select form-select-sm" v-model="winningFilterDate" style="min-width:120px" @change="applyWinningFilter">
             <option value="">全部</option>
             <option v-for="date in winningFilterOptions.dates" :key="date" :value="date">{{ date }}</option>
           </select>
         </div>
         <div class="col-auto">
           <label class="form-label small mb-1">类型</label>
-          <select class="form-select form-select-sm" v-model="winningFilterType" style="min-width:120px">
+          <select class="form-select form-select-sm" v-model="winningFilterType" style="min-width:120px" @change="applyWinningFilter">
             <option value="">全部</option>
             <option v-for="type in winningFilterOptions.lottery_types" :key="type" :value="type">{{ type }}</option>
           </select>
         </div>
         <div class="col-auto">
-          <button class="btn btn-sm btn-primary" @click="applyWinningFilter">
-            <i class="bi bi-funnel"></i> 筛选
-          </button>
           <button v-if="winningFilterDate || winningFilterType" class="btn btn-sm btn-outline-secondary ms-1" @click="resetWinningFilter">
             <i class="bi bi-x-circle"></i> 重置
           </button>
@@ -380,6 +377,9 @@
             </div>
             <div v-if="r.is_predicted_display" class="small text-warning mb-1">预测奖金非最终结果，请以最终结果为准</div>
             <div class="winning-raw">{{ r.raw_content }}</div>
+            <div class="winning-card-meta">
+              <span>票面金额：¥{{ Number(r.ticket_amount || 0).toFixed(2) }}</span>
+            </div>
             <div v-if="r.download_filename" class="small text-muted text-break mt-1">文件：{{ r.download_filename }}</div>
             <div class="winning-card-bottom">
               <div class="winning-card-times">
@@ -495,6 +495,7 @@ createApp({
       // 中奖筛选
       winningFilterDate: '',
       winningFilterType: '',
+      winningDefaultBusinessDate: '',
       winningFilterOptions: { dates: [], lottery_types: [] },
       winningSummary: { record_count: 0, total_display_winning_amount: 0 },
       // 修改密码弹窗
@@ -1090,7 +1091,8 @@ createApp({
       this.winningFilterDate = '';
       this.winningFilterType = '';
       try {
-        const res = await fetch('/api/winning/my');
+        const params = new URLSearchParams({ default_date: '1' });
+        const res = await fetch('/api/winning/my?' + params.toString());
         const data = await res.json();
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载中奖记录失败');
@@ -1098,6 +1100,8 @@ createApp({
         if (requestSeq !== winningRecordsRequestSeq) return;
         this._winningAll = Object.values(data.grouped || {}).flat();
         this.winningFilterOptions = data.filter_options || { dates: [], lottery_types: [] };
+        this.winningDefaultBusinessDate = data.default_business_date || '';
+        this.winningFilterDate = this.winningDefaultBusinessDate;
         this.winningSummary = data.summary || { record_count: 0, total_display_winning_amount: 0 };
         this.applyWinningGrouping();
       } catch(e) {
@@ -1105,6 +1109,7 @@ createApp({
         this.winningGrouped = {};
         this._winningAll = [];
         this.winningFilterOptions = { dates: [], lottery_types: [] };
+        this.winningDefaultBusinessDate = '';
         this.winningSummary = { record_count: 0, total_display_winning_amount: 0 };
         showToast(e.message || '加载中奖记录失败，请稍后重试', 'danger');
       } finally {
@@ -1138,7 +1143,7 @@ createApp({
       }
     },
     async resetWinningFilter() {
-      this.winningFilterDate = '';
+      this.winningFilterDate = this.winningDefaultBusinessDate || '';
       this.winningFilterType = '';
       await this.applyWinningFilter();
     },
@@ -1349,6 +1354,10 @@ createApp({
 .winning-raw {
   font-family: monospace; font-size: .9rem; font-weight: 700; color: #495057;
   word-break: break-all; margin-bottom: .4rem;
+}
+.winning-card-meta {
+  display: flex; flex-wrap: wrap; gap: .75rem;
+  color: #6c757d; font-size: .82rem; margin-bottom: .4rem;
 }
 .winning-card-bottom {
   display: flex; justify-content: space-between; align-items: center;

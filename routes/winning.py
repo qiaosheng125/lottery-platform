@@ -203,16 +203,21 @@ def my_winning():
     lottery_type = request.args.get('lottery_type', '').strip()
 
     today = get_business_date()
+    default_business_date = today - timedelta(days=1)
+    if not date_str and request.args.get('default_date') == '1':
+        date_str = str(default_business_date)
     four_days_ago = today - timedelta(days=3)
     start_time, _ = get_business_window(four_days_ago)
     _, end_time = get_business_window(today)
 
-    q = LotteryTicket.query.filter(
+    base_q = LotteryTicket.query.filter(
         LotteryTicket.assigned_user_id == current_user.id,
         LotteryTicket.is_winning == True,
         LotteryTicket.completed_at >= start_time,
         LotteryTicket.completed_at < end_time,
     )
+    option_tickets = base_q.order_by(LotteryTicket.completed_at.desc()).all()
+    q = base_q
 
     if date_str:
         try:
@@ -272,10 +277,10 @@ def my_winning():
         })
 
     date_options = sorted(
-        {str(get_business_date(t.completed_at)) for t in tickets if t.completed_at},
+        {str(get_business_date(t.completed_at)) for t in option_tickets if t.completed_at} | {str(default_business_date)},
         reverse=True,
     )
-    type_options = sorted({t.lottery_type for t in tickets if t.lottery_type})
+    type_options = sorted({t.lottery_type for t in option_tickets if t.lottery_type})
 
     return jsonify({
         'success': True,
@@ -288,6 +293,8 @@ def my_winning():
             'dates': date_options,
             'lottery_types': type_options,
         },
+        'current_business_date': str(today),
+        'default_business_date': str(default_business_date),
     })
 
 

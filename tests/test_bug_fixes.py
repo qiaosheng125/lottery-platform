@@ -8246,6 +8246,79 @@ def test_my_winning_returns_download_filename(app, client):
     assert record["download_filename"] == "比分_2倍_53张_1112元_02.40_2026-0429-011309.txt"
 
 
+def test_my_winning_returns_original_ticket_amount(app, client):
+    with app.app_context():
+        user = create_user("winning_ticket_amount", "secret123", client_mode="mode_b")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-AMOUNT-001",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+            is_winning=True,
+            ticket_amount=12.5,
+            winning_amount=88,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = login(client, "winning_ticket_amount", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    record = [item for items in data["grouped"].values() for item in items][0]
+    assert record["ticket_amount"] == 12.5
+
+
+def test_my_winning_default_date_uses_previous_business_day(app, client, monkeypatch):
+    business_today = datetime(2026, 4, 8, 13, 0, 0)
+
+    with app.app_context():
+        user = create_user("winning_default_prev_day", "secret123", client_mode="mode_b")
+        prev_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-DEFAULT-PREV",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 7, 13, 0, 0),
+            is_winning=True,
+            winning_amount=10,
+        )
+        current_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="WIN-DEFAULT-CURRENT",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=datetime(2026, 4, 8, 13, 0, 0),
+            is_winning=True,
+            winning_amount=20,
+        )
+        db.session.add_all([prev_ticket, current_ticket])
+        db.session.commit()
+
+    monkeypatch.setattr("routes.winning.get_business_date", lambda dt=None: (dt or business_today).date())
+
+    resp = login(client, "winning_default_prev_day", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/winning/my?default_date=1")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    records = [item["raw_content"] for items in data["grouped"].values() for item in items]
+    assert records == ["WIN-DEFAULT-PREV"]
+    assert data["current_business_date"] == "2026-04-08"
+    assert data["default_business_date"] == "2026-04-07"
+    assert "2026-04-07" in data["filter_options"]["dates"]
+
+
 def test_my_winning_returns_assigned_time_and_filtered_summary(app, client):
     assigned_at = beijing_now() - timedelta(hours=2)
 
@@ -10026,6 +10099,31 @@ def test_client_dashboard_shows_winning_assigned_time_and_summary():
     assert "获取时间：" in content
     assert "r.assigned_at" in content
     assert ".winning-card-times {\n  display: flex; align-items: center; gap: .75rem;" in content
+
+
+def test_client_dashboard_shows_winning_original_ticket_amount():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "票面金额：" in content
+    assert "r.ticket_amount" in content
+    assert ".winning-card-meta {" in content
+
+
+def test_client_dashboard_defaults_winning_records_to_previous_business_day():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "winningDefaultBusinessDate: ''" in content
+    assert "new URLSearchParams({ default_date: '1' })" in content
+    assert "this.winningDefaultBusinessDate = data.default_business_date || '';" in content
+    assert "this.winningFilterDate = this.winningDefaultBusinessDate;" in content
+    assert "this.winningFilterDate = this.winningDefaultBusinessDate || '';" in content
+
+
+def test_client_dashboard_auto_applies_winning_filters_on_select_change():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert 'v-model="winningFilterDate" style="min-width:120px" @change="applyWinningFilter"' in content
+    assert 'v-model="winningFilterType" style="min-width:120px" @change="applyWinningFilter"' in content
 
 
 def test_client_dashboard_emphasizes_winning_raw_content():
