@@ -9383,11 +9383,11 @@ def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
         admin_id = admin.id
 
     predicted_file = tmp_path / "predicted_result.txt"
-    predicted_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.85\n", encoding="utf-8")
+    predicted_file.write_text("\u5e8f\u53f7\tA\tB\n1\t0\t1.85\n", encoding="utf-8")
     final_file = tmp_path / "final_result.txt"
     final_file.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t2.05\n", encoding="utf-8")
     predicted_file_2 = tmp_path / "predicted_result_2.txt"
-    predicted_file_2.write_text("\u5e8f\u53f7\tA\tB\n1\t3\t1.95\n", encoding="utf-8")
+    predicted_file_2.write_text("\u5e8f\u53f7\tA\tB\n1\t1\t1.95\n", encoding="utf-8")
 
     with app.app_context():
         first = parse_result_file(str(predicted_file), "26188", admin_id, upload_kind="predicted")
@@ -9402,6 +9402,7 @@ def test_parse_result_file_keeps_predicted_and_final_sp_separate(app, tmp_path):
     assert second["calc_token"].startswith("ts:")
     assert third["calc_token"].startswith("ts:")
     assert match_result.result_data["1"]["SPF"]["result"] == "3"
+    assert match_result.result_data["1"]["SPF"]["predicted_result"] == "1"
     assert match_result.result_data["1"]["SPF"]["predicted_sp"] == 1.95
     assert match_result.result_data["1"]["SPF"]["sp"] == 2.05
 
@@ -9428,6 +9429,54 @@ def test_parse_result_file_returns_error_for_invalid_sp_value(app, tmp_path):
     assert result["success"] is False
     assert result["count"] == 0
     assert "invalid sp value" in result["error"]
+
+
+def test_parse_result_file_accepts_dash_sp_as_missing_value(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="dash_sp_parser_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    result_file = tmp_path / "dash_sp_result.txt"
+    result_file.write_text("序号\tA\tB\n1\t3\t-\n", encoding="utf-8")
+
+    with app.app_context():
+        result = parse_result_file(str(result_file), "26903", admin_id, upload_kind="final")
+        match_result = MatchResult.query.filter_by(detail_period="26903").first()
+
+    assert result["success"] is True
+    assert match_result.result_data["1"]["SPF"]["result"] == "3"
+    assert match_result.result_data["1"]["SPF"]["sp"] is None
+
+
+def test_parse_result_file_dash_sp_replaces_existing_sp(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="dash_sp_replace_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    full_file = tmp_path / "full_sp_result.txt"
+    full_file.write_text("序号\tA\tB\n1\t3\t2.05\n", encoding="utf-8")
+    dash_file = tmp_path / "dash_sp_replace_result.txt"
+    dash_file.write_text("序号\tA\tB\n1\t3\t-\n", encoding="utf-8")
+
+    with app.app_context():
+        first = parse_result_file(str(full_file), "26904", admin_id, upload_kind="final")
+        second = parse_result_file(str(dash_file), "26904", admin_id, upload_kind="final")
+        match_result = MatchResult.query.filter_by(detail_period="26904").first()
+
+    assert first["success"] is True
+    assert second["success"] is True
+    assert match_result.result_data["1"]["SPF"]["result"] == "3"
+    assert match_result.result_data["1"]["SPF"]["sp"] is None
 
 
 def test_admin_match_result_upload_returns_400_for_invalid_sp_value(app, client):
@@ -9491,6 +9540,71 @@ def test_winning_calc_stores_predicted_and_final_amounts_separately(app):
     assert refreshed_ticket.is_winning is True
     assert float(refreshed_ticket.predicted_winning_amount) == 6.5
     assert float(refreshed_ticket.winning_amount) == 13.0
+    assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
+    assert float(refreshed_match_result.total_winning_amount) == 13.0
+
+
+def test_winning_calc_final_result_wins_after_new_predicted_upload(app):
+    from services.winning_calc_service import process_match_result
+
+    with app.app_context():
+        user = create_user("predicted_after_final_calc_user", "secret123", client_mode="mode_b")
+        match_result = MatchResult(
+            detail_period="261890",
+            result_data={
+                "1": {
+                    "SPF": {
+                        "predicted_result": "0",
+                        "predicted_sp": 5,
+                        "result": "3",
+                        "sp": 10,
+                    }
+                }
+            },
+            uploaded_by=user.id,
+        )
+        final_win_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            status="completed",
+            detail_period="261890",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        predicted_win_ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=2,
+            raw_content="SPF|1=0|1*1|1",
+            status="completed",
+            detail_period="261890",
+            multiplier=1,
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            completed_at=beijing_now(),
+        )
+        db.session.add_all([match_result, final_win_ticket, predicted_win_ticket])
+        db.session.commit()
+        match_result_id = match_result.id
+        final_win_ticket_id = final_win_ticket.id
+        predicted_win_ticket_id = predicted_win_ticket.id
+
+    process_match_result(match_result_id, app=app)
+
+    with app.app_context():
+        refreshed_match_result = db.session.get(MatchResult, match_result_id)
+        refreshed_final_ticket = db.session.get(LotteryTicket, final_win_ticket_id)
+        refreshed_predicted_ticket = db.session.get(LotteryTicket, predicted_win_ticket_id)
+
+    assert refreshed_final_ticket.is_winning is True
+    assert float(refreshed_final_ticket.winning_amount) == 13.0
+    assert refreshed_final_ticket.predicted_winning_amount is None
+    assert refreshed_predicted_ticket.is_winning is False
+    assert refreshed_predicted_ticket.winning_amount is None
+    assert float(refreshed_predicted_ticket.predicted_winning_amount) == 6.5
+    assert refreshed_match_result.tickets_winning == 1
     assert float(refreshed_match_result.predicted_total_winning_amount) == 6.5
     assert float(refreshed_match_result.total_winning_amount) == 13.0
 

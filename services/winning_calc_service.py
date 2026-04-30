@@ -17,18 +17,29 @@ from utils.time_utils import beijing_now
 from utils.winning_calculator import calculate_winning, has_complete_result_data
 
 
-def _run_calculation(raw_content: str, result_data: dict, multiplier: int, sp_field: str):
+def _run_calculation(raw_content: str, result_data: dict, multiplier: int, sp_field: str, result_field: str):
     try:
         return calculate_winning(
             raw_content=raw_content,
             result_data=result_data,
             multiplier=multiplier,
             sp_field=sp_field,
+            result_field=result_field,
         )
     except TypeError as exc:
-        if 'sp_field' not in str(exc):
+        if 'sp_field' not in str(exc) and 'result_field' not in str(exc):
             raise
-        return calculate_winning(raw_content, result_data, multiplier)
+        try:
+            return calculate_winning(
+                raw_content=raw_content,
+                result_data=result_data,
+                multiplier=multiplier,
+                sp_field=sp_field,
+            )
+        except TypeError as fallback_exc:
+            if 'sp_field' not in str(fallback_exc):
+                raise
+            return calculate_winning(raw_content, result_data, multiplier)
 
 
 def _clear_ticket_amounts(ticket: LotteryTicket, clear_predicted: bool, clear_final: bool):
@@ -183,12 +194,14 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
                             sp_field='predicted_sp',
+                            result_field='predicted_result',
                         )
                         predicted_result = _run_calculation(
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
                             multiplier=ticket.multiplier or 1,
                             sp_field='predicted_sp',
+                            result_field='predicted_result',
                         )
 
                     if has_final_results:
@@ -196,12 +209,14 @@ def process_match_result(match_result_id: int, expected_calc_token=None, expecte
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
                             sp_field='sp',
+                            result_field='result',
                         )
                         final_result = _run_calculation(
                             raw_content=ticket.raw_content,
                             result_data=match_result.result_data,
                             multiplier=ticket.multiplier or 1,
                             sp_field='sp',
+                            result_field='result',
                         )
 
                     predicted_is_win, predicted_gross, predicted_net, predicted_tax = predicted_result

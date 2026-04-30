@@ -33,6 +33,11 @@ UPLOAD_KIND_TO_SP_KEY = {
     'final': 'sp',
 }
 
+UPLOAD_KIND_TO_RESULT_KEY = {
+    'predicted': 'predicted_result',
+    'final': 'result',
+}
+
 
 _period_locks_guard = threading.Lock()
 _period_locks = {}
@@ -75,7 +80,7 @@ def _safe_get(cols, idx):
 
 
 def _parse_sp_value(raw_value: str):
-    if raw_value == '':
+    if raw_value in {'', '-'}:
         return None
     try:
         return float(raw_value)
@@ -130,6 +135,7 @@ def _extract_seq_no(first_col: str):
 
 def _clear_upload_kind(existing_data: dict, upload_kind: str) -> dict:
     sp_key = UPLOAD_KIND_TO_SP_KEY[upload_kind]
+    result_key = UPLOAD_KIND_TO_RESULT_KEY[upload_kind]
     cleaned = {}
 
     for seq_no, field_map in (existing_data or {}).items():
@@ -139,7 +145,13 @@ def _clear_upload_kind(existing_data: dict, upload_kind: str) -> dict:
                 continue
             next_play_data = dict(play_data)
             next_play_data.pop(sp_key, None)
-            if next_play_data.get('predicted_sp') is None and next_play_data.get('sp') is None:
+            next_play_data.pop(result_key, None)
+            if (
+                next_play_data.get('predicted_sp') is None
+                and next_play_data.get('sp') is None
+                and next_play_data.get('predicted_result') is None
+                and next_play_data.get('result') is None
+            ):
                 continue
             next_field_map[play_code] = next_play_data
         if next_field_map:
@@ -150,13 +162,14 @@ def _clear_upload_kind(existing_data: dict, upload_kind: str) -> dict:
 
 def _merge_result_data(existing_data: dict, parsed_data: dict, upload_kind: str) -> dict:
     sp_key = UPLOAD_KIND_TO_SP_KEY[upload_kind]
+    result_key = UPLOAD_KIND_TO_RESULT_KEY[upload_kind]
     merged = copy.deepcopy(existing_data or {})
 
     for seq_no, field_map in parsed_data.items():
         seq_bucket = merged.setdefault(seq_no, {})
         for play_code, play_data in field_map.items():
             target = dict(seq_bucket.get(play_code) or {})
-            target['result'] = play_data.get('result')
+            target[result_key] = play_data.get('result')
             if play_code == 'SF' and play_data.get('seq'):
                 target['seq'] = play_data.get('seq')
             target[sp_key] = play_data.get('sp')
@@ -186,7 +199,7 @@ def _collect_parsed_keys(parsed_data: dict) -> set[tuple[str, str]]:
         for play_code, play_data in (field_map or {}).items():
             if not isinstance(play_data, dict):
                 continue
-            if play_data.get('sp') is None:
+            if play_data.get('sp') is None and play_data.get('result') is None:
                 continue
             keys.add((seq, play_code))
     return keys

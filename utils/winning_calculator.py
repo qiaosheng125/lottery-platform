@@ -42,6 +42,13 @@ def _get_decimal_sp(match_info: dict, sp_field: str):
     return Decimal(str(sp_value))
 
 
+def _get_result_value(match_info: dict, result_field: str):
+    result_value = match_info.get(result_field)
+    if result_value in (None, '') and result_field != 'result':
+        result_value = match_info.get('result')
+    return result_value
+
+
 def _normalize_result_option(play_code: str, value: str) -> str:
     normalized = str(value or '').strip()
     if play_code in {'CBF', 'BQC'}:
@@ -61,6 +68,7 @@ def calculate_winning(
     result_data: dict,
     multiplier: int,
     sp_field: str = 'sp',
+    result_field: str = 'result',
 ) -> Tuple[bool, Decimal, Decimal, Decimal]:
     parsed = parse_ticket_line(raw_content)
     if not parsed:
@@ -89,7 +97,7 @@ def calculate_winning(
                 all_win = False
                 break
 
-            actual_result = _normalize_result_option(result_key, match_info.get('result', ''))
+            actual_result = _normalize_result_option(result_key, _get_result_value(match_info, result_field))
             if _is_postponed(actual_result):
                 combo_sp *= Decimal('1.0')
                 continue
@@ -117,6 +125,7 @@ def has_complete_result_data(
     raw_content: str,
     result_data: dict,
     sp_field: str = 'sp',
+    result_field: str = 'result',
 ) -> bool:
     parsed = parse_ticket_line(raw_content)
     if not parsed:
@@ -136,7 +145,7 @@ def has_complete_result_data(
         if not match_info:
             return False
 
-        actual_result = str(match_info.get('result', '')).strip()
+        actual_result = str(_get_result_value(match_info, result_field) or '').strip()
         if not actual_result:
             return False
         if _is_postponed(actual_result):
