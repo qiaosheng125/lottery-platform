@@ -1,17 +1,69 @@
+import math
+import time
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from flask import current_app
+from sqlalchemy import or_
 
 from models.settings import SystemSettings
 from models.ticket import LotteryTicket
 from services.ticket_pool import assign_ticket_atomic, finalize_ticket
+from utils.time_utils import get_today_noon
 
 HISTORY_TTL = 3 * 3600
 MAX_HISTORY = 3
+NEXT_COOLDOWN_SECONDS = 3
+_cooldown_memory = {}
 
 
 def _history_key(user_id: int, device_id: str) -> str:
     return f"history:{user_id}:{device_id}"
+
+
+def _cooldown_key(user_id: int, device_id: str) -> str:
+    return f"mode_a_next_cooldown:{user_id}:{device_id}"
+
+
+def _memory_cooldown_key(user_id: int, device_id: str) -> str:
+    db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    return f"{db_uri}:{_cooldown_key(user_id, device_id)}"
+
+
+def _get_cooldown_remaining(user_id: int, device_id: str) -> int:
+    from extensions import redis_client as rc
+
+    key = _cooldown_key(user_id, device_id)
+    if rc:
+        try:
+            pttl = rc.pttl(key)
+            return max(0, math.ceil(pttl / 1000)) if pttl and pttl > 0 else 0
+        except Exception as e:
+            current_app.logger.warning(f"Redis mode A cooldown read error: {e}")
+
+    memory_key = _memory_cooldown_key(user_id, device_id)
+    expires_at = _cooldown_memory.get(memory_key)
+    if not expires_at:
+        return 0
+    remaining = expires_at - time.monotonic()
+    if remaining <= 0:
+        _cooldown_memory.pop(memory_key, None)
+        return 0
+    return math.ceil(remaining)
+
+
+def _set_cooldown(user_id: int, device_id: str) -> None:
+    from extensions import redis_client as rc
+
+    key = _cooldown_key(user_id, device_id)
+    if rc:
+        try:
+            rc.set(key, '1', ex=NEXT_COOLDOWN_SECONDS)
+            return
+        except Exception as e:
+            current_app.logger.warning(f"Redis mode A cooldown write error: {e}")
+
+    _cooldown_memory[_memory_cooldown_key(user_id, device_id)] = time.monotonic() + NEXT_COOLDOWN_SECONDS
 
 
 def _push_history(user_id: int, device_id: str, ticket_id: int):
@@ -79,6 +131,73 @@ def _get_latest_assigned_ticket(user_id: int, device_id: str) -> Optional[Lotter
     ).first()
 
 
+def _device_today_tickets(user_id: int, device_id: str) -> List[LotteryTicket]:
+    today_start = get_today_noon()
+    today_end = today_start + timedelta(days=1)
+
+    tickets = LotteryTicket.query.filter(
+        LotteryTicket.assigned_user_id == user_id,
+        LotteryTicket.assigned_device_id == device_id,
+        LotteryTicket.status.in_(('completed', 'assigned')),
+        or_(
+            (
+                (LotteryTicket.status == 'completed')
+                & (LotteryTicket.completed_at >= today_start)
+                & (LotteryTicket.completed_at < today_end)
+            ),
+            (
+                (LotteryTicket.status == 'assigned')
+                & (LotteryTicket.assigned_at >= today_start)
+                & (LotteryTicket.assigned_at < today_end)
+            ),
+        ),
+    ).all()
+
+    def sort_key(ticket: LotteryTicket):
+        when = ticket.completed_at if ticket.status == 'completed' else ticket.assigned_at
+        return (when or datetime.min, ticket.id)
+
+    return sorted(tickets, key=sort_key)
+
+
+def _ticket_dict_with_device_sequence(ticket: LotteryTicket, user_id: int, device_id: str) -> dict:
+    data = ticket.to_dict()
+    sequence = None
+    for idx, item in enumerate(_device_today_tickets(user_id, device_id), start=1):
+        if item.id == ticket.id:
+            sequence = idx
+            break
+
+    if sequence is None and ticket.status == 'assigned':
+        today_start = get_today_noon()
+        today_end = today_start + timedelta(days=1)
+        completed_count = LotteryTicket.query.filter(
+            LotteryTicket.assigned_user_id == user_id,
+            LotteryTicket.assigned_device_id == device_id,
+            LotteryTicket.status == 'completed',
+            LotteryTicket.completed_at >= today_start,
+            LotteryTicket.completed_at < today_end,
+        ).count()
+        sequence = completed_count + 1
+
+    data['device_today_sequence'] = sequence
+    return data
+
+
+def get_device_daily_records(user_id: int, device_id: str) -> dict:
+    records = []
+    indexed_tickets = list(enumerate(_device_today_tickets(user_id, device_id), start=1))
+    for idx, ticket in reversed(indexed_tickets):
+        item = ticket.to_dict()
+        item['device_today_sequence'] = idx
+        records.append(item)
+    return {
+        'success': True,
+        'records': records,
+        'count': len(records),
+    }
+
+
 def get_next_ticket(
     user_id: int,
     device_id: str,
@@ -112,8 +231,17 @@ def get_next_ticket(
         if requested_ticket_id != current_ticket.id:
             return {
                 'success': True,
-                'ticket': current_ticket.to_dict(),
+                'ticket': _ticket_dict_with_device_sequence(current_ticket, user_id, device_id),
                 'completed_current': False,
+            }
+
+        cooldown_remaining = _get_cooldown_remaining(user_id, device_id)
+        if cooldown_remaining > 0:
+            return {
+                'success': True,
+                'ticket': _ticket_dict_with_device_sequence(current_ticket, user_id, device_id),
+                'completed_current': False,
+                'cooldown_remaining': cooldown_remaining,
             }
 
         completed = finalize_ticket(
@@ -143,10 +271,12 @@ def get_next_ticket(
     if not ticket:
         return {'success': False, 'error': '暂无可用票'}
 
+    _set_cooldown(user_id, device_id)
     return {
         'success': True,
-        'ticket': ticket.to_dict(),
+        'ticket': _ticket_dict_with_device_sequence(ticket, user_id, device_id),
         'completed_current': current_ticket is not None,
+        'cooldown_seconds': NEXT_COOLDOWN_SECONDS,
     }
 
 
@@ -181,9 +311,17 @@ def get_previous_ticket(user_id: int, device_id: str, offset: int = 0) -> dict:
     if not ticket:
         return {'success': False, 'error': '历史票不存在'}
 
-    return {'success': True, 'ticket': ticket.to_dict()}
+    return {'success': True, 'ticket': _ticket_dict_with_device_sequence(ticket, user_id, device_id)}
 
 
 def get_current_ticket(user_id: int, device_id: str) -> Optional[LotteryTicket]:
     """Return the currently assigned ticket for the given device."""
     return _get_latest_assigned_ticket(user_id, device_id)
+
+
+def get_current_ticket_data(user_id: int, device_id: str) -> Optional[dict]:
+    """Return the current ticket serialized with device-local sequence data."""
+    ticket = _get_latest_assigned_ticket(user_id, device_id)
+    if not ticket:
+        return None
+    return _ticket_dict_with_device_sequence(ticket, user_id, device_id)

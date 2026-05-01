@@ -4121,6 +4121,60 @@ def test_mode_a_next_ignores_stale_completion_ticket_id(app, client):
         assert current.status == "assigned"
 
 
+def test_mode_a_next_returns_current_device_today_sequence(app, client):
+    with app.app_context():
+        user = create_user("modea_sequence_user", "secret123", client_mode="mode_a")
+        completed = create_assigned_ticket(user, "device-a", "DONE-001", 1)
+        completed.status = "completed"
+        completed.completed_at = beijing_now() - timedelta(minutes=5)
+        create_pending_ticket("NEXT-SEQUENCE-002", 2)
+        db.session.commit()
+
+    resp = login(client, "modea_sequence_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-a/next", json={"device_id": "device-a"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["device_today_sequence"] == 2
+
+
+def test_mode_a_next_enforces_server_side_cooldown_before_completing_current(app, client):
+    with app.app_context():
+        user = create_user("modea_server_cooldown_user", "secret123", client_mode="mode_a")
+        first = create_pending_ticket("SERVER-COOLDOWN-1", 1)
+        second = create_pending_ticket("SERVER-COOLDOWN-2", 2)
+        first_id = first.id
+        second_id = second.id
+
+    resp = login(client, "modea_server_cooldown_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-a/next", json={"device_id": "device-a"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["id"] == first_id
+
+    resp = client.post(
+        "/api/mode-a/next",
+        json={"device_id": "device-a", "complete_current_ticket_id": first_id},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["ticket"]["id"] == first_id
+    assert data["completed_current"] is False
+    assert data["cooldown_remaining"] > 0
+
+    with app.app_context():
+        first = LotteryTicket.query.get(first_id)
+        second = LotteryTicket.query.get(second_id)
+        assert first.status == "assigned"
+        assert second.status == "pending"
+
+
 def test_mode_a_next_can_expire_overdue_current_ticket(app, client):
     with app.app_context():
         user = create_user("modea_expire_user", "secret123", client_mode="mode_a")
@@ -4273,6 +4327,50 @@ def test_mode_a_stop_reports_finalize_race_failure(app, client, monkeypatch):
     data = resp.get_json()
     assert data["success"] is False
     assert "状态已变化" in data["error"]
+
+
+def test_mode_a_device_daily_records_include_current_device_future_deadline_tickets(app, client):
+    with app.app_context():
+        user = create_user("modea_daily_list_user", "secret123", client_mode="mode_a")
+        other_user = create_user("modea_daily_list_other_user", "secret123", client_mode="mode_a")
+
+        first = create_assigned_ticket(user, "device-a", "DEVICE-A-DONE-1", 1)
+        first.status = "completed"
+        first.deadline_time = beijing_now() + timedelta(hours=2)
+        first.completed_at = beijing_now() - timedelta(minutes=8)
+        first.ticket_amount = 12
+
+        assigned = create_assigned_ticket(user, "device-a", "DEVICE-A-CURRENT-2", 2)
+        assigned.deadline_time = beijing_now() + timedelta(hours=3)
+        assigned.assigned_at = beijing_now() - timedelta(minutes=2)
+        assigned.ticket_amount = 34
+
+        other_device = create_assigned_ticket(user, "device-b", "DEVICE-B-DONE", 3)
+        other_device.status = "completed"
+        other_device.completed_at = beijing_now() - timedelta(minutes=6)
+
+        other_owner = create_assigned_ticket(other_user, "device-a", "OTHER-USER-DONE", 4)
+        other_owner.status = "completed"
+        other_owner.completed_at = beijing_now() - timedelta(minutes=4)
+
+        db.session.commit()
+
+    resp = login(client, "modea_daily_list_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.get("/api/mode-a/device-daily?device_id=device-a")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["count"] == 2
+    assert [record["raw_content"] for record in data["records"]] == [
+        "DEVICE-A-CURRENT-2",
+        "DEVICE-A-DONE-1",
+    ]
+    assert [record["device_today_sequence"] for record in data["records"]] == [2, 1]
+    assert [record["ticket_amount"] for record in data["records"]] == [34.0, 12.0]
+    assert data["records"][0]["status"] == "assigned"
+    assert data["records"][1]["status"] == "completed"
 
 
 def test_pool_status_returns_empty_when_pool_disabled(app, client):
@@ -10391,7 +10489,34 @@ def test_client_dashboard_skips_mode_a_cooldown_when_server_returns_same_ticket(
     content = dashboard_template.read_text(encoding="utf-8")
     assert "const previousCurrentTicketId = this.currentTicket ? this.currentTicket.id : null;" in content
     assert "if (!(data.completed_current === false && previousCurrentTicketId === data.ticket.id)) {" in content
-    assert "this.startNextCooldown();" in content
+    assert "this.startNextCooldown(data.cooldown_seconds || 3);" in content
+
+
+def test_client_dashboard_mode_a_uses_three_second_cooldown_and_server_remaining():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "startNextCooldown(seconds = 3)" in content
+    assert "const cooldownSeconds = Math.max(1, Number(seconds) || 3);" in content
+    assert "data.cooldown_remaining" in content
+    assert "服务端冷却中，请等待 " in content
+
+
+def test_client_dashboard_mode_a_device_daily_records_ui():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "当前设备今日处理清单" in content
+    assert "openModeADailyRecords" in content
+    assert "fetch(`/api/mode-a/device-daily?device_id=${encodeURIComponent(currentDeviceId())}`)" in content
+    assert "第 {{ currentTicket.device_today_sequence }} 张" in content
+    assert "票面金额：¥{{ Number(r.ticket_amount || 0).toFixed(2) }}" in content
+
+
+def test_client_dashboard_mode_a_incoming_alert_only_on_zero_to_positive_pool():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "lastModeAPoolTotalPending: null" in content
+    assert "previousModeAPoolTotal === 0" in content
+    assert "previousPoolTotal === 0 && currentPoolTotal > 0" in content
 
 
 def test_client_dashboard_blocks_mode_a_next_when_current_ticket_is_overdue():

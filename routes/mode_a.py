@@ -2,7 +2,8 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from services.mode_a_service import (
-    get_current_ticket,
+    get_current_ticket_data,
+    get_device_daily_records,
     get_next_ticket,
     get_previous_ticket,
     stop_receiving,
@@ -83,10 +84,10 @@ def current_ticket():
     if error:
         return jsonify({'success': False, 'error': error}), 400
 
-    ticket = get_current_ticket(current_user.id, device_id)
+    ticket = get_current_ticket_data(current_user.id, device_id)
     if not ticket:
         return jsonify({'success': False, 'error': '当前没有进行中的票'})
-    return jsonify({'success': True, 'ticket': ticket.to_dict()})
+    return jsonify({'success': True, 'ticket': ticket})
 
 
 @mode_a_bp.route('/stop', methods=['POST'])
@@ -119,4 +120,18 @@ def previous_ticket():
         return jsonify({'success': False, 'error': 'offset 必须是大于等于 0 的整数'}), 400
 
     result = get_previous_ticket(current_user.id, device_id, offset)
+    return jsonify(result)
+
+
+@mode_a_bp.route('/device-daily', methods=['GET'])
+@login_required_json
+@login_required
+@mode_a_required
+def device_daily():
+    device_id = _normalize_device_id(request.args.get('device_id', ''))
+    error = _validate_device_id(device_id)
+    if error:
+        return jsonify({'success': False, 'error': error}), 400
+
+    result = get_device_daily_records(current_user.id, device_id)
     return jsonify(result)

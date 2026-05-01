@@ -113,7 +113,10 @@
         <div class="mode-a-fullscreen-container">
           <div class="mode-a-info-bar">
             <div class="d-flex justify-content-between align-items-center">
-              <div class="info-left">编号: {{ currentTicket.detail_period }}</div>
+              <div class="info-left">
+                编号: {{ currentTicket.detail_period }}
+                <span v-if="currentTicket.device_today_sequence" class="badge bg-light text-dark border ms-1">第 {{ currentTicket.device_today_sequence }} 张</span>
+              </div>
               <div class="info-center">
                 <div>{{ currentTicket.lottery_type }}{{ currentTicket.multiplier || '' }}倍投</div>
                 <div class="info-amount">¥{{ currentTicket.ticket_amount || calculateTicketAmount(currentTicket.raw_content) }}</div>
@@ -273,6 +276,14 @@
         </div>
       </div>
     </div>
+    <div v-if="!isModeB" class="col-md-4">
+      <div class="card">
+        <div class="card-body d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-list-check text-primary"></i> 当前设备今日处理清单</span>
+          <button class="btn btn-sm btn-outline-primary" @click="openModeADailyRecords">查看</button>
+        </div>
+      </div>
+    </div>
     <div class="col-md-4">
       <div class="card">
         <div class="card-body d-flex justify-content-between align-items-center">
@@ -401,6 +412,45 @@
     </div>
   </div>
 
+  <div v-if="modeADailyVisible" class="winning-panel">
+    <div class="winning-panel-header">
+      <span><i class="bi bi-list-check text-primary"></i> 当前设备今日处理清单</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-light text-dark border">{{ modeADailyRecords.length }} 张</span>
+        <button class="btn btn-sm btn-outline-secondary" @click="modeADailyVisible = false">关闭</button>
+      </div>
+    </div>
+    <div class="winning-panel-body">
+      <div v-if="modeADailyLoading" class="text-center py-5">加载中...</div>
+      <div v-else-if="modeADailyRecords.length === 0" class="text-center py-5 text-muted">当前设备今日暂无处理记录</div>
+      <div v-else>
+        <div v-for="r in modeADailyRecords" :key="r.id" class="winning-card mode-a-daily-card">
+          <div class="winning-card-top">
+            <div class="winning-badges">
+              <span class="badge bg-primary">第 {{ r.device_today_sequence }} 张</span>
+              <span class="badge bg-secondary">#{{ r.id }}</span>
+              <span class="badge bg-dark">编号 {{ r.detail_period || '-' }}</span>
+              <span class="badge" :class="r.status === 'assigned' ? 'bg-warning text-dark' : 'bg-success'">
+                {{ r.status === 'assigned' ? '处理中' : '已完成' }}
+              </span>
+            </div>
+            <div class="winning-amount">票面金额：¥{{ Number(r.ticket_amount || 0).toFixed(2) }}</div>
+          </div>
+          <div class="winning-raw">{{ r.raw_content }}</div>
+          <div class="winning-card-meta">
+            <span>彩种：{{ r.lottery_type || '-' }}</span>
+            <span>倍数：{{ r.multiplier || '-' }}</span>
+            <span>截止：{{ r.deadline_time ? r.deadline_time.substring(0, 16).replace('T', ' ') : '-' }}</span>
+          </div>
+          <div class="winning-card-times">
+            <span class="text-muted small">获取时间：{{ r.assigned_at ? r.assigned_at.substring(0, 16).replace('T', ' ') : '-' }}</span>
+            <span class="text-muted small">完成时间：{{ r.completed_at ? r.completed_at.substring(0, 16).replace('T', ' ') : '-' }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div v-if="winningPreviewUrl" class="modal-backdrop-custom" @click.self="winningPreviewUrl = null" style="z-index:2000">
     <div style="max-width:90vw;max-height:90vh;display:flex;flex-direction:column;align-items:center">
       <button class="btn btn-sm btn-light mb-2 align-self-end" @click="winningPreviewUrl = null">关闭</button>
@@ -470,12 +520,16 @@ createApp({
       countdownTimer: null,
       deadlineStr: '',
       showStopConfirm: false,
-      // 下一张冷却：7秒内不能再次调用 API 获取新票
+      // 下一张冷却：3秒内不能再次调用 API 获取新票
       nextCooldownUntil: 0,
       nextCooldownSec: 0,
       cooldownTimer: null,
       modeAIncomingAlertAt: 0,
       modeAAudioContext: null,
+      lastModeAPoolTotalPending: null,
+      modeADailyVisible: false,
+      modeADailyLoading: false,
+      modeADailyRecords: [],
       // Mode B
       bCount: 50,
       bCountInitialized: false,
@@ -675,11 +729,19 @@ createApp({
     },
     handleModeAPoolUpdate(event) {
       const detail = (event && event.detail) || {};
-      const hasPending = detail.total_pending === undefined || Number(detail.total_pending || 0) > 0;
+      const previousPoolTotal = this.lastModeAPoolTotalPending;
+      const hasExplicitTotal = detail.total_pending !== undefined;
+      const currentPoolTotal = hasExplicitTotal ? Number(detail.total_pending || 0) : null;
+      const hasPending = !hasExplicitTotal || currentPoolTotal > 0;
+      if (hasExplicitTotal) {
+        this.lastModeAPoolTotalPending = currentPoolTotal;
+      }
       if (!this.modeAActive || this.currentTicket || this.loadingNext || !hasPending) {
         return;
       }
-      this.playModeAIncomingAlert();
+      if (previousPoolTotal === 0 && currentPoolTotal > 0) {
+        this.playModeAIncomingAlert();
+      }
       showToast('票池有新票，正在自动获取...', 'info');
       this.nextTicket();
     },
@@ -714,10 +776,17 @@ createApp({
           throw new Error(data.error || '加载统计失败');
         }
         if (requestSeq !== dailyStatsRequestSeq) return;
+        const previousModeAPoolTotal = this.lastModeAPoolTotalPending;
+        const currentModeAPoolTotal = Number(data.pool_total_pending || 0);
+        if (!this.isModeB) {
+          this.lastModeAPoolTotalPending = currentModeAPoolTotal;
+        }
         this.stats = data;
         this.announcement = data.announcement || '';
-        if (!this.isModeB && this.modeAActive && !this.currentTicket && !this.loadingNext && Number(data.pool_total_pending || 0) > 0) {
-          this.playModeAIncomingAlert();
+        if (!this.isModeB && this.modeAActive && !this.currentTicket && !this.loadingNext && currentModeAPoolTotal > 0) {
+          if (previousModeAPoolTotal === 0) {
+            this.playModeAIncomingAlert();
+          }
           showToast('票池有新票，正在自动获取...', 'info');
           this.nextTicket();
         }
@@ -753,6 +822,9 @@ createApp({
       }
     },
     async nextTicket() {
+      if (this.loadingNext) {
+        return;
+      }
       if (this.currentTicket && this.isDeadlinePassed(this.currentTicket.deadline_time)) {
         showToast('当前票已截止，请先点击停止接单', 'warning');
         return;
@@ -799,8 +871,13 @@ createApp({
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
+          if (data.cooldown_remaining) {
+            this.startNextCooldown(data.cooldown_remaining);
+            showToast('服务端冷却中，请等待 ' + data.cooldown_remaining + ' 秒', 'warning');
+            return;
+          }
           if (!(data.completed_current === false && previousCurrentTicketId === data.ticket.id)) {
-            this.startNextCooldown();
+            this.startNextCooldown(data.cooldown_seconds || 3);
           }
         } else {
           if (this.ticketHistory.length > 0) {
@@ -818,10 +895,11 @@ createApp({
         this.loadingNext = false;
       }
     },
-    startNextCooldown() {
-      const COOLDOWN_MS = 5000;
+    startNextCooldown(seconds = 3) {
+      const cooldownSeconds = Math.max(1, Number(seconds) || 3);
+      const COOLDOWN_MS = cooldownSeconds * 1000;
       this.nextCooldownUntil = Date.now() + COOLDOWN_MS;
-      this.nextCooldownSec = 5;
+      this.nextCooldownSec = cooldownSeconds;
       clearInterval(this.cooldownTimer);
       this.cooldownTimer = setInterval(() => {
         const remaining = Math.ceil((this.nextCooldownUntil - Date.now()) / 1000);
@@ -1084,6 +1162,23 @@ createApp({
         showToast(e.message || '确认完成失败，请稍后重试', 'danger');
       }
     },
+    async openModeADailyRecords() {
+      this.modeADailyVisible = true;
+      this.modeADailyLoading = true;
+      try {
+        const res = await fetch(`/api/mode-a/device-daily?device_id=${encodeURIComponent(currentDeviceId())}`);
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载当前设备今日处理清单失败');
+        }
+        this.modeADailyRecords = data.records || [];
+      } catch(e) {
+        this.modeADailyRecords = [];
+        showToast(e.message || '加载当前设备今日处理清单失败', 'danger');
+      } finally {
+        this.modeADailyLoading = false;
+      }
+    },
     async openWinning() {
       const requestSeq = ++winningRecordsRequestSeq;
       this.winningVisible = true;
@@ -1272,6 +1367,7 @@ createApp({
   },
   beforeUnmount() {
     clearInterval(this.countdownTimer);
+    clearInterval(this.cooldownTimer);
     if (this.pwdSuccessTimer) {
       clearTimeout(this.pwdSuccessTimer);
     }
@@ -1344,6 +1440,9 @@ createApp({
 .winning-card {
   background: #fff; border: 1px solid #ffc107; border-radius: 8px;
   padding: .75rem 1rem; margin-bottom: .75rem;
+}
+.mode-a-daily-card {
+  border-color: #0d6efd;
 }
 .winning-card-top {
   display: flex; justify-content: space-between; align-items: flex-start;
