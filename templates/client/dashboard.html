@@ -751,7 +751,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(frequency, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.14, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.45, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.12);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -775,7 +775,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(880, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.18, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.55, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.18);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
