@@ -7774,6 +7774,8 @@ def test_client_dashboard_only_shows_no_ticket_toast_once():
 def test_client_dashboard_handles_mode_a_stop_failures_and_localizes_next_ticket_messages():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
+    assert "async playNoTicketWarningAlert()" in content
+    assert "this.playNoTicketWarningAlert();" in content
     assert "showToast('请等待 ' + remaining + ' 秒后再获取下一张', 'warning');" in content
     assert "showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');" in content
     assert "showToast('获取下一张失败，请稍后重试', 'danger');" in content
@@ -10875,7 +10877,7 @@ def test_client_dashboard_mode_a_device_daily_records_ui():
 def test_client_dashboard_mode_a_incoming_alert_only_on_zero_to_positive_pool():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "lastModeAPoolTotalPending: null" in content
+    assert "lastModeAPoolTotalPending: 0" in content
     assert "previousModeAPoolTotal === 0" in content
     assert "previousPoolTotal === 0 && currentPoolTotal > 0" in content
 
@@ -10883,8 +10885,8 @@ def test_client_dashboard_mode_a_incoming_alert_only_on_zero_to_positive_pool():
 def test_client_dashboard_mode_b_incoming_alert_only_on_zero_to_positive_pool():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "lastModeBPoolTotalPending: null" in content
-    assert "const previousModeBPoolTotal = this.lastModeBPoolTotalPending;" in content
+    assert "lastModeBPoolTotalPending: 0" in content
+    assert "const previousModeBPoolTotal = Number(this.lastModeBPoolTotalPending || 0);" in content
     assert "this.lastModeBPoolTotalPending = currentModeBPoolTotal;" in content
     assert "if (previousModeBPoolTotal === 0 && currentModeBPoolTotal > 0) {" in content
     assert "this.playIncomingTicketAlert();" in content
@@ -11409,7 +11411,8 @@ def test_client_dashboard_plays_distinct_announcement_alert_sound_for_all_modes(
     assert "announcementAlertAt: 0" in content
     assert "ensureAnnouncementAudioReady()" in content
     assert "playAnnouncementAlert()" in content
-    assert "[660, 990].forEach" in content
+    assert "[523.25, 659.25, 783.99].forEach" in content
+    assert "gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);" in content
     assert "oscillator.frequency.setValueAtTime(frequency, startAt);" in content
     assert "this.playAnnouncementAlert();" in content
     assert "if (!this.stats.can_receive) {" in content

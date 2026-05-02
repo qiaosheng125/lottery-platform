@@ -528,8 +528,9 @@ createApp({
       incomingTicketAudioContext: null,
       announcementAlertAt: 0,
       announcementAudioContext: null,
-      lastModeAPoolTotalPending: null,
-      lastModeBPoolTotalPending: null,
+      noTicketWarningAlertAt: 0,
+      lastModeAPoolTotalPending: 0,
+      lastModeBPoolTotalPending: 0,
       modeADailyVisible: false,
       modeADailyLoading: false,
       modeADailyRecords: [],
@@ -751,7 +752,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(frequency, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.45, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.12);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -775,7 +776,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(880, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.55, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.18);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -784,9 +785,33 @@ createApp({
         });
       } catch (e) {}
     },
+    async playNoTicketWarningAlert() {
+      const now = Date.now();
+      if (now - this.noTicketWarningAlertAt < 3000) return;
+      this.noTicketWarningAlertAt = now;
+      try {
+        await this.ensureIncomingTicketAudioReady();
+        const ctx = this.incomingTicketAudioContext;
+        if (!ctx || ctx.state !== 'running') return;
+        [0, 0.16].forEach((offset) => {
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const startAt = ctx.currentTime + offset;
+          oscillator.type = 'triangle';
+          oscillator.frequency.setValueAtTime(330, startAt);
+          gain.gain.setValueAtTime(0.001, startAt);
+          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.14);
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + 0.14);
+        });
+      } catch (e) {}
+    },
     handleModeAPoolUpdate(event) {
       const detail = (event && event.detail) || {};
-      const previousPoolTotal = this.lastModeAPoolTotalPending;
+      const previousPoolTotal = Number(this.lastModeAPoolTotalPending || 0);
       const hasExplicitTotal = detail.total_pending !== undefined;
       const currentPoolTotal = hasExplicitTotal ? Number(detail.total_pending || 0) : null;
       const hasPending = !hasExplicitTotal || currentPoolTotal > 0;
@@ -833,7 +858,7 @@ createApp({
           throw new Error(data.error || '加载统计失败');
         }
         if (requestSeq !== dailyStatsRequestSeq) return;
-        const previousModeAPoolTotal = this.lastModeAPoolTotalPending;
+        const previousModeAPoolTotal = Number(this.lastModeAPoolTotalPending || 0);
         const currentModeAPoolTotal = Number(data.pool_total_pending || 0);
         if (!this.isModeB) {
           this.lastModeAPoolTotalPending = currentModeAPoolTotal;
@@ -948,6 +973,7 @@ createApp({
           } else {
             this.currentTicket = null;
           }
+          this.playNoTicketWarningAlert();
           showToast(data.error || '暂无可用票据', 'warning');
         }
       } catch (e) {
@@ -1114,7 +1140,7 @@ createApp({
           throw new Error(data.error || '加载票池状态失败');
         }
         if (requestSeq !== modeBPoolStatusRequestSeq) return;
-        const previousModeBPoolTotal = this.lastModeBPoolTotalPending;
+        const previousModeBPoolTotal = Number(this.lastModeBPoolTotalPending || 0);
         const currentModeBPoolTotal = Number(data.total_pending || 0);
         this.lastModeBPoolTotalPending = currentModeBPoolTotal;
         if (previousModeBPoolTotal === 0 && currentModeBPoolTotal > 0) {
