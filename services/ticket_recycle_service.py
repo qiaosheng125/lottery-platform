@@ -55,25 +55,43 @@ def _ticket_item(ticket: LotteryTicket, user: User = None) -> dict:
     }
 
 
-def _distinct_assigned_values(column) -> list:
-    rows = (
+def _distinct_assigned_values(column, username: str = '', device_id: str = '', download_filename: str = '') -> list:
+    rows_query = (
         db.session.query(column)
         .filter(
             LotteryTicket.status == 'assigned',
             column.isnot(None),
             func.trim(column) != '',
         )
-        .distinct()
-        .all()
     )
+    if username:
+        rows_query = rows_query.filter(LotteryTicket.assigned_username == username)
+    if device_id:
+        rows_query = rows_query.filter(LotteryTicket.assigned_device_id == device_id)
+    if download_filename:
+        rows_query = rows_query.filter(LotteryTicket.download_filename == download_filename)
+    rows = rows_query.distinct().all()
     return sorted({(row[0] or '').strip() for row in rows if (row[0] or '').strip()})
 
 
-def _filter_options() -> dict:
+def _filter_options(username: str = '', device_id: str = '', download_filename: str = '') -> dict:
     return {
-        'usernames': _distinct_assigned_values(LotteryTicket.assigned_username),
-        'device_ids': _distinct_assigned_values(LotteryTicket.assigned_device_id),
-        'download_filenames': _distinct_assigned_values(LotteryTicket.download_filename),
+        # Cascade filter options: each dimension is constrained by the other selected dimensions.
+        'usernames': _distinct_assigned_values(
+            LotteryTicket.assigned_username,
+            device_id=device_id,
+            download_filename=download_filename,
+        ),
+        'device_ids': _distinct_assigned_values(
+            LotteryTicket.assigned_device_id,
+            username=username,
+            download_filename=download_filename,
+        ),
+        'download_filenames': _distinct_assigned_values(
+            LotteryTicket.download_filename,
+            username=username,
+            device_id=device_id,
+        ),
     }
 
 
@@ -106,7 +124,11 @@ def list_recyclable_assigned_tickets(username: str = '', device_id: str = '', do
         'items': [_ticket_item(ticket, user) for ticket, user in rows],
         'total': total,
         'limit': MAX_RECYCLE_LIST_LIMIT,
-        'filter_options': _filter_options(),
+        'filter_options': _filter_options(
+            username=username,
+            device_id=device_id,
+            download_filename=download_filename,
+        ),
     }
 
 

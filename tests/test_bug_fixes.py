@@ -484,6 +484,8 @@ def test_admin_recycle_template_renders_filters_and_actions():
     assert "回收当前文件名处理中票" in content
     assert "B模式单张回收风险提示" in content
     assert "/admin/api/tickets/recycle-assigned" in content
+    assert "async readJsonResponse(res, fallbackMessage)" in content
+    assert "服务返回了非 JSON 响应" in content
     assert "只处理“处理中”的票" in content
     assert "待分配 / pending" not in content
     assert "处理中 / assigned" not in content
@@ -570,9 +572,9 @@ def test_admin_recycle_assigned_list_filters_processing_tickets(app, client):
     assert data["items"][0]["status_label"] == "处理中"
     assert data["items"][0]["ticket_amount"] == 12.5
     assert data["items"][0]["download_filename"] == "分配文件A.txt"
-    assert data["filter_options"]["usernames"] == ["recycle_list_other", "recycle_list_user"]
-    assert data["filter_options"]["device_ids"] == ["dev-a", "dev-b"]
-    assert data["filter_options"]["download_filenames"] == ["分配文件A.txt", "分配文件B.txt"]
+    assert data["filter_options"]["usernames"] == ["recycle_list_user"]
+    assert data["filter_options"]["device_ids"] == ["dev-a"]
+    assert data["filter_options"]["download_filenames"] == [data["items"][0]["download_filename"]]
 
 
 def test_admin_recycle_single_assigned_ticket_returns_it_to_pending(app, client):
@@ -10723,9 +10725,9 @@ def test_client_dashboard_only_calls_mode_b_endpoints_for_mode_b_users():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "isModeB: {{ (current_user.client_mode == 'mode_b') | tojson }}," in content
-    assert "if (!this.isModeB) {\n      this.loadCurrentModeATicket();\n    }" in content
+    assert "if (!this.isModeB) {\n      this.loadCurrentModeATicket();\n      this.loadModeAPoolStatus();\n    }" in content
     assert "if (this.isModeB) {\n      this.loadPoolStatus();\n      this.loadProcessingBatches();\n    }" in content
-    assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    }" in content
+    assert "if (this.isModeB) {\n      setInterval(this.loadPoolStatus, 15000);\n    } else {\n      setInterval(this.loadModeAPoolStatus, 15000);\n    }" in content
     assert "if (this.isModeB) {\n        this.loadProcessingBatches();\n        this.loadPoolStatus();\n      }\n      this.loadStats();" in content
 
 
@@ -10878,8 +10880,12 @@ def test_client_dashboard_mode_a_incoming_alert_only_on_zero_to_positive_pool():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
     assert "lastModeAPoolTotalPending: 0" in content
+    assert "let modeAPoolStatusRequestSeq = 0;" in content
     assert "previousModeAPoolTotal === 0" in content
-    assert "previousPoolTotal === 0 && currentPoolTotal > 0" in content
+    assert "if (previousModeAPoolTotal === 0 && currentModeAPoolTotal > 0) {" in content
+    assert "if (this.modeAActive && previousModeAPoolTotal === 0 && currentModeAPoolTotal > 0) {" not in content
+    assert "this.loadModeAPoolStatus();" in content
+    assert "if (requestSeq !== modeAPoolStatusRequestSeq) return;" in content
 
 
 def test_client_dashboard_mode_b_incoming_alert_only_on_zero_to_positive_pool():
@@ -10917,9 +10923,9 @@ def test_client_dashboard_listens_for_realtime_revoke_and_announcement_events():
     assert "this._onPoolUpdated = (event) => {" in content
     assert "this.loadProcessingBatches();" in content
     assert "this.currentTicket = null;" in content
-    assert "this._onPoolUpdated = (event) => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.handleModeAPoolUpdate(event);\n      }\n      this.loadStats();\n    };" in content
-    assert "this._onPoolDisabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
-    assert "this._onPoolEnabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolUpdated = (event) => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.handleModeAPoolUpdate(event);\n        this.loadModeAPoolStatus();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolDisabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n        this.loadModeAPoolStatus();\n      }\n      this.loadStats();\n    };" in content
+    assert "this._onPoolEnabled = () => {\n      if (this.isModeB) {\n        this.loadPoolStatus();\n        this.loadProcessingBatches();\n      } else {\n        this.loadCurrentModeATicket();\n        this.loadModeAPoolStatus();\n      }\n      this.loadStats();\n    };" in content
 
 
 def test_client_dashboard_mode_a_flip_buttons_show_text_hints():

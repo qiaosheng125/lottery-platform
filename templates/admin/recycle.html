@@ -129,6 +129,18 @@ createApp({
     this.loadTickets();
   },
   methods: {
+    async readJsonResponse(res, fallbackMessage) {
+      const contentType = (res.headers.get('Content-Type') || '').toLowerCase();
+      if (contentType.includes('application/json')) {
+        return await res.json();
+      }
+      const raw = await res.text();
+      const snippet = (raw || '').trim().slice(0, 120);
+      if (!res.ok) {
+        throw new Error(snippet || fallbackMessage || ('请求失败：HTTP ' + res.status));
+      }
+      throw new Error(fallbackMessage || '服务返回了非 JSON 响应');
+    },
     buildQuery() {
       const params = new URLSearchParams();
       if (this.filters.username) params.append('username', this.filters.username);
@@ -142,7 +154,7 @@ createApp({
       try {
         const query = this.buildQuery();
         const res = await fetch('/admin/api/tickets/recycle-assigned' + (query ? '?' + query : ''));
-        const data = await res.json();
+        const data = await this.readJsonResponse(res, '加载处理中票失败');
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '加载处理中票失败');
         }
@@ -193,7 +205,7 @@ createApp({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
+        const data = await this.readJsonResponse(res, '回收失败');
         if (!res.ok || data.success === false) {
           throw new Error(data.error || '回收失败');
         }

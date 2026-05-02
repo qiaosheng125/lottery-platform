@@ -495,6 +495,7 @@ const { createApp } = Vue;
 let modeACurrentTicketRequestSeq = 0;
 let dailyStatsRequestSeq = 0;
 let modeBProcessingRequestSeq = 0;
+let modeAPoolStatusRequestSeq = 0;
 let modeBPoolStatusRequestSeq = 0;
 let winningRecordsRequestSeq = 0;
 createApp({
@@ -580,6 +581,7 @@ createApp({
     this.loadStats();
     if (!this.isModeB) {
       this.loadCurrentModeATicket();
+      this.loadModeAPoolStatus();
     }
     if (this.isModeB) {
       this.loadPoolStatus();
@@ -588,6 +590,8 @@ createApp({
     setInterval(this.loadStats, 15000);
     if (this.isModeB) {
       setInterval(this.loadPoolStatus, 15000);
+    } else {
+      setInterval(this.loadModeAPoolStatus, 15000);
     }
 
     this._onAnnouncement = (event) => {
@@ -610,6 +614,7 @@ createApp({
         this.loadProcessingBatches();
       } else {
         this.handleModeAPoolUpdate(event);
+        this.loadModeAPoolStatus();
       }
       this.loadStats();
     };
@@ -619,6 +624,7 @@ createApp({
         this.loadProcessingBatches();
       } else {
         this.loadCurrentModeATicket();
+        this.loadModeAPoolStatus();
       }
       this.loadStats();
     };
@@ -628,6 +634,7 @@ createApp({
         this.loadProcessingBatches();
       } else {
         this.loadCurrentModeATicket();
+        this.loadModeAPoolStatus();
       }
       this.loadStats();
     };
@@ -811,18 +818,11 @@ createApp({
     },
     handleModeAPoolUpdate(event) {
       const detail = (event && event.detail) || {};
-      const previousPoolTotal = Number(this.lastModeAPoolTotalPending || 0);
       const hasExplicitTotal = detail.total_pending !== undefined;
       const currentPoolTotal = hasExplicitTotal ? Number(detail.total_pending || 0) : null;
       const hasPending = !hasExplicitTotal || currentPoolTotal > 0;
-      if (hasExplicitTotal) {
-        this.lastModeAPoolTotalPending = currentPoolTotal;
-      }
       if (!this.modeAActive || this.currentTicket || this.loadingNext || !hasPending) {
         return;
-      }
-      if (previousPoolTotal === 0 && currentPoolTotal > 0) {
-        this.playIncomingTicketAlert();
       }
       showToast('票池有新票，正在自动获取...', 'info');
       this.nextTicket();
@@ -858,17 +858,10 @@ createApp({
           throw new Error(data.error || '加载统计失败');
         }
         if (requestSeq !== dailyStatsRequestSeq) return;
-        const previousModeAPoolTotal = Number(this.lastModeAPoolTotalPending || 0);
         const currentModeAPoolTotal = Number(data.pool_total_pending || 0);
-        if (!this.isModeB) {
-          this.lastModeAPoolTotalPending = currentModeAPoolTotal;
-        }
         this.stats = data;
         this.announcement = data.announcement || '';
         if (!this.isModeB && this.modeAActive && !this.currentTicket && !this.loadingNext && currentModeAPoolTotal > 0) {
-          if (previousModeAPoolTotal === 0) {
-            this.playIncomingTicketAlert();
-          }
           showToast('票池有新票，正在自动获取...', 'info');
           this.nextTicket();
         }
@@ -1129,6 +1122,25 @@ createApp({
       } catch(e) {
         if (requestSeq !== modeBProcessingRequestSeq) return;
         this.bPendingBatches = [];
+      }
+    },
+    async loadModeAPoolStatus() {
+      const requestSeq = ++modeAPoolStatusRequestSeq;
+      try {
+        const res = await fetch('/api/pool/status');
+        const data = await res.json();
+        if (requestSeq !== modeAPoolStatusRequestSeq) return;
+        if (!res.ok) {
+          throw new Error(data.error || '加载票池状态失败');
+        }
+        const previousModeAPoolTotal = Number(this.lastModeAPoolTotalPending || 0);
+        const currentModeAPoolTotal = Number(data.total_pending || 0);
+        this.lastModeAPoolTotalPending = currentModeAPoolTotal;
+        if (previousModeAPoolTotal === 0 && currentModeAPoolTotal > 0) {
+          this.playIncomingTicketAlert();
+        }
+      } catch (e) {
+        if (requestSeq !== modeAPoolStatusRequestSeq) return;
       }
     },
     async loadPoolStatus() {
