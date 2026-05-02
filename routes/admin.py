@@ -24,6 +24,7 @@ from models.audit import AuditLog
 from services.file_parser import process_uploaded_file, revoke_file
 from services.session_service import force_logout_user
 from services.ticket_pool import get_pool_status
+from services.ticket_recycle_service import list_recyclable_assigned_tickets, recycle_assigned_tickets
 from services.notify_service import notify_admins, notify_all
 from utils.decorators import admin_required, get_client_ip, login_required_json, parse_json_object
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
@@ -714,6 +715,13 @@ def files_list():
     return render_template('admin/upload.html')
 
 
+@admin_bp.route('/tickets/recycle')
+@login_required
+@admin_required
+def recycle_page():
+    return render_template('admin/recycle.html')
+
+
 @admin_bp.route('/api/files')
 @login_required_json
 @login_required
@@ -813,6 +821,76 @@ def api_revoke_file(file_id):
     if not result['success']:
         return jsonify(result), 400
     return jsonify(result)
+
+
+@admin_bp.route('/api/tickets/recycle-assigned', methods=['GET'])
+@login_required_json
+@login_required
+@admin_required
+def api_recycle_assigned_list():
+    result = list_recyclable_assigned_tickets(
+        username=request.args.get('username', ''),
+        device_id=request.args.get('device_id', ''),
+        download_filename=request.args.get('download_filename', ''),
+    )
+    return jsonify(result)
+
+
+def _parse_ticket_id_list(value):
+    if not isinstance(value, list) or not value:
+        return None
+    parsed = []
+    for item in value:
+        if isinstance(item, bool) or isinstance(item, float):
+            return None
+        try:
+            ticket_id = int(item)
+        except (TypeError, ValueError):
+            return None
+        if ticket_id < 1:
+            return None
+        parsed.append(ticket_id)
+    return list(dict.fromkeys(parsed))
+
+
+@admin_bp.route('/api/tickets/recycle-assigned', methods=['POST'])
+@login_required_json
+@login_required
+@admin_required
+def api_recycle_assigned():
+    data, data_error = parse_json_object()
+    if data_error:
+        return data_error
+
+    raw_ticket_ids = data.get('ticket_ids')
+    if raw_ticket_ids is not None:
+        ticket_ids = _parse_ticket_id_list(raw_ticket_ids)
+        if ticket_ids is None:
+            return jsonify({'success': False, 'error': '票ID必须是大于 0 的整数数组'}), 400
+        result = recycle_assigned_tickets(
+            admin_user_id=current_user.id,
+            ticket_ids=ticket_ids,
+        )
+    else:
+        result = recycle_assigned_tickets(
+            admin_user_id=current_user.id,
+            username=data.get('username') or '',
+            device_id=data.get('device_id') or '',
+            download_filename=data.get('download_filename') or '',
+        )
+
+    if result.get('success'):
+        try:
+            from services.notify_service import notify_pool_update as _npu
+            _npu(get_pool_status())
+            notify_all('tickets_recycled', {
+                'ticket_ids': result.get('ticket_ids', []),
+                'recycled_count': result.get('recycled_count', 0),
+            })
+        except Exception as notify_exc:
+            current_app.logger.warning('notify failed after ticket recycle: %s', notify_exc)
+        return jsonify(result)
+    return jsonify(result), 400
 
 
 @admin_bp.route('/api/tickets/export')

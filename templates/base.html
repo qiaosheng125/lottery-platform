@@ -17,6 +17,7 @@
     {% if current_user.is_admin %}
       <a class="nav-link text-light small" href="{{ url_for('admin.dashboard') }}"><i class="bi bi-speedometer2"></i> <span class="d-none d-md-inline">管理后台</span></a>
       <a class="nav-link text-light small" href="{{ url_for('admin.files_list') }}"><i class="bi bi-file-earmark-text"></i> <span class="d-none d-md-inline">文件管理</span></a>
+      <a class="nav-link text-light small" href="{{ url_for('admin.recycle_page') }}"><i class="bi bi-arrow-counterclockwise"></i> <span class="d-none d-md-inline">回收处理中票</span></a>
       <a class="nav-link text-light small" href="{{ url_for('admin.users_page') }}"><i class="bi bi-people"></i> <span class="d-none d-md-inline">用户管理</span></a>
       <a class="nav-link text-light small" href="{{ url_for('admin.winning_page') }}"><i class="bi bi-trophy"></i> <span class="d-none d-md-inline">中签管理</span></a>
       <a class="nav-link text-light small" href="{{ url_for('admin.settings_page') }}"><i class="bi bi-gear"></i> <span class="d-none d-md-inline">设置</span></a>

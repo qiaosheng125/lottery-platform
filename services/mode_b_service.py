@@ -247,5 +247,14 @@ def confirm_batch(ticket_ids: List[int], user_id: int, completed_count: int = No
 
     result = finalize_tickets_batch(ticket_ids, user_id, completed_count=completed_count, device_id=device_id)
     if result['completed_count'] == 0 and result['expired_count'] == 0:
-        return {'success': False, 'error': '未找到可确认的票据，可能已完成或不属于当前用户或设备', 'completed_count': 0}
+        if device_id:
+            wrong_device_count = LotteryTicket.query.filter(
+                LotteryTicket.id.in_(ticket_ids),
+                LotteryTicket.assigned_user_id == user_id,
+                LotteryTicket.status == 'assigned',
+                LotteryTicket.assigned_device_id != device_id,
+            ).count()
+            if wrong_device_count:
+                return {'success': False, 'error': '未找到当前设备可确认的票据，请检查设备ID', 'completed_count': 0}
+        return {'success': False, 'error': '该批次票据已不存在或已被管理员回收，无法确认完成，请刷新页面', 'completed_count': 0}
     return {'success': True, **result}

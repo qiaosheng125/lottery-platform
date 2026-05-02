@@ -524,9 +524,12 @@ createApp({
       nextCooldownUntil: 0,
       nextCooldownSec: 0,
       cooldownTimer: null,
-      modeAIncomingAlertAt: 0,
-      modeAAudioContext: null,
+      incomingTicketAlertAt: 0,
+      incomingTicketAudioContext: null,
+      announcementAlertAt: 0,
+      announcementAudioContext: null,
       lastModeAPoolTotalPending: null,
+      lastModeBPoolTotalPending: null,
       modeADailyVisible: false,
       modeADailyLoading: false,
       modeADailyRecords: [],
@@ -596,6 +599,9 @@ createApp({
         return;
       }
       this.announcement = (event.detail && event.detail.content) || '';
+      if (this.announcement) {
+        this.playAnnouncementAlert();
+      }
     };
     this._onPoolUpdated = (event) => {
       if (this.isModeB) {
@@ -689,27 +695,65 @@ createApp({
       this.nextCooldownSec = 0;
       document.body.classList.remove('mode-a-active');
     },
-    ensureModeAAudioReady() {
+    ensureIncomingTicketAudioReady() {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
-        if (!this.modeAAudioContext) {
-          this.modeAAudioContext = new AudioContext();
+        if (!this.incomingTicketAudioContext) {
+          this.incomingTicketAudioContext = new AudioContext();
         }
-        if (this.modeAAudioContext.state === 'suspended') {
-          this.modeAAudioContext.resume().catch(() => {});
+        if (this.incomingTicketAudioContext.state === 'suspended') {
+          this.incomingTicketAudioContext.resume().catch(() => {});
         }
       } catch (e) {
-        this.modeAAudioContext = null;
+        this.incomingTicketAudioContext = null;
       }
     },
-    playModeAIncomingAlert() {
-      const now = Date.now();
-      if (now - this.modeAIncomingAlertAt < 3000) return;
-      this.modeAIncomingAlertAt = now;
+    ensureAnnouncementAudioReady() {
       try {
-        this.ensureModeAAudioReady();
-        const ctx = this.modeAAudioContext;
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        if (!this.announcementAudioContext) {
+          this.announcementAudioContext = new AudioContext();
+        }
+        if (this.announcementAudioContext.state === 'suspended') {
+          this.announcementAudioContext.resume().catch(() => {});
+        }
+      } catch (e) {
+        this.announcementAudioContext = null;
+      }
+    },
+    playAnnouncementAlert() {
+      const now = Date.now();
+      if (now - this.announcementAlertAt < 3000) return;
+      this.announcementAlertAt = now;
+      try {
+        this.ensureAnnouncementAudioReady();
+        const ctx = this.announcementAudioContext;
+        if (!ctx) return;
+        [660, 990].forEach((frequency, index) => {
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const startAt = ctx.currentTime + index * 0.16;
+          oscillator.type = 'triangle';
+          oscillator.frequency.setValueAtTime(frequency, startAt);
+          gain.gain.setValueAtTime(0.001, startAt);
+          gain.gain.exponentialRampToValueAtTime(0.16, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.14);
+          oscillator.connect(gain);
+          gain.connect(ctx.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + 0.14);
+        });
+      } catch (e) {}
+    },
+    playIncomingTicketAlert() {
+      const now = Date.now();
+      if (now - this.incomingTicketAlertAt < 3000) return;
+      this.incomingTicketAlertAt = now;
+      try {
+        this.ensureIncomingTicketAudioReady();
+        const ctx = this.incomingTicketAudioContext;
         if (!ctx) return;
         [0, 0.22].forEach((offset) => {
           const oscillator = ctx.createOscillator();
@@ -740,7 +784,7 @@ createApp({
         return;
       }
       if (previousPoolTotal === 0 && currentPoolTotal > 0) {
-        this.playModeAIncomingAlert();
+        this.playIncomingTicketAlert();
       }
       showToast('票池有新票，正在自动获取...', 'info');
       this.nextTicket();
@@ -785,7 +829,7 @@ createApp({
         this.announcement = data.announcement || '';
         if (!this.isModeB && this.modeAActive && !this.currentTicket && !this.loadingNext && currentModeAPoolTotal > 0) {
           if (previousModeAPoolTotal === 0) {
-            this.playModeAIncomingAlert();
+            this.playIncomingTicketAlert();
           }
           showToast('票池有新票，正在自动获取...', 'info');
           this.nextTicket();
@@ -813,7 +857,7 @@ createApp({
       if (this.modeAActive) {
         // 接单中时继续下一张，保持 body class
         document.body.classList.add('mode-a-active');
-        this.ensureModeAAudioReady();
+        this.ensureIncomingTicketAudioReady();
         await this.nextTicket();
       } else {
         // 停止接单时移除 body class
@@ -1057,6 +1101,13 @@ createApp({
           throw new Error(data.error || '加载票池状态失败');
         }
         if (requestSeq !== modeBPoolStatusRequestSeq) return;
+        const previousModeBPoolTotal = this.lastModeBPoolTotalPending;
+        const currentModeBPoolTotal = Number(data.total_pending || 0);
+        this.lastModeBPoolTotalPending = currentModeBPoolTotal;
+        if (previousModeBPoolTotal === 0 && currentModeBPoolTotal > 0) {
+          this.playIncomingTicketAlert();
+          showToast('B模式票池有新票，可以下载了', 'info');
+        }
         this.poolStatus = data;
       } catch(e) {
         if (requestSeq !== modeBPoolStatusRequestSeq) return;
@@ -1480,5 +1531,3 @@ createApp({
 }
 </style>
 {% endblock %}
-
-

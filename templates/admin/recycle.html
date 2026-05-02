@@ -1,0 +1,215 @@
+{% extends 'base.html' %}
+{% block title %}回收处理中票{% endblock %}
+{% block content %}
+{% raw %}
+<div id="recycle-app">
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-arrow-counterclockwise"></i> 回收处理中票</span>
+      <span class="badge bg-warning text-dark">只处理“处理中”的票</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-warning py-2">
+        回收后票会回到票池，状态变为“待分配”。请确认客户没有实际出票，否则可能重复出票。
+      </div>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label small fw-bold">用户名</label>
+          <select v-model="filters.username" class="form-select" @change="loadTickets">
+            <option value="">全部用户</option>
+            <option v-for="name in filterOptions.usernames" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small fw-bold">设备ID</label>
+          <select v-model="filters.device_id" class="form-select" @change="loadTickets">
+            <option value="">全部设备</option>
+            <option v-for="id in filterOptions.device_ids" :key="id" :value="id">{{ id }}</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small fw-bold">分配文件名</label>
+          <select v-model="filters.download_filename" class="form-select" @change="loadTickets">
+            <option value="">全部文件</option>
+            <option v-for="name in filterOptions.download_filenames" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </div>
+        <div class="col-md-2 d-grid">
+          <button class="btn btn-primary" @click="loadTickets" :disabled="loading">
+            <span v-if="loading" class="spinner-border spinner-border-sm me-1"></span>
+            查询
+          </button>
+        </div>
+      </div>
+      <div class="small text-muted mt-2">
+        “回收当前文件名处理中票”必须同时选择用户名、设备ID、分配文件名，避免误回收其他客户或设备的票。
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>处理中票列表</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="small text-muted">共 {{ total }} 张，当前显示 {{ tickets.length }} 张</span>
+        <button class="btn btn-sm btn-outline-danger" @click="recycleCurrentFilename" :disabled="recycling || !canRecycleFilename">
+          回收当前文件名处理中票
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" @click="loadTickets">刷新</button>
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div v-if="error" class="alert alert-danger rounded-0 border-0 border-bottom mb-0 py-2">{{ error }}</div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead class="table-dark">
+            <tr>
+              <th>票ID</th>
+              <th>模式</th>
+              <th>用户名</th>
+              <th>设备ID</th>
+              <th>分配文件名</th>
+              <th>编号</th>
+              <th>彩种</th>
+              <th class="text-end">票面金额</th>
+              <th>分配时间</th>
+              <th>原始内容</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loading"><td colspan="11" class="text-center py-3">加载中...</td></tr>
+            <tr v-else-if="tickets.length === 0"><td colspan="11" class="text-center py-3 text-muted">暂无处理中票</td></tr>
+            <tr v-for="t in tickets" :key="t.id">
+              <td><span class="badge bg-secondary">#{{ t.id }}</span></td>
+              <td><span class="badge bg-info text-dark">{{ t.client_mode_label || '-' }}</span></td>
+              <td>{{ t.assigned_username || '-' }}</td>
+              <td>{{ t.assigned_device_id || '-' }}</td>
+              <td class="text-break" style="min-width:180px">{{ t.download_filename || '-' }}</td>
+              <td>{{ t.detail_period || '-' }}</td>
+              <td>{{ t.lottery_type || '-' }}</td>
+              <td class="text-end text-success fw-bold">¥{{ Number(t.ticket_amount || 0).toFixed(2) }}</td>
+              <td class="small">{{ formatTime(t.assigned_at) }}</td>
+              <td class="font-monospace small text-break" style="min-width:220px">{{ t.raw_content }}</td>
+              <td>
+                <button v-if="t.client_mode !== 'mode_b'" class="btn btn-xs btn-outline-danger" @click="recycleSingle(t)" :disabled="recycling">
+                  回收单张
+                </button>
+                <span v-else class="small text-muted">B模式批量文件请用整文件回收</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endraw %}
+{% endblock %}
+{% block scripts %}
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      filters: { username: '', device_id: '', download_filename: '' },
+      filterOptions: { usernames: [], device_ids: [], download_filenames: [] },
+      tickets: [],
+      total: 0,
+      loading: false,
+      recycling: false,
+      error: '',
+    };
+  },
+  computed: {
+    canRecycleFilename() {
+      return !!(this.filters.username && this.filters.device_id && this.filters.download_filename);
+    },
+  },
+  mounted() {
+    this.loadTickets();
+  },
+  methods: {
+    buildQuery() {
+      const params = new URLSearchParams();
+      if (this.filters.username) params.append('username', this.filters.username);
+      if (this.filters.device_id) params.append('device_id', this.filters.device_id);
+      if (this.filters.download_filename) params.append('download_filename', this.filters.download_filename);
+      return params.toString();
+    },
+    async loadTickets() {
+      this.loading = true;
+      this.error = '';
+      try {
+        const query = this.buildQuery();
+        const res = await fetch('/admin/api/tickets/recycle-assigned' + (query ? '?' + query : ''));
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '加载处理中票失败');
+        }
+        this.tickets = data.items || [];
+        this.total = data.total || 0;
+        this.filterOptions = data.filter_options || { usernames: [], device_ids: [], download_filenames: [] };
+      } catch (e) {
+        this.tickets = [];
+        this.total = 0;
+        this.filterOptions = { usernames: [], device_ids: [], download_filenames: [] };
+        this.error = e.message || '加载处理中票失败';
+      } finally {
+        this.loading = false;
+      }
+    },
+    formatTime(value) {
+      if (!value) return '-';
+      return value.substring(0, 16).replace('T', ' ');
+    },
+    async recycleSingle(ticket) {
+      if (!window.confirm('确认回收这张处理中票？\n\n回收后这张票会重新回到票池。请确认客户没有实际出票，否则可能重复出票。')) {
+        return;
+      }
+      await this.recycle({ ticket_ids: [ticket.id] });
+    },
+    async recycleCurrentFilename() {
+      if (!this.canRecycleFilename) {
+        showToast('请先选择用户名、设备ID、分配文件名', 'warning');
+        return;
+      }
+      if (!window.confirm('确认回收当前文件名下所有处理中票？\n\n回收后这些票会重新回到票池，客户原下载文件将不能再确认完成。请确认客户没有实际出票，否则可能重复出票。')) {
+        return;
+      }
+      await this.recycle({
+        username: this.filters.username,
+        device_id: this.filters.device_id,
+        download_filename: this.filters.download_filename,
+      });
+    },
+    async recycle(payload) {
+      this.recycling = true;
+      try {
+        const res = await fetch('/admin/api/tickets/recycle-assigned', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '回收失败');
+        }
+        showToast(data.message || ('已回收 ' + data.recycled_count + ' 张票'), 'success');
+        await this.loadTickets();
+      } catch (e) {
+        showToast(e.message || '回收失败', 'danger');
+      } finally {
+        this.recycling = false;
+      }
+    },
+  },
+}).mount('#recycle-app');
+</script>
+<style>
+.btn-xs {
+  padding: .15rem .4rem;
+  font-size: .75rem;
+}
+</style>
+{% endblock %}

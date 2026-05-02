@@ -460,6 +460,350 @@ def test_mode_a_next_rejects_malformed_json_body(app, client):
     assert data["success"] is False
 
 
+def test_admin_recycle_page_is_linked_from_navbar():
+    base_template = Path(__file__).resolve().parents[1] / "templates" / "base.html"
+    content = base_template.read_text(encoding="utf-8")
+    assert "url_for('admin.recycle_page')" in content
+    assert "回收处理中票" in content
+
+
+def test_admin_recycle_template_renders_filters_and_actions():
+    recycle_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "recycle.html"
+    content = recycle_template.read_text(encoding="utf-8")
+    assert "用户名" in content
+    assert "设备ID" in content
+    assert "分配文件名" in content
+    assert '<select v-model="filters.username"' in content
+    assert '<select v-model="filters.device_id"' in content
+    assert '<select v-model="filters.download_filename"' in content
+    assert "filterOptions.usernames" in content
+    assert "filterOptions.device_ids" in content
+    assert "filterOptions.download_filenames" in content
+    assert "const { createApp } = Vue;" in content
+    assert "回收单张" in content
+    assert "回收当前文件名处理中票" in content
+    assert "t.client_mode !== 'mode_b'" in content
+    assert "B模式批量文件请用整文件回收" in content
+    assert "/admin/api/tickets/recycle-assigned" in content
+    assert "只处理“处理中”的票" in content
+    assert "待分配 / pending" not in content
+    assert "处理中 / assigned" not in content
+
+
+def test_ticket_recycle_service_uses_distinct_filter_options_and_row_locks():
+    service = Path(__file__).resolve().parents[1] / "services" / "ticket_recycle_service.py"
+    content = service.read_text(encoding="utf-8")
+    assert ".distinct()" in content
+    assert ".with_for_update()" in content
+
+
+def test_admin_recycle_assigned_list_filters_processing_tickets(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_list", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_list_user", "secret123", client_mode="mode_b")
+        other = create_user("recycle_list_other", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="回收测试.txt",
+            stored_filename="recycle-list.txt",
+            total_tickets=3,
+            pending_count=0,
+            assigned_count=2,
+            completed_count=1,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+        assigned = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="LIST-ASSIGNED",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="dev-a",
+            assigned_at=beijing_now(),
+            download_filename="分配文件A.txt",
+            detail_period="26051",
+            lottery_type="胜平负",
+            ticket_amount=Decimal("12.5"),
+        )
+        completed = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=2,
+            raw_content="LIST-COMPLETED",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="dev-a",
+            assigned_at=beijing_now(),
+            completed_at=beijing_now(),
+            download_filename="分配文件A.txt",
+            ticket_amount=Decimal("20"),
+        )
+        other_assigned = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=3,
+            raw_content="LIST-OTHER",
+            status="assigned",
+            assigned_user_id=other.id,
+            assigned_username=other.username,
+            assigned_device_id="dev-b",
+            assigned_at=beijing_now(),
+            download_filename="分配文件B.txt",
+            ticket_amount=Decimal("30"),
+        )
+        db.session.add_all([assigned, completed, other_assigned])
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_list", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/tickets/recycle-assigned?username=recycle_list_user&device_id=dev-a&download_filename=分配文件A.txt")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["total"] == 1
+    assert data["items"][0]["raw_content"] == "LIST-ASSIGNED"
+    assert data["items"][0]["status"] == "assigned"
+    assert data["items"][0]["status_label"] == "处理中"
+    assert data["items"][0]["ticket_amount"] == 12.5
+    assert data["items"][0]["download_filename"] == "分配文件A.txt"
+    assert data["filter_options"]["usernames"] == ["recycle_list_other", "recycle_list_user"]
+    assert data["filter_options"]["device_ids"] == ["dev-a", "dev-b"]
+    assert data["filter_options"]["download_filenames"] == ["分配文件A.txt", "分配文件B.txt"]
+
+
+def test_admin_recycle_single_assigned_ticket_returns_it_to_pending(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_single", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_single_user", "secret123", client_mode="mode_a")
+        uploaded = UploadedFile(
+            original_filename="单张回收.txt",
+            stored_filename="recycle-single.txt",
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="RECYCLE-SINGLE",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="dev-single",
+            assigned_at=beijing_now(),
+            locked_until=beijing_now() + timedelta(minutes=10),
+            download_filename="单张分配.txt",
+            completed_at=beijing_now(),
+            ticket_amount=Decimal("18"),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+        file_id = uploaded.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_single", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={"ticket_ids": [ticket_id]})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["recycled_count"] == 1
+    assert data["recycled_amount"] == 18.0
+
+    with app.app_context():
+        refreshed = db.session.get(LotteryTicket, ticket_id)
+        uploaded = db.session.get(UploadedFile, file_id)
+        assert refreshed.status == "pending"
+        assert refreshed.assigned_user_id is None
+        assert refreshed.assigned_username is None
+        assert refreshed.assigned_device_id is None
+        assert refreshed.assigned_at is None
+        assert refreshed.locked_until is None
+        assert refreshed.download_filename is None
+        assert refreshed.completed_at is None
+        assert uploaded.pending_count == 1
+        assert uploaded.assigned_count == 0
+        assert uploaded.completed_count == 0
+        log = AuditLog.query.filter_by(action_type="ticket_recycle").first()
+        assert log is not None
+        assert "管理员手动回收处理中票" in log.details
+
+
+def test_admin_recycle_single_rejects_mode_b_ticket_ids(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_single_b", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_single_b_user", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="B单张回收.txt",
+            stored_filename="recycle-single-b.txt",
+            total_tickets=1,
+            pending_count=0,
+            assigned_count=1,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+        ticket = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=1,
+            raw_content="RECYCLE-SINGLE-B",
+            status="assigned",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="dev-single-b",
+            assigned_at=beijing_now(),
+            download_filename="B批量文件.txt",
+            ticket_amount=Decimal("18"),
+        )
+        db.session.add(ticket)
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_single_b", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={"ticket_ids": [ticket_id]})
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "B模式" in data["error"]
+
+    with app.app_context():
+        refreshed = db.session.get(LotteryTicket, ticket_id)
+        assert refreshed.status == "assigned"
+        assert refreshed.download_filename == "B批量文件.txt"
+
+
+def test_admin_recycle_by_filename_only_recycles_matching_processing_tickets(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_filename", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_file_user", "secret123", client_mode="mode_b")
+        other = create_user("recycle_file_other", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="文件名回收.txt",
+            stored_filename="recycle-filename.txt",
+            total_tickets=4,
+            pending_count=0,
+            assigned_count=3,
+            completed_count=1,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+        matching = []
+        for line in (1, 2):
+            matching.append(LotteryTicket(
+                source_file_id=uploaded.id,
+                line_number=line,
+                raw_content=f"RECYCLE-FILE-{line}",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="dev-file",
+                assigned_at=beijing_now(),
+                download_filename="同一个分配文件.txt",
+                ticket_amount=Decimal("10"),
+            ))
+        same_filename_other_device = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=3,
+            raw_content="RECYCLE-FILE-OTHER-DEVICE",
+            status="assigned",
+            assigned_user_id=other.id,
+            assigned_username=other.username,
+            assigned_device_id="dev-other",
+            assigned_at=beijing_now(),
+            download_filename="同一个分配文件.txt",
+            ticket_amount=Decimal("10"),
+        )
+        completed = LotteryTicket(
+            source_file_id=uploaded.id,
+            line_number=4,
+            raw_content="RECYCLE-FILE-COMPLETED",
+            status="completed",
+            assigned_user_id=user.id,
+            assigned_username=user.username,
+            assigned_device_id="dev-file",
+            assigned_at=beijing_now(),
+            completed_at=beijing_now(),
+            download_filename="同一个分配文件.txt",
+            ticket_amount=Decimal("10"),
+        )
+        db.session.add_all(matching + [same_filename_other_device, completed])
+        db.session.commit()
+        matching_ids = [ticket.id for ticket in matching]
+        other_id = same_filename_other_device.id
+        completed_id = completed.id
+        file_id = uploaded.id
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_filename", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={
+        "username": "recycle_file_user",
+        "device_id": "dev-file",
+        "download_filename": "同一个分配文件.txt",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["recycled_count"] == 2
+
+    with app.app_context():
+        assert [db.session.get(LotteryTicket, ticket_id).status for ticket_id in matching_ids] == ["pending", "pending"]
+        assert db.session.get(LotteryTicket, other_id).status == "assigned"
+        assert db.session.get(LotteryTicket, completed_id).status == "completed"
+        uploaded = db.session.get(UploadedFile, file_id)
+        assert uploaded.pending_count == 2
+        assert uploaded.assigned_count == 1
+        assert uploaded.completed_count == 1
+
+
+def test_mode_b_confirm_reports_recycled_batch_message(app, client):
+    with app.app_context():
+        user = create_user("mode_b_recycled_confirm_user", "secret123", client_mode="mode_b")
+        ticket = create_assigned_ticket(user, "dev-recycled", "RECYCLED-CONFIRM", 1)
+        ticket.status = "pending"
+        ticket.assigned_user_id = None
+        ticket.assigned_username = None
+        ticket.assigned_device_id = None
+        ticket.assigned_at = None
+        db.session.commit()
+        ticket_id = ticket.id
+
+    resp = login(client, "mode_b_recycled_confirm_user", "secret123")
+    assert resp.status_code == 200
+
+    resp = client.post("/api/mode-b/confirm", json={
+        "ticket_ids": [ticket_id],
+        "device_id": "dev-recycled",
+    })
+    assert resp.status_code == 400
+    data = resp.get_json()
+    assert data["success"] is False
+    assert "管理员回收" in data["error"]
+
+
 def test_admin_json_endpoints_reject_non_object_payload(app, client):
     with app.app_context():
         admin = User(username="admin_non_object_json", is_admin=True)
@@ -474,6 +818,7 @@ def test_admin_json_endpoints_reject_non_object_payload(app, client):
         ("POST", "/admin/api/users"),
         ("PUT", "/admin/api/settings"),
         ("POST", "/admin/api/winning/record"),
+        ("POST", "/admin/api/tickets/recycle-assigned"),
     ]:
         if method == "PUT":
             response = client.put(endpoint, json=[1])
@@ -10519,6 +10864,17 @@ def test_client_dashboard_mode_a_incoming_alert_only_on_zero_to_positive_pool():
     assert "previousPoolTotal === 0 && currentPoolTotal > 0" in content
 
 
+def test_client_dashboard_mode_b_incoming_alert_only_on_zero_to_positive_pool():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "lastModeBPoolTotalPending: null" in content
+    assert "const previousModeBPoolTotal = this.lastModeBPoolTotalPending;" in content
+    assert "this.lastModeBPoolTotalPending = currentModeBPoolTotal;" in content
+    assert "if (previousModeBPoolTotal === 0 && currentModeBPoolTotal > 0) {" in content
+    assert "this.playIncomingTicketAlert();" in content
+    assert "showToast('B模式票池有新票，可以下载了', 'info');" in content
+
+
 def test_client_dashboard_blocks_mode_a_next_when_current_ticket_is_overdue():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
@@ -11028,6 +11384,19 @@ def test_client_dashboard_renders_fixed_announcement_card_and_hides_global_bar()
     assert "const announcementBar = document.getElementById('announcement-bar');" in content
     assert "announcementBar.classList.add('d-none');" in content
     assert ".client-announcement-card {" in content
+
+
+def test_client_dashboard_plays_distinct_announcement_alert_sound_for_all_modes():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    assert "announcementAudioContext: null" in content
+    assert "announcementAlertAt: 0" in content
+    assert "ensureAnnouncementAudioReady()" in content
+    assert "playAnnouncementAlert()" in content
+    assert "[660, 990].forEach" in content
+    assert "oscillator.frequency.setValueAtTime(frequency, startAt);" in content
+    assert "this.playAnnouncementAlert();" in content
+    assert "if (!this.stats.can_receive) {" in content
 
 
 def test_client_dashboard_handles_download_and_open_winning_failures():
