@@ -7778,6 +7778,7 @@ def test_client_dashboard_handles_mode_a_stop_failures_and_localizes_next_ticket
     content = dashboard_template.read_text(encoding="utf-8")
     assert "async playNoTicketWarningAlert()" in content
     assert "this.playNoTicketWarningAlert();" in content
+    assert "this.startCountdown(data.ticket.deadline_time);\n          // Refresh daily device totals immediately after successful Mode A progression.\n          this.loadStats();" in content
     assert "showToast('请等待 ' + remaining + ' 秒后再获取下一张', 'warning');" in content
     assert "showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');" in content
     assert "showToast('获取下一张失败，请稍后重试', 'danger');" in content
@@ -10873,6 +10874,8 @@ def test_client_dashboard_mode_a_device_daily_records_ui():
     assert "openModeADailyRecords" in content
     assert "fetch(`/api/mode-a/device-daily?device_id=${encodeURIComponent(currentDeviceId())}`)" in content
     assert "第 {{ currentTicket.device_today_sequence }} 张" in content
+    assert "本设备当日 ¥{{ currentDeviceTodayAmount.toFixed(2) }}" in content
+    assert "currentDeviceTodayAmount()" in content
     assert "票面金额：¥{{ Number(r.ticket_amount || 0).toFixed(2) }}" in content
 
 
@@ -11418,7 +11421,7 @@ def test_client_dashboard_plays_distinct_announcement_alert_sound_for_all_modes(
     assert "ensureAnnouncementAudioReady()" in content
     assert "playAnnouncementAlert()" in content
     assert "[523.25, 659.25, 783.99].forEach" in content
-    assert "gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);" in content
+    assert "gain.gain.exponentialRampToValueAtTime(2, startAt + 0.02);" in content
     assert "oscillator.frequency.setValueAtTime(frequency, startAt);" in content
     assert "this.playAnnouncementAlert();" in content
     assert "if (!this.stats.can_receive) {" in content

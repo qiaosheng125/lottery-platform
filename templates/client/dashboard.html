@@ -116,6 +116,7 @@
               <div class="info-left">
                 编号: {{ currentTicket.detail_period }}
                 <span v-if="currentTicket.device_today_sequence" class="badge bg-light text-dark border ms-1">第 {{ currentTicket.device_today_sequence }} 张</span>
+                <span class="badge bg-success-subtle text-success border ms-1">本设备当日 ¥{{ currentDeviceTodayAmount.toFixed(2) }}</span>
               </div>
               <div class="info-center">
                 <div>{{ currentTicket.lottery_type }}{{ currentTicket.multiplier || '' }}倍投</div>
@@ -506,6 +507,12 @@ createApp({
       }
       return this.announcement || '无公告';
     },
+    currentDeviceTodayAmount() {
+      const deviceId = String(currentDeviceId() || '').trim();
+      const rows = (this.stats && Array.isArray(this.stats.device_stats)) ? this.stats.device_stats : [];
+      const match = rows.find((row) => String((row && row.device_id) || '').trim() === deviceId);
+      return Number((match && match.amount) || 0);
+    },
   },
   data() {
     return {
@@ -759,7 +766,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(frequency, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(2, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.12);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -783,7 +790,7 @@ createApp({
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(880, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(2, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.18);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -807,7 +814,7 @@ createApp({
           oscillator.type = 'triangle';
           oscillator.frequency.setValueAtTime(330, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.8, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(2, startAt + 0.02);
           gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.14);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
@@ -947,6 +954,8 @@ createApp({
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
+          // Refresh daily device totals immediately after successful Mode A progression.
+          this.loadStats();
           if (isNewTicket) {
             this.playIncomingTicketAlert();
           }
