@@ -671,6 +671,13 @@ createApp({
     window.addEventListener('pool_enabled', this._onPoolEnabled);
     window.addEventListener('file_revoked', this._onFileRevoked);
     window.addEventListener('keydown', this._onModeAArrowKey);
+    this._onAudioUnlockGesture = () => {
+      this.ensureAllAudioReady();
+      window.removeEventListener('pointerdown', this._onAudioUnlockGesture);
+      window.removeEventListener('keydown', this._onAudioUnlockGesture);
+    };
+    window.addEventListener('pointerdown', this._onAudioUnlockGesture, { passive: true });
+    window.addEventListener('keydown', this._onAudioUnlockGesture);
 
     // 每 30 秒上报一次心跳，保持设备在线状态
     setInterval(() => {
@@ -695,7 +702,7 @@ createApp({
       this.nextCooldownSec = 0;
       document.body.classList.remove('mode-a-active');
     },
-    ensureIncomingTicketAudioReady() {
+    async ensureIncomingTicketAudioReady() {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
@@ -703,13 +710,13 @@ createApp({
           this.incomingTicketAudioContext = new AudioContext();
         }
         if (this.incomingTicketAudioContext.state === 'suspended') {
-          this.incomingTicketAudioContext.resume().catch(() => {});
+          await this.incomingTicketAudioContext.resume();
         }
       } catch (e) {
         this.incomingTicketAudioContext = null;
       }
     },
-    ensureAnnouncementAudioReady() {
+    async ensureAnnouncementAudioReady() {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
@@ -717,44 +724,50 @@ createApp({
           this.announcementAudioContext = new AudioContext();
         }
         if (this.announcementAudioContext.state === 'suspended') {
-          this.announcementAudioContext.resume().catch(() => {});
+          await this.announcementAudioContext.resume();
         }
       } catch (e) {
         this.announcementAudioContext = null;
       }
     },
-    playAnnouncementAlert() {
+    async ensureAllAudioReady() {
+      await Promise.allSettled([
+        this.ensureIncomingTicketAudioReady(),
+        this.ensureAnnouncementAudioReady(),
+      ]);
+    },
+    async playAnnouncementAlert() {
       const now = Date.now();
       if (now - this.announcementAlertAt < 3000) return;
       this.announcementAlertAt = now;
       try {
-        this.ensureAnnouncementAudioReady();
+        await this.ensureAnnouncementAudioReady();
         const ctx = this.announcementAudioContext;
-        if (!ctx) return;
-        [660, 990].forEach((frequency, index) => {
+        if (!ctx || ctx.state !== 'running') return;
+        [523.25, 659.25, 783.99].forEach((frequency, index) => {
           const oscillator = ctx.createOscillator();
           const gain = ctx.createGain();
-          const startAt = ctx.currentTime + index * 0.16;
-          oscillator.type = 'triangle';
+          const startAt = ctx.currentTime + index * 0.14;
+          oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(frequency, startAt);
           gain.gain.setValueAtTime(0.001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.16, startAt + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.14, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.12);
           oscillator.connect(gain);
           gain.connect(ctx.destination);
           oscillator.start(startAt);
-          oscillator.stop(startAt + 0.14);
+          oscillator.stop(startAt + 0.12);
         });
       } catch (e) {}
     },
-    playIncomingTicketAlert() {
+    async playIncomingTicketAlert() {
       const now = Date.now();
       if (now - this.incomingTicketAlertAt < 3000) return;
       this.incomingTicketAlertAt = now;
       try {
-        this.ensureIncomingTicketAudioReady();
+        await this.ensureIncomingTicketAudioReady();
         const ctx = this.incomingTicketAudioContext;
-        if (!ctx) return;
+        if (!ctx || ctx.state !== 'running') return;
         [0, 0.22].forEach((offset) => {
           const oscillator = ctx.createOscillator();
           const gain = ctx.createGain();
@@ -857,7 +870,7 @@ createApp({
       if (this.modeAActive) {
         // 接单中时继续下一张，保持 body class
         document.body.classList.add('mode-a-active');
-        this.ensureIncomingTicketAudioReady();
+        await this.ensureIncomingTicketAudioReady();
         await this.nextTicket();
       } else {
         // 停止接单时移除 body class
@@ -909,12 +922,16 @@ createApp({
         } else if (data.success) {
           console.log('Received ticket data:', data.ticket);
           this.modeAActive = true;
+          const isNewTicket = previousCurrentTicketId !== data.ticket.id;
           this.ticketHistory = this.ticketHistory.filter(t => t && t.id !== data.ticket.id);
           this.ticketHistory.unshift(data.ticket);
           if (this.ticketHistory.length > 2) this.ticketHistory.pop();
           this.historyOffset = 0;
           this.currentTicket = data.ticket;
           this.startCountdown(data.ticket.deadline_time);
+          if (isNewTicket) {
+            this.playIncomingTicketAlert();
+          }
           if (data.cooldown_remaining) {
             this.startNextCooldown(data.cooldown_remaining);
             showToast('服务端冷却中，请等待 ' + data.cooldown_remaining + ' 秒', 'warning');
@@ -1435,6 +1452,10 @@ createApp({
     }
     if (this._onModeAArrowKey) {
       window.removeEventListener('keydown', this._onModeAArrowKey);
+    }
+    if (this._onAudioUnlockGesture) {
+      window.removeEventListener('pointerdown', this._onAudioUnlockGesture);
+      window.removeEventListener('keydown', this._onAudioUnlockGesture);
     }
     if (this._syncModeALayoutMetrics) {
       window.removeEventListener('resize', this._syncModeALayoutMetrics);
