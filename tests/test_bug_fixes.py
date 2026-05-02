@@ -482,8 +482,7 @@ def test_admin_recycle_template_renders_filters_and_actions():
     assert "const { createApp } = Vue;" in content
     assert "回收单张" in content
     assert "回收当前文件名处理中票" in content
-    assert "t.client_mode !== 'mode_b'" in content
-    assert "B模式批量文件请用整文件回收" in content
+    assert "B模式单张回收风险提示" in content
     assert "/admin/api/tickets/recycle-assigned" in content
     assert "只处理“处理中”的票" in content
     assert "待分配 / pending" not in content
@@ -642,7 +641,7 @@ def test_admin_recycle_single_assigned_ticket_returns_it_to_pending(app, client)
         assert "管理员手动回收处理中票" in log.details
 
 
-def test_admin_recycle_single_rejects_mode_b_ticket_ids(app, client):
+def test_admin_recycle_single_allows_mode_b_ticket_ids(app, client):
     from decimal import Decimal
 
     with app.app_context():
@@ -680,15 +679,20 @@ def test_admin_recycle_single_rejects_mode_b_ticket_ids(app, client):
     assert resp.status_code == 200
 
     resp = client.post("/admin/api/tickets/recycle-assigned", json={"ticket_ids": [ticket_id]})
-    assert resp.status_code == 400
+    assert resp.status_code == 200
     data = resp.get_json()
-    assert data["success"] is False
-    assert "B模式" in data["error"]
+    assert data["success"] is True
+    assert data["recycled_count"] == 1
 
     with app.app_context():
         refreshed = db.session.get(LotteryTicket, ticket_id)
-        assert refreshed.status == "assigned"
-        assert refreshed.download_filename == "B批量文件.txt"
+        uploaded = UploadedFile.query.filter_by(stored_filename="recycle-single-b.txt").first()
+        assert refreshed.status == "pending"
+        assert refreshed.assigned_user_id is None
+        assert refreshed.assigned_device_id is None
+        assert refreshed.download_filename is None
+        assert uploaded.pending_count == 1
+        assert uploaded.assigned_count == 0
 
 
 def test_admin_recycle_by_filename_only_recycles_matching_processing_tickets(app, client):

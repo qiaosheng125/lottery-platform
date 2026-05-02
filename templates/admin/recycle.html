@@ -92,10 +92,9 @@
               <td class="small">{{ formatTime(t.assigned_at) }}</td>
               <td class="font-monospace small text-break" style="min-width:220px">{{ t.raw_content }}</td>
               <td>
-                <button v-if="t.client_mode !== 'mode_b'" class="btn btn-xs btn-outline-danger" @click="recycleSingle(t)" :disabled="recycling">
+                <button class="btn btn-xs btn-outline-danger" @click="recycleSingle(t)" :disabled="recycling">
                   回收单张
                 </button>
-                <span v-else class="small text-muted">B模式批量文件请用整文件回收</span>
               </td>
             </tr>
           </tbody>
@@ -164,7 +163,10 @@ createApp({
       return value.substring(0, 16).replace('T', ' ');
     },
     async recycleSingle(ticket) {
-      if (!window.confirm('确认回收这张处理中票？\n\n回收后这张票会重新回到票池。请确认客户没有实际出票，否则可能重复出票。')) {
+      const modeBWarning = ticket.client_mode === 'mode_b'
+        ? '\n\nB模式单张回收风险提示：客户本地下载的 txt 仍可能包含这张票。请确认客户没有导入或没有实际出票，否则可能重复出票。'
+        : '';
+      if (!window.confirm('确认回收这张处理中票？\n\n回收后这张票会重新回到票池。请确认客户没有实际出票，否则可能重复出票。' + modeBWarning)) {
         return;
       }
       await this.recycle({ ticket_ids: [ticket.id] });

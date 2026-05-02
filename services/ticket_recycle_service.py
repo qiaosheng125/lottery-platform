@@ -145,19 +145,6 @@ def recycle_assigned_tickets(admin_user_id: int, ticket_ids=None, username: str 
             return {'success': False, 'error': '缺少要回收的票ID'}
         query = _recycle_query(ticket_ids=ticket_ids)
         recycle_scope = 'ticket_ids'
-        has_mode_b_ticket = (
-            db.session.query(LotteryTicket.id)
-            .join(User, LotteryTicket.assigned_user_id == User.id)
-            .filter(
-                LotteryTicket.id.in_(ticket_ids),
-                LotteryTicket.status == 'assigned',
-                User.client_mode == 'mode_b',
-            )
-            .first()
-            is not None
-        )
-        if has_mode_b_ticket:
-            return {'success': False, 'error': 'B模式批量文件不能回收单张，请选择用户名、设备ID、分配文件名后回收当前文件名处理中票'}
     else:
         username = _safe_text(username)
         device_id = _safe_text(device_id)
