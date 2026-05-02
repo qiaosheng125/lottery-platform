@@ -10614,6 +10614,18 @@ def test_client_dashboard_handles_mode_b_confirm_failure():
     assert "bDownloadCooldownUntil > Date.now()" in content
 
 
+def test_client_dashboard_mode_b_overdue_prompts_completed_count_directly():
+    dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
+    content = dashboard_template.read_text(encoding="utf-8")
+    start = content.index("resolveModeBCompletedCount(batch) {")
+    end = content.index("async doStop()", start)
+    snippet = content[start:end]
+    assert "window.prompt(" in snippet
+    assert "window.confirm(" not in snippet
+    assert "请输入已完成的张数" in snippet
+    assert "return batch.count;" not in snippet
+
+
 def test_client_dashboard_replaces_processing_batches_from_server():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")

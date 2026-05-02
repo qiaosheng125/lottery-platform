@@ -1005,11 +1005,7 @@ createApp({
       return completed ? 'completed' : 'expired';
     },
     resolveModeBCompletedCount(batch) {
-      const allCompleted = window.confirm('当前已过截止时间。\n点击“确定”标记整批已完成；点击“取消”后可输入已完成张数，其余将标记为已过期。');
-      if (allCompleted) {
-        return batch.count;
-      }
-      const input = window.prompt('请输入已完成的张数，例如输入 10 则前 10 张完成，其余标记为已过期；如果一张都没完成请输入 0。', '0');
+      const input = window.prompt('当前已过截止时间。\n请输入已完成的张数（0-' + batch.count + '）。\n例如输入 10，则前 10 张完成，其余标记为已过期；如果一张都没完成请输入 0。', '0');
       if (input === null) {
         return null;
       }
