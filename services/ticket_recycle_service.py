@@ -13,6 +13,7 @@ from models.user import User
 DEFAULT_RECYCLE_REASON = '管理员手动回收处理中票'
 MAX_RECYCLE_LIST_LIMIT = 200
 MAX_RECYCLE_AUDIT_SAMPLE_SIZE = 200
+MAX_AUDIT_RESOURCE_ID_LENGTH = 64
 
 
 def _safe_text(value) -> str:
@@ -158,6 +159,19 @@ def _recycle_query(ticket_ids=None, username: str = '', device_id: str = '', dow
     return query
 
 
+def _audit_resource_id(ticket_ids: Iterable[int]) -> str:
+    parts = []
+    current_length = 0
+    for ticket_id in ticket_ids:
+        value = str(ticket_id)
+        next_length = current_length + len(value) + (1 if parts else 0)
+        if next_length > MAX_AUDIT_RESOURCE_ID_LENGTH:
+            break
+        parts.append(value)
+        current_length = next_length
+    return ','.join(parts)
+
+
 def recycle_assigned_tickets(admin_user_id: int, ticket_ids=None, username: str = '',
                              device_id: str = '', download_filename: str = '',
                              reason: str = DEFAULT_RECYCLE_REASON) -> dict:
@@ -225,7 +239,7 @@ def recycle_assigned_tickets(admin_user_id: int, ticket_ids=None, username: str 
         'ticket_recycle',
         user_id=admin_user_id,
         resource_type='ticket',
-        resource_id=','.join(str(ticket_id) for ticket_id in recycled_ids[:20]),
+        resource_id=_audit_resource_id(recycled_ids),
         details={
             'reason': reason,
             'scope': recycle_scope,

@@ -850,6 +850,67 @@ def test_admin_recycle_by_filename_audit_details_are_sampled_for_large_batches(a
         assert details["original_omitted_count"] == 5
 
 
+def test_admin_recycle_by_filename_audit_resource_id_fits_column_for_large_ticket_ids(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_large_ids", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_large_ids_user", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="large-ids-recycle.txt",
+            stored_filename="large-ids-recycle.txt",
+            total_tickets=20,
+            pending_count=0,
+            assigned_count=20,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+
+        tickets = []
+        for line in range(1, 21):
+            tickets.append(LotteryTicket(
+                id=100000000000 + line,
+                source_file_id=uploaded.id,
+                line_number=line,
+                raw_content=f"LARGE-ID-RECYCLE-{line}",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="dev-large-ids",
+                assigned_at=beijing_now(),
+                download_filename="large-id-assigned.txt",
+                ticket_amount=Decimal("1"),
+            ))
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_large_ids", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={
+        "username": "recycle_large_ids_user",
+        "device_id": "dev-large-ids",
+        "download_filename": "large-id-assigned.txt",
+    })
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["success"] is True
+    assert payload["recycled_count"] == 20
+
+    with app.app_context():
+        latest_log = (
+            AuditLog.query.filter_by(action_type="ticket_recycle")
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        assert latest_log is not None
+        assert len(latest_log.resource_id) <= 64
+        assert latest_log.resource_id == "100000000001,100000000002,100000000003,100000000004,100000000005"
+
+
 def test_mode_b_confirm_reports_recycled_batch_message(app, client):
     with app.app_context():
         user = create_user("mode_b_recycled_confirm_user", "secret123", client_mode="mode_b")
