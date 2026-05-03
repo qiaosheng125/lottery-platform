@@ -141,14 +141,14 @@
 {% endblock %}
 {% block scripts %}
 <script>
+window.DEFAULT_FILE_FILTER_DATE = {{ current_business_date|tojson }};
 const { createApp } = Vue;
 createApp({
   data() {
     return {
       files: [], loading: false, page: 1, totalPages: 1, total: 0,
-      filterDate: '', dateOptions: [],
+      filterDate: window.DEFAULT_FILE_FILTER_DATE || '', dateOptions: [],
       currentBusinessDate: '',
-      defaultDateInitialized: false,
       uploadQueue: [], uploading: false,
       detailTickets: [],
       listRequestSeq: 0,
@@ -163,12 +163,10 @@ createApp({
     };
     window.addEventListener('file_uploaded', this._reloadFileList);
     window.addEventListener('file_revoked', this._reloadFileList);
-    window.addEventListener('pool_updated', this._reloadFileList);
   },
   beforeUnmount() {
     window.removeEventListener('file_uploaded', this._reloadFileList);
     window.removeEventListener('file_revoked', this._reloadFileList);
-    window.removeEventListener('pool_updated', this._reloadFileList);
   },
   methods: {
     async loadFiles() {
@@ -178,6 +176,7 @@ createApp({
       try {
         const params = new URLSearchParams({ page: this.page, per_page: 20 });
         if (this.filterDate) params.set('date', this.filterDate);
+        if (this.dateOptions.length === 0) params.set('include_date_options', '1');
         const res = await fetch(`/admin/api/files?${params}`);
         const data = await res.json();
         if (!res.ok || data.success === false) {
@@ -190,7 +189,7 @@ createApp({
         this.totalPages = data.pages || 1;
         if (data.date_options) {
           this.dateOptions = data.date_options;
-          if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {
+          if (this.filterDate && this.dateOptions.length > 0 && !this.dateOptions.includes(this.filterDate)) {
             this.filterDate = '';
             this.page = 1;
             await this.loadFiles();
@@ -198,15 +197,6 @@ createApp({
           }
         }
         this.currentBusinessDate = data.current_business_date || '';
-        if (!this.defaultDateInitialized) {
-          this.defaultDateInitialized = true;
-          if (!this.filterDate && this.currentBusinessDate) {
-            this.filterDate = this.currentBusinessDate;
-            this.page = 1;
-            await this.loadFiles();
-            return;
-          }
-        }
       } catch (e) {
         if (requestSeq !== this.listRequestSeq) return;
         this.files = [];

@@ -137,6 +137,35 @@ def ensure_runtime_columns(app):
                 conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}'))
 
 
+def ensure_runtime_indexes(app):
+    ensure_model_metadata_loaded()
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    if 'uploaded_files' not in existing_tables:
+        return
+
+    existing_indexes = {idx['name'] for idx in inspector.get_indexes('uploaded_files')}
+    if 'idx_uploaded_files_uploaded_at' in existing_indexes:
+        return
+
+    dialect = db.engine.dialect.name
+    if dialect not in {'sqlite', 'postgresql'}:
+        app.logger.warning(
+            'Skipping automatic index creation for unsupported dialect %s: idx_uploaded_files_uploaded_at',
+            dialect,
+        )
+        return
+
+    app.logger.warning('Adding missing runtime index uploaded_files.uploaded_at')
+    statement = 'CREATE INDEX IF NOT EXISTS idx_uploaded_files_uploaded_at ON uploaded_files (uploaded_at)'
+    if dialect == 'postgresql':
+        with db.engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+            conn.execute(text(statement))
+    else:
+        with db.engine.begin() as conn:
+            conn.execute(text(statement))
+
+
 def should_start_scheduler(config_name: str = None) -> bool:
     # Explicit disable always wins.
     if os.environ.get('DISABLE_SCHEDULER', '0') == '1':
@@ -192,6 +221,7 @@ def create_app(config_name=None):
         ensure_sqlite_bootstrap(app)
         ensure_runtime_aux_tables(app)
         ensure_runtime_columns(app)
+        ensure_runtime_indexes(app)
 
     login_manager.login_view = 'auth.login'
     login_manager.login_message = '请先登录'

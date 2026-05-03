@@ -8,6 +8,9 @@ def beijing_now():
 
 class UploadedFile(db.Model):
     __tablename__ = 'uploaded_files'
+    __table_args__ = (
+        db.Index('idx_uploaded_files_uploaded_at', 'uploaded_at'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     display_id = db.Column(db.String(32), nullable=True)  # e.g. "2024/03/18-01"

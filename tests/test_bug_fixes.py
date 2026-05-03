@@ -9453,7 +9453,7 @@ def test_admin_file_list_uses_business_date_for_date_filter(app, client):
     resp = client.post("/auth/login", json={"username": "admin_file_date", "password": "secret123"})
     assert resp.status_code == 200
 
-    resp = client.get("/admin/api/files?date=2026-04-06")
+    resp = client.get("/admin/api/files?date=2026-04-06&include_date_options=1")
     assert resp.status_code == 200
     data = resp.get_json()
     assert [f["original_filename"] for f in data["files"]] == ["before_noon.txt"]
@@ -9476,6 +9476,23 @@ def test_admin_files_list_returns_current_business_date(app, client, monkeypatch
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["current_business_date"] == "2026-04-07"
+
+
+def test_admin_files_page_embeds_current_business_date(app, client, monkeypatch):
+    monkeypatch.setattr("routes.admin.get_business_date", lambda dt=None: datetime(2026, 4, 7).date())
+    with app.app_context():
+        admin = User(username="admin_file_page_default_date", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_file_page_default_date", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/files")
+    assert resp.status_code == 200
+    content = resp.get_data(as_text=True)
+    assert "window.DEFAULT_FILE_FILTER_DATE = \"2026-04-07\";" in content
 
 
 def test_admin_winning_uses_business_date_for_date_filter(app, client):
@@ -11350,7 +11367,7 @@ def test_admin_upload_template_syncs_page_with_server_response():
 def test_admin_upload_template_clears_stale_date_filter_and_reloads():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
-    assert "if (this.filterDate && !this.dateOptions.includes(this.filterDate)) {" in content
+    assert "if (this.filterDate && this.dateOptions.length > 0 && !this.dateOptions.includes(this.filterDate)) {" in content
     assert "this.filterDate = '';" in content
     assert "await this.loadFiles();" in content
     assert "return;" in content
@@ -11366,12 +11383,11 @@ def test_admin_upload_template_resets_to_first_page_after_successful_mutations()
 def test_admin_upload_template_defaults_date_filter_to_current_business_date():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
+    assert "filterDate: window.DEFAULT_FILE_FILTER_DATE || ''," in content
     assert "currentBusinessDate: ''," in content
-    assert "defaultDateInitialized: false," in content
+    assert "defaultDateInitialized" not in content
     assert "this.currentBusinessDate = data.current_business_date || '';" in content
-    assert "if (!this.defaultDateInitialized) {" in content
-    assert "if (!this.filterDate && this.currentBusinessDate) {" in content
-    assert "this.filterDate = this.currentBusinessDate;" in content
+    assert "include_date_options" in content
 
 
 def test_admin_upload_template_checks_export_http_errors_before_download():
@@ -11403,10 +11419,26 @@ def test_admin_upload_template_listens_for_realtime_file_events():
     assert "this._reloadFileList = () => {" in content
     assert "window.addEventListener('file_uploaded', this._reloadFileList);" in content
     assert "window.addEventListener('file_revoked', this._reloadFileList);" in content
-    assert "window.addEventListener('pool_updated', this._reloadFileList);" in content
     assert "window.removeEventListener('file_uploaded', this._reloadFileList);" in content
     assert "window.removeEventListener('file_revoked', this._reloadFileList);" in content
-    assert "window.removeEventListener('pool_updated', this._reloadFileList);" in content
+    assert "window.addEventListener('pool_updated', this._reloadFileList);" not in content
+    assert "window.removeEventListener('pool_updated', this._reloadFileList);" not in content
+
+
+def test_uploaded_files_model_indexes_uploaded_at_for_file_list_performance():
+    model = Path(__file__).resolve().parents[1] / "models" / "file.py"
+    content = model.read_text(encoding="utf-8")
+    assert "idx_uploaded_files_uploaded_at" in content
+
+
+def test_uploaded_files_uploaded_at_index_migration_exists():
+    root = Path(__file__).resolve().parents[1]
+    up = root / "migrations" / "add_uploaded_files_uploaded_at_index.up.sql"
+    down = root / "migrations" / "add_uploaded_files_uploaded_at_index.down.sql"
+    assert up.exists()
+    assert down.exists()
+    assert "idx_uploaded_files_uploaded_at" in up.read_text(encoding="utf-8")
+    assert "idx_uploaded_files_uploaded_at" in down.read_text(encoding="utf-8")
 
 
 def test_admin_upload_template_ignores_stale_file_list_responses():

@@ -712,7 +712,7 @@ def upload_files():
 @login_required
 @admin_required
 def files_list():
-    return render_template('admin/upload.html')
+    return render_template('admin/upload.html', current_business_date=str(get_business_date()))
 
 
 @admin_bp.route('/tickets/recycle')
@@ -747,13 +747,16 @@ def api_files_list():
         )
 
     # 鏃ユ湡閫夐」锛堜笟鍔℃棩锛?
-    uploaded_rows = db.session.query(UploadedFile.uploaded_at).filter(
-        UploadedFile.uploaded_at.isnot(None)
-    ).all()
-    date_options = sorted(
-        {str(get_business_date(row[0])) for row in uploaded_rows if row[0]},
-        reverse=True,
-    )
+    include_date_options = request.args.get('include_date_options') == '1'
+    date_options = None
+    if include_date_options:
+        uploaded_rows = db.session.query(UploadedFile.uploaded_at).filter(
+            UploadedFile.uploaded_at.isnot(None)
+        ).all()
+        date_options = sorted(
+            {str(get_business_date(row[0])) for row in uploaded_rows if row[0]},
+            reverse=True,
+        )
 
     if status_filter:
         q = _apply_uploaded_file_status_filter(q, status_filter)
@@ -766,14 +769,16 @@ def api_files_list():
         page = 1
     items = q.offset((page - 1) * per_page).limit(per_page).all()
 
-    return jsonify({
+    payload = {
         'files': [f.to_dict() for f in items],
         'total': total,
         'pages': pages,
         'page': page,
-        'date_options': date_options,
         'current_business_date': str(get_business_date()),
-    })
+    }
+    if date_options is not None:
+        payload['date_options'] = date_options
+    return jsonify(payload)
 
 
 @admin_bp.route('/api/files/<int:file_id>/detail')
