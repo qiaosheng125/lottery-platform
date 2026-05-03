@@ -12,6 +12,7 @@ from models.user import User
 
 DEFAULT_RECYCLE_REASON = '管理员手动回收处理中票'
 MAX_RECYCLE_LIST_LIMIT = 200
+MAX_RECYCLE_AUDIT_SAMPLE_SIZE = 200
 
 
 def _safe_text(value) -> str:
@@ -181,23 +182,27 @@ def recycle_assigned_tickets(admin_user_id: int, ticket_ids=None, username: str 
         return {'success': False, 'error': '未找到可回收的处理中票'}
 
     recycled_ids = []
+    sampled_ticket_ids = []
     original_details = []
     file_counts = defaultdict(int)
     total_amount = 0.0
 
     for ticket in tickets:
         recycled_ids.append(ticket.id)
+        if len(sampled_ticket_ids) < MAX_RECYCLE_AUDIT_SAMPLE_SIZE:
+            sampled_ticket_ids.append(ticket.id)
         file_counts[ticket.source_file_id] += 1
         total_amount += float(ticket.ticket_amount or 0)
-        original_details.append({
-            'ticket_id': ticket.id,
-            'assigned_user_id': ticket.assigned_user_id,
-            'assigned_username': ticket.assigned_username,
-            'assigned_device_id': ticket.assigned_device_id,
-            'download_filename': ticket.download_filename,
-            'assigned_at': ticket.assigned_at.isoformat() if ticket.assigned_at else None,
-            'ticket_amount': float(ticket.ticket_amount or 0),
-        })
+        if len(original_details) < MAX_RECYCLE_AUDIT_SAMPLE_SIZE:
+            original_details.append({
+                'ticket_id': ticket.id,
+                'assigned_user_id': ticket.assigned_user_id,
+                'assigned_username': ticket.assigned_username,
+                'assigned_device_id': ticket.assigned_device_id,
+                'download_filename': ticket.download_filename,
+                'assigned_at': ticket.assigned_at.isoformat() if ticket.assigned_at else None,
+                'ticket_amount': float(ticket.ticket_amount or 0),
+            })
 
         ticket.status = 'pending'
         ticket.assigned_user_id = None
@@ -226,8 +231,12 @@ def recycle_assigned_tickets(admin_user_id: int, ticket_ids=None, username: str 
             'scope': recycle_scope,
             'recycled_count': len(recycled_ids),
             'recycled_amount': total_amount,
-            'ticket_ids': recycled_ids,
+            'ticket_ids': sampled_ticket_ids,
+            'ticket_ids_sampled_count': len(sampled_ticket_ids),
+            'ticket_ids_omitted_count': max(len(recycled_ids) - len(sampled_ticket_ids), 0),
             'original': original_details,
+            'original_sampled_count': len(original_details),
+            'original_omitted_count': max(len(recycled_ids) - len(original_details), 0),
         },
         status_code=200,
     )

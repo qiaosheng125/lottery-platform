@@ -862,22 +862,27 @@ def api_recycle_assigned():
     if data_error:
         return data_error
 
-    raw_ticket_ids = data.get('ticket_ids')
-    if raw_ticket_ids is not None:
-        ticket_ids = _parse_ticket_id_list(raw_ticket_ids)
-        if ticket_ids is None:
-            return jsonify({'success': False, 'error': '票ID必须是大于 0 的整数数组'}), 400
-        result = recycle_assigned_tickets(
-            admin_user_id=current_user.id,
-            ticket_ids=ticket_ids,
-        )
-    else:
-        result = recycle_assigned_tickets(
-            admin_user_id=current_user.id,
-            username=data.get('username') or '',
-            device_id=data.get('device_id') or '',
-            download_filename=data.get('download_filename') or '',
-        )
+    try:
+        raw_ticket_ids = data.get('ticket_ids')
+        if raw_ticket_ids is not None:
+            ticket_ids = _parse_ticket_id_list(raw_ticket_ids)
+            if ticket_ids is None:
+                return jsonify({'success': False, 'error': '票ID必须是大于0的整数数组'}), 400
+            result = recycle_assigned_tickets(
+                admin_user_id=current_user.id,
+                ticket_ids=ticket_ids,
+            )
+        else:
+            result = recycle_assigned_tickets(
+                admin_user_id=current_user.id,
+                username=data.get('username') or '',
+                device_id=data.get('device_id') or '',
+                download_filename=data.get('download_filename') or '',
+            )
+    except Exception as exc:
+        current_app.logger.exception('recycle assigned tickets failed: %s', exc)
+        db.session.rollback()
+        return jsonify({'success': False, 'error': '回收失败，请稍后重试'}), 500
 
     if result.get('success'):
         try:

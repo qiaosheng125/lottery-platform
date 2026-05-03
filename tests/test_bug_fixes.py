@@ -1,6 +1,7 @@
 import os
 import sys
 import builtins
+import json
 from pathlib import Path
 from datetime import datetime, timedelta
 import io
@@ -785,6 +786,70 @@ def test_admin_recycle_by_filename_only_recycles_matching_processing_tickets(app
         assert uploaded.completed_count == 1
 
 
+def test_admin_recycle_by_filename_audit_details_are_sampled_for_large_batches(app, client):
+    from decimal import Decimal
+
+    with app.app_context():
+        admin = User(username="admin_recycle_large_batch", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        user = create_user("recycle_large_user", "secret123", client_mode="mode_b")
+        uploaded = UploadedFile(
+            original_filename="large-recycle.txt",
+            stored_filename="large-recycle.txt",
+            total_tickets=205,
+            pending_count=0,
+            assigned_count=205,
+            completed_count=0,
+        )
+        db.session.add(uploaded)
+        db.session.flush()
+
+        tickets = []
+        for line in range(1, 206):
+            tickets.append(LotteryTicket(
+                source_file_id=uploaded.id,
+                line_number=line,
+                raw_content=f"LARGE-RECYCLE-{line}",
+                status="assigned",
+                assigned_user_id=user.id,
+                assigned_username=user.username,
+                assigned_device_id="dev-large",
+                assigned_at=beijing_now(),
+                download_filename="large-assigned.txt",
+                ticket_amount=Decimal("1"),
+            ))
+        db.session.add_all(tickets)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_large_batch", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={
+        "username": "recycle_large_user",
+        "device_id": "dev-large",
+        "download_filename": "large-assigned.txt",
+    })
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["success"] is True
+    assert payload["recycled_count"] == 205
+
+    with app.app_context():
+        latest_log = (
+            AuditLog.query.filter_by(action_type="ticket_recycle")
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        assert latest_log is not None
+        details = json.loads(latest_log.details)
+        assert details["recycled_count"] == 205
+        assert details["ticket_ids_sampled_count"] == 200
+        assert details["ticket_ids_omitted_count"] == 5
+        assert details["original_sampled_count"] == 200
+        assert details["original_omitted_count"] == 5
+
+
 def test_mode_b_confirm_reports_recycled_batch_message(app, client):
     with app.app_context():
         user = create_user("mode_b_recycled_confirm_user", "secret123", client_mode="mode_b")
@@ -834,6 +899,30 @@ def test_admin_json_endpoints_reject_non_object_payload(app, client):
         assert response.is_json is True
         data = response.get_json()
         assert data["success"] is False
+
+
+def test_admin_recycle_assigned_returns_json_when_internal_error(app, client, monkeypatch):
+    with app.app_context():
+        admin = User(username="admin_recycle_internal_error", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_recycle_internal_error", "password": "secret123"})
+    assert resp.status_code == 200
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("routes.admin.recycle_assigned_tickets", _raise)
+
+    resp = client.post("/admin/api/tickets/recycle-assigned", json={"ticket_ids": [1]})
+    assert resp.status_code == 500
+    assert resp.is_json is True
+    data = resp.get_json()
+    assert data["success"] is False
+    assert data["error"]
+    assert "回收失败" in data["error"]
 
 
 def test_logout_redirects_to_login_and_invalidates_heartbeat(app, client):
