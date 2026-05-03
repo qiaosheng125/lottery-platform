@@ -968,13 +968,8 @@ createApp({
             this.startNextCooldown(data.cooldown_seconds || 3);
           }
         } else {
-          if (this.ticketHistory.length > 0) {
-            this.historyOffset = 0;
-            this.currentTicket = this.ticketHistory[0];
-            this.startCountdown(this.currentTicket.deadline_time);
-          } else {
-            this.currentTicket = null;
-          }
+          this.historyOffset = 0;
+          this.currentTicket = null;
           this.playNoTicketWarningAlert();
           showToast(data.error || '暂无可用票据', 'warning');
         }

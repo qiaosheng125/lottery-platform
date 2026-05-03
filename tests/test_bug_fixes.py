@@ -10810,13 +10810,15 @@ def test_client_dashboard_stop_reanchors_from_history_to_latest_ticket():
     assert "this.startCountdown(this.currentTicket.deadline_time);" in content
 
 
-def test_client_dashboard_keeps_latest_ticket_visible_when_next_returns_empty():
+def test_client_dashboard_clears_current_ticket_when_next_returns_empty():
     dashboard_template = Path(__file__).resolve().parents[1] / "templates" / "client" / "dashboard.html"
     content = dashboard_template.read_text(encoding="utf-8")
-    assert "if (this.ticketHistory.length > 0) {" in content
-    assert "this.historyOffset = 0;" in content
-    assert "this.currentTicket = this.ticketHistory[0];" in content
-    assert "showToast(data.error || '\u6682\u65e0\u53ef\u7528\u7968\u636e', 'warning');" in content
+    next_ticket_start = content.index("async nextTicket() {")
+    next_ticket_error_toast = content.index("showToast(data.error || '暂无可用票据', 'warning');")
+    next_ticket_segment = content[next_ticket_start:next_ticket_error_toast]
+    assert "this.historyOffset = 0;" in next_ticket_segment
+    assert "this.currentTicket = null;" in next_ticket_segment
+    assert "this.currentTicket = this.ticketHistory[0];" not in next_ticket_segment
 
 
 def test_client_dashboard_resets_full_mode_a_state_after_stop_success():
