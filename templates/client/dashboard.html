@@ -333,6 +333,7 @@
         <div class="btn-group btn-group-sm">
           <button class="btn" :class="winningGroupBy === 'date' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('date')">按日期</button>
           <button class="btn" :class="winningGroupBy === 'type' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('type')">按类型</button>
+          <button class="btn" :class="winningGroupBy === 'device' ? 'btn-warning' : 'btn-outline-secondary'" @click="setWinningGroupBy('device')">按设备ID</button>
         </div>
         <button class="btn btn-sm btn-outline-secondary" @click="winningVisible = false">关闭</button>
       </div>
@@ -557,7 +558,7 @@ createApp({
       // 中奖记录弹窗
       winningVisible: false, winningLoading: false, winningGrouped: {},
       winningPreviewUrl: null, uploadingWinningId: null,
-      winningGroupBy: 'date', // 'date' | 'type'
+      winningGroupBy: 'date', // 'date' | 'type' | 'device'
       // 中奖筛选
       winningFilterDate: '',
       winningFilterType: '',
@@ -1360,9 +1361,14 @@ createApp({
           const key = r.business_date || 'unknown';
           (grouped[key] = grouped[key] || []).push(r);
         });
-      } else {
+      } else if (this.winningGroupBy === 'type') {
         this._winningAll.forEach(r => {
           const key = r.lottery_type || '未知类型';
+          (grouped[key] = grouped[key] || []).push(r);
+        });
+      } else {
+        this._winningAll.forEach(r => {
+          const key = r.assigned_device_id || '未知设备';
           (grouped[key] = grouped[key] || []).push(r);
         });
       }

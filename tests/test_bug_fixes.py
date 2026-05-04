@@ -7907,6 +7907,9 @@ def test_client_dashboard_preserves_winning_group_mode_after_filter():
     assert "this.applyWinningGrouping();" in content
     assert "const key = r.business_date || 'unknown';" in content
     assert "this.winningGroupBy === 'date'" in content
+    assert "winningGroupBy === 'device'" in content
+    assert "const key = r.assigned_device_id || '未知设备';" in content
+    assert "按设备ID" in content
 
 
 def test_client_dashboard_clears_password_success_timer_before_reopen():
