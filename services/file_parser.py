@@ -179,18 +179,20 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     if not parsed_meta:
         return {'success': False, 'message': f'文件名格式不正确: {filename}', 'file_id': None, 'filename': filename}
     parsed_meta['lottery_type'] = _normalize_lottery_type(parsed_meta.get('lottery_type'))
+    internal_code = parsed_meta['internal_code']
 
     business_date = get_business_date(upload_dt)
+    duplicate_guard_key = internal_code
     if _is_postgres():
         db.session.execute(
             text("SELECT pg_advisory_xact_lock(:ns, hashtext(:lock_key))"),
-            {'ns': 1002, 'lock_key': f"{str(business_date)}:{filename.lower()}"},
+            {'ns': 1002, 'lock_key': f"{str(business_date)}:{duplicate_guard_key.lower()}"},
         )
     else:
-        if not _enter_sqlite_duplicate_guard(filename, business_date):
+        if not _enter_sqlite_duplicate_guard(duplicate_guard_key, business_date):
             return {
                 'success': False,
-                'message': f'当前业务日内已上传同名文件: {filename}',
+                'message': f'当前业务日内已上传同名文件或相同内部编号文件: {filename}',
                 'file_id': None,
                 'filename': filename,
             }
@@ -203,10 +205,25 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
     ).first()
     if existing_same_name:
         if not _is_postgres():
-            _leave_sqlite_duplicate_guard(filename, business_date)
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
         return {
             'success': False,
             'message': f'当前业务日内已上传同名文件: {filename}',
+            'file_id': None,
+            'filename': filename,
+        }
+
+    existing_same_internal_code = UploadedFile.query.filter(
+        func.lower(UploadedFile.internal_code) == internal_code.lower(),
+        UploadedFile.uploaded_at >= business_start,
+        UploadedFile.uploaded_at < business_end,
+    ).first()
+    if existing_same_internal_code:
+        if not _is_postgres():
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
+        return {
+            'success': False,
+            'message': f'当前业务日内已上传相同内部编号文件: {internal_code}',
             'file_id': None,
             'filename': filename,
         }
@@ -249,7 +266,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             db.session.rollback()
             os.remove(file_path)
             if not _is_postgres():
-                _leave_sqlite_duplicate_guard(filename, business_date)
+                _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
             return {
                 'success': False,
                 'message': '文件编码无法识别，请使用 UTF-8 或 GBK',
@@ -276,7 +293,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         db.session.rollback()
         os.remove(file_path)
         if not _is_postgres():
-            _leave_sqlite_duplicate_guard(filename, business_date)
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
         return {
             'success': False,
             'message': f'文件名彩种不支持: {lottery_type}',
@@ -293,7 +310,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             db.session.rollback()
             os.remove(file_path)
             if not _is_postgres():
-                _leave_sqlite_duplicate_guard(filename, business_date)
+                _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行内容格式无效',
@@ -304,7 +321,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             db.session.rollback()
             os.remove(file_path)
             if not _is_postgres():
-                _leave_sqlite_duplicate_guard(filename, business_date)
+                _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行玩法与文件名彩种不一致',
@@ -315,7 +332,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
             db.session.rollback()
             os.remove(file_path)
             if not _is_postgres():
-                _leave_sqlite_duplicate_guard(filename, business_date)
+                _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
             return {
                 'success': False,
                 'message': f'第 {line_no} 行倍数与文件名倍数不一致',
@@ -343,7 +360,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         db.session.rollback()
         os.remove(file_path)
         if not _is_postgres():
-            _leave_sqlite_duplicate_guard(filename, business_date)
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
         return {'success': False, 'message': '文件内容为空', 'file_id': None, 'filename': filename}
 
     declared_count = int(parsed_meta['declared_count'])
@@ -352,7 +369,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         db.session.rollback()
         os.remove(file_path)
         if not _is_postgres():
-            _leave_sqlite_duplicate_guard(filename, business_date)
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
         return {
             'success': False,
             'message': f'文件名声明 {declared_count} 张，实际解析 {len(tickets)} 张',
@@ -363,7 +380,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
         db.session.rollback()
         os.remove(file_path)
         if not _is_postgres():
-            _leave_sqlite_duplicate_guard(filename, business_date)
+            _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
         return {
             'success': False,
             'message': f'文件名声明金额 {declared_amount} 元，实际解析金额 {total_amount} 元',
@@ -399,7 +416,7 @@ def process_uploaded_file(file_storage, uploader_id: int) -> dict:
 
     db.session.commit()
     if not _is_postgres():
-        _leave_sqlite_duplicate_guard(filename, business_date)
+        _leave_sqlite_duplicate_guard(duplicate_guard_key, business_date)
 
     # Push to Redis queue (after DB commit for consistency)
     if ticket_ids and redis_client:

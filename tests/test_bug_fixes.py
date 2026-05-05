@@ -1979,6 +1979,36 @@ def test_process_uploaded_file_rejects_case_only_duplicate_filename_same_busines
         assert UploadedFile.query.count() == 1
 
 
+def test_process_uploaded_file_rejects_same_business_day_duplicate_internal_code(app, monkeypatch):
+    from services import file_parser
+    first_now = datetime(2026, 4, 7, 13, 0, 0)
+    second_now = datetime(2026, 4, 7, 13, 5, 0)
+    calls = {"count": 0}
+
+    def fake_now():
+        calls["count"] += 1
+        return first_now if calls["count"] == 1 else second_now
+
+    monkeypatch.setattr(file_parser, "beijing_now", fake_now)
+
+    with app.app_context():
+        user = create_user("upload_duplicate_internal_code_user", "secret123", client_mode="mode_b")
+        first_result = file_parser.process_uploaded_file(
+            make_upload_file("自_W308胜平负3倍投_金额6元_1张_22.55_26051_小.txt", "SPF|1=3|1*1|3\n"),
+            uploader_id=user.id,
+        )
+        assert first_result["success"] is True
+
+        second_result = file_parser.process_uploaded_file(
+            make_upload_file("自_W308胜平负3倍投_金额6元_1张_22.56_26051_小.txt", "SPF|1=0|1*1|3\n"),
+            uploader_id=user.id,
+        )
+        assert second_result["success"] is False
+        assert "当前业务日内已上传相同内部编号文件: W308" in second_result["message"]
+
+        assert UploadedFile.query.count() == 1
+
+
 def test_process_uploaded_file_rejects_declared_count_mismatch(app, monkeypatch):
     from services import file_parser
 
