@@ -4,6 +4,7 @@ import builtins
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+from decimal import Decimal
 import io
 
 import pytest
@@ -12369,6 +12370,81 @@ def test_parse_result_file_duplicate_seq_keeps_unique_count(app, tmp_path):
     assert sorted(mr.result_data.keys()) == ["1"]
     assert mr.result_data["1"]["SPF"]["result"] == "1"
     assert mr.result_data["1"]["SPF"]["sp"] == 2.20
+
+
+def test_parse_result_file_stores_sf_by_sf_sequence(app, tmp_path):
+    from services.result_parser import parse_result_file
+    from utils.winning_calculator import calculate_winning
+
+    with app.app_context():
+        admin = User(username="result_sf_sequence_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+
+    result_file = tmp_path / "sf_sequence_result.txt"
+    result_file.write_text(
+        "\u5e8f\u53f7\t\u8ba9\u7403\u80dc\u5e73\u8d1f\u5f69\u679c\t\u8ba9\u7403\u80dc\u5e73\u8d1fSP\u503c\t\u6bd4\u5206\u5f69\u679c\t\u6bd4\u5206SP\u503c\t\u603b\u8fdb\u7403\u5f69\u679c\t\u603b\u8fdb\u7403SP\u503c\t\u534a\u5168\u573a\u5f69\u679c\t\u534a\u5168\u573aSP\u503c\t\u4e0a\u4e0b\u76d8\u5f69\u679c\t\u4e0a\u4e0b\u76d8SP\u503c\t\u80dc\u8d1f\u5e8f\u53f7\t\u80dc\u8d1f\u5f69\u679c\t\u80dc\u8d1fSP\u503c\n"
+        "1\t3\t1.80\t\t\t\t\t\t\t\t\t400\t\u80dc\t2.00\n",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        result = parse_result_file(str(result_file), "27215", admin_id, upload_kind="final")
+        assert result["success"] is True
+        mr = db.session.get(MatchResult, result["match_result_id"])
+
+    assert mr is not None
+    assert mr.result_data["1"]["SPF"]["result"] == "3"
+    assert "SF" not in mr.result_data["1"]
+    assert mr.result_data["400"]["SF"]["result"] == "3"
+    assert mr.result_data["400"]["SF"]["sp"] == 2.00
+
+    is_winning, gross, net, tax = calculate_winning("SF|400=3|1*1|1", mr.result_data, 1)
+    assert is_winning is True
+    assert gross == Decimal("2.60")
+    assert net == Decimal("2.60")
+    assert tax == Decimal("0")
+
+
+def test_parse_result_file_allows_replacing_legacy_sf_file_sequence(app, tmp_path):
+    from services.result_parser import parse_result_file
+
+    with app.app_context():
+        admin = User(username="result_legacy_sf_sequence_admin", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+        admin_id = admin.id
+        legacy = MatchResult(
+            detail_period="27216",
+            result_data={
+                "1": {
+                    "SPF": {"result": "3", "sp": 1.80},
+                    "SF": {"result": "3", "sp": 2.00, "seq": "400"},
+                },
+            },
+            uploaded_by=admin_id,
+        )
+        db.session.add(legacy)
+        db.session.commit()
+        legacy_id = legacy.id
+
+    result_file = tmp_path / "legacy_sf_sequence_result.txt"
+    result_file.write_text(
+        "\u5e8f\u53f7\t\u8ba9\u7403\u80dc\u5e73\u8d1f\u5f69\u679c\t\u8ba9\u7403\u80dc\u5e73\u8d1fSP\u503c\t\u6bd4\u5206\u5f69\u679c\t\u6bd4\u5206SP\u503c\t\u603b\u8fdb\u7403\u5f69\u679c\t\u603b\u8fdb\u7403SP\u503c\t\u534a\u5168\u573a\u5f69\u679c\t\u534a\u5168\u573aSP\u503c\t\u4e0a\u4e0b\u76d8\u5f69\u679c\t\u4e0a\u4e0b\u76d8SP\u503c\t\u80dc\u8d1f\u5e8f\u53f7\t\u80dc\u8d1f\u5f69\u679c\t\u80dc\u8d1fSP\u503c\n"
+        "1\t3\t1.80\t\t\t\t\t\t\t\t\t400\t\u80dc\t2.10\n",
+        encoding="utf-8",
+    )
+
+    with app.app_context():
+        result = parse_result_file(str(result_file), "27216", admin_id, upload_kind="final")
+        refreshed = db.session.get(MatchResult, legacy_id)
+
+    assert result["success"] is True
+    assert "SF" not in refreshed.result_data["1"]
+    assert refreshed.result_data["400"]["SF"]["sp"] == 2.10
 
 
 def test_mode_b_batch_sqlite_assigns_null_lottery_type_tickets(app):

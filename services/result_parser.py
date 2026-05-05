@@ -182,12 +182,14 @@ def _collect_upload_kind_keys(result_data: dict, upload_kind: str) -> set[tuple[
     sp_key = UPLOAD_KIND_TO_SP_KEY[upload_kind]
     keys = set()
     for seq_no, field_map in (result_data or {}).items():
-        seq = str(seq_no)
         for play_code, play_data in (field_map or {}).items():
             if not isinstance(play_data, dict):
                 continue
             if play_data.get(sp_key) is None:
                 continue
+            seq = str(seq_no)
+            if play_code == 'SF' and play_data.get('seq'):
+                seq = str(play_data.get('seq'))
             keys.add((seq, play_code))
     return keys
 
@@ -251,7 +253,13 @@ def parse_result_file(
 
             field_data = _parse_result_line(cols)
             if field_data:
-                parsed_data[seq_no] = field_data
+                sf_data = field_data.pop('SF', None)
+                if field_data:
+                    parsed_data[seq_no] = field_data
+                if sf_data:
+                    sf_seq_no = _extract_seq_no(str(sf_data.get('seq') or '')) or seq_no
+                    sf_bucket = parsed_data.setdefault(sf_seq_no, {})
+                    sf_bucket['SF'] = sf_data
     except ValueError as exc:
         return {'success': False, 'error': str(exc), 'count': 0}
 
