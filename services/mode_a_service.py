@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from models.settings import SystemSettings
 from models.ticket import LotteryTicket
 from services.ticket_pool import assign_ticket_atomic, finalize_ticket
+from services.ticket_pool import apply_postgres_statement_timeouts
 from utils.time_utils import get_today_noon
 
 HISTORY_TTL = 3 * 3600
@@ -212,6 +213,7 @@ def get_next_ticket(
     confirms the exact current ticket ID. This avoids duplicate/retried requests
     from accidentally completing a newer ticket.
     """
+    apply_postgres_statement_timeouts()
     settings = SystemSettings.get()
     if not settings.mode_a_enabled:
         return {'success': False, 'error': '模式A已被关闭'}

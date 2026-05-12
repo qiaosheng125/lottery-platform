@@ -462,6 +462,54 @@ def test_mode_a_next_rejects_malformed_json_body(app, client):
     assert data["success"] is False
 
 
+def test_mode_a_next_logs_slow_requests(app, client, monkeypatch, caplog):
+    import logging
+
+    with app.app_context():
+        create_user("mode_a_slow_log_user", "secret123", client_mode="mode_a")
+
+    login_resp = login(client, "mode_a_slow_log_user", "secret123")
+    assert login_resp.status_code == 200
+
+    perf_values = iter([10.0, 14.2])
+    monkeypatch.setattr("routes.mode_a.time.perf_counter", lambda: next(perf_values))
+    monkeypatch.setattr(
+        "routes.mode_a.get_next_ticket",
+        lambda **kwargs: {"success": False, "error": "no ticket"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        resp = client.post("/api/mode-a/next", json={"device_id": "device-a"})
+
+    assert resp.status_code == 200
+    assert "slow mode_a_next request" in caplog.text
+    assert "elapsed=4.200s" in caplog.text
+    assert "device_id=device-a" in caplog.text
+
+
+def test_mode_a_next_returns_503_for_database_errors(app, client, monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    with app.app_context():
+        create_user("mode_a_db_error_user", "secret123", client_mode="mode_a")
+
+    login_resp = login(client, "mode_a_db_error_user", "secret123")
+    assert login_resp.status_code == 200
+
+    def raise_db_error(**kwargs):
+        raise SQLAlchemyError("statement timeout")
+
+    rollback_called = {"value": False}
+    monkeypatch.setattr("routes.mode_a.get_next_ticket", raise_db_error)
+    monkeypatch.setattr("routes.mode_a.db.session.rollback", lambda: rollback_called.__setitem__("value", True))
+
+    resp = client.post("/api/mode-a/next", json={"device_id": "device-a"})
+    assert resp.status_code == 503
+    data = resp.get_json()
+    assert data["success"] is False
+    assert rollback_called["value"] is True
+
+
 def test_admin_recycle_page_is_linked_from_navbar():
     base_template = Path(__file__).resolve().parents[1] / "templates" / "base.html"
     content = base_template.read_text(encoding="utf-8")
@@ -3648,6 +3696,24 @@ def test_mode_a_postgres_assignment_update_uses_deadline_guard(app, monkeypatch)
 
     assert result is not None
     assert any("deadline_time > :now" in sql for sql, _ in captured if "UPDATE lottery_tickets" in sql and "SET status = 'assigned'" in sql)
+
+
+def test_ticket_pool_postgres_timeouts_set_lock_and_statement_limits(app, monkeypatch):
+    from services.ticket_pool import apply_postgres_statement_timeouts
+
+    captured = []
+
+    def fake_execute(statement, params=None):
+        captured.append(str(statement))
+
+    monkeypatch.setattr("services.ticket_pool._is_postgres", lambda: True)
+    monkeypatch.setattr("services.ticket_pool.db.session.execute", fake_execute)
+
+    with app.app_context():
+        apply_postgres_statement_timeouts()
+
+    assert "SET LOCAL lock_timeout = '3000ms'" in captured
+    assert "SET LOCAL statement_timeout = '15000ms'" in captured
 
 
 def test_mode_a_postgres_assignment_prefers_earliest_deadline(app, monkeypatch):

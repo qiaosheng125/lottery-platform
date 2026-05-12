@@ -1,5 +1,10 @@
-from flask import Blueprint, jsonify, request
+import time
+
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
+from sqlalchemy.exc import SQLAlchemyError
+
+from extensions import db
 
 from services.mode_a_service import (
     get_current_ticket_data,
@@ -11,6 +16,7 @@ from services.mode_a_service import (
 from utils.decorators import can_receive_required, login_required_json, mode_a_required, parse_json_object
 
 mode_a_bp = Blueprint('mode_a', __name__)
+MODE_A_NEXT_SLOW_LOG_SECONDS = 3.0
 
 
 def _normalize_device_id(raw_device_id: str) -> str:
@@ -57,21 +63,50 @@ def _parse_non_negative_int(value):
 @mode_a_required
 @can_receive_required
 def next_ticket():
-    device_id, complete_current_ticket_id, complete_current_ticket_action, data_error = _get_device_payload()
-    if data_error:
-        return data_error
-    error = _validate_device_id(device_id)
-    if error:
-        return jsonify({'success': False, 'error': error}), 400
+    started_at = time.perf_counter()
+    device_id = ''
+    status_code = 500
+    try:
+        device_id, complete_current_ticket_id, complete_current_ticket_action, data_error = _get_device_payload()
+        if data_error:
+            status_code = data_error[1] if isinstance(data_error, tuple) and len(data_error) > 1 else 400
+            return data_error
+        error = _validate_device_id(device_id)
+        if error:
+            status_code = 400
+            return jsonify({'success': False, 'error': error}), 400
 
-    result = get_next_ticket(
-        user_id=current_user.id,
-        device_id=device_id,
-        username=current_user.username,
-        complete_current_ticket_id=complete_current_ticket_id,
-        complete_current_ticket_action=complete_current_ticket_action,
-    )
-    return jsonify(result)
+        result = get_next_ticket(
+            user_id=current_user.id,
+            device_id=device_id,
+            username=current_user.username,
+            complete_current_ticket_id=complete_current_ticket_id,
+            complete_current_ticket_action=complete_current_ticket_action,
+        )
+        status_code = 200
+        return jsonify(result)
+    except SQLAlchemyError:
+        db.session.rollback()
+        status_code = 503
+        current_app.logger.exception(
+            "mode_a_next database error user_id=%s device_id=%s",
+            getattr(current_user, 'id', None),
+            device_id,
+        )
+        return jsonify({
+            'success': False,
+            'error': '\u51fa\u7968\u8bf7\u6c42\u7e41\u5fd9\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5',
+        }), 503
+    finally:
+        elapsed = time.perf_counter() - started_at
+        if elapsed >= MODE_A_NEXT_SLOW_LOG_SECONDS:
+            current_app.logger.warning(
+                "slow mode_a_next request elapsed=%.3fs user_id=%s device_id=%s status=%s",
+                elapsed,
+                getattr(current_user, 'id', None),
+                device_id,
+                status_code,
+            )
 
 
 @mode_a_bp.route('/current', methods=['GET'])

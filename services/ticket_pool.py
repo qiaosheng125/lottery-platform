@@ -30,6 +30,33 @@ from utils.time_utils import beijing_now
 # SQLite 环境下用 gevent 协程锁保证分票串行化，持锁期间其他协程可继续处理无关请求
 _sqlite_assign_lock = BoundedSemaphore(1)
 DEFAULT_MODE_B_POOL_RESERVE = 20
+POSTGRES_LOCK_TIMEOUT_MS = 3000
+POSTGRES_STATEMENT_TIMEOUT_MS = 15000
+
+
+def _clamp_timeout_ms(value: int, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, 60000))
+
+
+def apply_postgres_statement_timeouts(
+    lock_timeout_ms: int = POSTGRES_LOCK_TIMEOUT_MS,
+    statement_timeout_ms: int = POSTGRES_STATEMENT_TIMEOUT_MS,
+) -> None:
+    """Bound PostgreSQL waits so ticket requests fail fast instead of wedging a worker."""
+    if not _is_postgres():
+        return
+
+    lock_timeout_ms = _clamp_timeout_ms(lock_timeout_ms, POSTGRES_LOCK_TIMEOUT_MS)
+    statement_timeout_ms = _clamp_timeout_ms(statement_timeout_ms, POSTGRES_STATEMENT_TIMEOUT_MS)
+    try:
+        db.session.execute(text(f"SET LOCAL lock_timeout = '{lock_timeout_ms}ms'"))
+        db.session.execute(text(f"SET LOCAL statement_timeout = '{statement_timeout_ms}ms'"))
+    except Exception as exc:
+        current_app.logger.warning("Failed to set PostgreSQL request timeouts: %s", exc)
 
 
 def _is_postgres() -> bool:
@@ -235,6 +262,7 @@ def assign_ticket_atomic(user_id: int, device_id: str, username: str,
             return None
 
     # ── PostgreSQL production path ────────────────────────────────
+    apply_postgres_statement_timeouts()
     # 检查每日上限
     _acquire_postgres_user_assignment_lock(user_id)
 
@@ -917,6 +945,8 @@ def finalize_tickets_batch(ticket_ids: List[int], user_id: int, completed_count:
 
         db.session.commit()
         return {'completed_count': completed_total, 'expired_count': expired_total}
+
+    apply_postgres_statement_timeouts()
 
     valid_completed_ids = []
     valid_expired_ids = []
