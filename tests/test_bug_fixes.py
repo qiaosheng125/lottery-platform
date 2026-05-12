@@ -9935,6 +9935,100 @@ def test_recalc_resets_stale_summary_when_scheduler_missing(app, client, monkeyp
     assert refreshed.tickets_total == 0
 
 
+def test_delete_match_result_period_clears_results_files_and_ticket_calcs(app, client, tmp_path):
+    with app.app_context():
+        app.config["UPLOAD_FOLDER"] = str(tmp_path)
+        stored_path = tmp_path / "results" / "27300" / "final.txt"
+        stored_path.parent.mkdir(parents=True)
+        stored_path.write_text("result payload", encoding="utf-8")
+
+        admin = User(username="admin_clear_match_result", is_admin=True)
+        admin.set_password("secret123")
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="SPF|1=3|1*1|1",
+            detail_period="27300",
+            lottery_type="\u80dc\u5e73\u8d1f",
+            status="completed",
+            completed_at=beijing_now(),
+            is_winning=True,
+            predicted_winning_amount=Decimal("5.00"),
+            predicted_winning_gross=Decimal("5.00"),
+            predicted_winning_tax=Decimal("0.00"),
+            winning_amount=Decimal("10.00"),
+            winning_gross=Decimal("10.00"),
+            winning_tax=Decimal("0.00"),
+            winning_image_url="/uploads/images/old.png",
+        )
+        result_file = ResultFile(
+            original_filename="27300_final.txt",
+            stored_filename="results/27300/final.txt",
+            uploaded_by=1,
+            upload_kind="final",
+        )
+        db.session.add_all([admin, ticket, result_file])
+        db.session.flush()
+        match_result = MatchResult(
+            detail_period="27300",
+            result_file_id=result_file.id,
+            result_data={"1": {"SPF": {"result": "3", "sp": 2.0}}},
+            calc_status="done",
+            tickets_total=1,
+            tickets_winning=1,
+            uploaded_by=admin.id,
+        )
+        duplicate_same_period = MatchResult(
+            detail_period="27300",
+            result_data={"2": {"SPF": {"result": "0", "sp": 1.8}}},
+            uploaded_by=admin.id,
+        )
+        other_period = MatchResult(
+            detail_period="27301",
+            result_data={"1": {"SPF": {"result": "1", "sp": 3.0}}},
+            uploaded_by=admin.id,
+        )
+        db.session.add_all([match_result, duplicate_same_period, other_period])
+        db.session.flush()
+        db.session.add(WinningRecord(
+            ticket_id=ticket.id,
+            source_file_id=ticket.source_file_id,
+            detail_period="27300",
+            lottery_type=ticket.lottery_type,
+            winning_image_url="/uploads/images/old.png",
+            is_checked=False,
+        ))
+        db.session.commit()
+        result_id = match_result.id
+        result_file_id = result_file.id
+        ticket_id = ticket.id
+        other_period_id = other_period.id
+
+    resp = client.post("/auth/login", json={"username": "admin_clear_match_result", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.delete(f"/admin/api/match-results/{result_id}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True
+    assert data["deleted_match_results"] == 2
+    assert data["deleted_result_files"] == 1
+    assert data["updated_tickets"] == 1
+
+    with app.app_context():
+        ticket = db.session.get(LotteryTicket, ticket_id)
+
+        assert MatchResult.query.filter_by(detail_period="27300").count() == 0
+        assert db.session.get(MatchResult, other_period_id) is not None
+        assert db.session.get(ResultFile, result_file_id) is None
+        assert WinningRecord.query.filter_by(ticket_id=ticket_id).first() is None
+        assert ticket.is_winning is None
+        assert ticket.predicted_winning_amount is None
+        assert ticket.winning_amount is None
+        assert ticket.winning_image_url is None
+        assert not stored_path.exists()
+
+
 def test_match_result_export_comparison_includes_user_and_device_rows(app, client):
     from openpyxl import load_workbook
 
@@ -11445,6 +11539,14 @@ def test_admin_winning_template_checks_export_http_errors_before_download():
     assert "if (!res.ok) {" in content
     assert "const blob = await res.blob();" in content
     assert "showToast(e.message || '\u5bfc\u51fa\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'danger');" in content
+
+
+def test_admin_winning_template_can_clear_match_result_period():
+    winning_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "winning.html"
+    content = winning_template.read_text(encoding="utf-8")
+    assert "async clearMatchResultPeriod(row) {" in content
+    assert "fetch(`/admin/api/match-results/${row.id}`, { method: 'DELETE' });" in content
+    assert "\u6e05\u7a7a" in content
 
 
 def test_admin_upload_template_listens_for_realtime_file_events():

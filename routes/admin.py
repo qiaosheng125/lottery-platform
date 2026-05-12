@@ -139,6 +139,21 @@ def _build_result_upload_relative_path(filename: str, detail_period: str, upload
     return os.path.join('results', period_folder, stored_name)
 
 
+def _resolve_stored_result_file_path(upload_folder: str, stored_filename: str):
+    normalized = (stored_filename or '').replace('\\', '/').strip()
+    if not normalized:
+        return None
+
+    base_abs = os.path.abspath(upload_folder)
+    candidate_abs = os.path.abspath(os.path.join(base_abs, normalized))
+    try:
+        if os.path.commonpath([base_abs, candidate_abs]) != base_abs:
+            return None
+    except ValueError:
+        return None
+    return candidate_abs
+
+
 def _validate_result_upload_filename(filename: str, detail_period: str, upload_kind: str):
     basename = _safe_uploaded_filename(filename)
     compact = re.sub(r'\s+', '', basename).lower()
@@ -2075,6 +2090,116 @@ def api_match_result_detail(result_id):
     if not mr:
         return jsonify({'success': False, 'error': '\u8d5b\u679c\u4e0d\u5b58\u5728'}), 404
     return jsonify({'success': True, 'result_data': mr.result_data, 'detail_period': mr.detail_period})
+
+
+@admin_bp.route('/api/match-results/<int:result_id>', methods=['DELETE'])
+@login_required_json
+@login_required
+@admin_required
+def api_delete_match_result_period(result_id):
+    """Clear all parsed result data and calculated winning fields for one period."""
+    match_result = db.session.get(MatchResult, result_id)
+    if not match_result:
+        return jsonify({'success': False, 'error': '\u8d5b\u679c\u4e0d\u5b58\u5728'}), 404
+
+    detail_period = match_result.detail_period
+    if not detail_period:
+        return jsonify({'success': False, 'error': '\u8d5b\u679c\u671f\u53f7\u4e0d\u80fd\u4e3a\u7a7a'}), 400
+
+    period_results = MatchResult.query.filter(MatchResult.detail_period == detail_period).all()
+    result_file_ids = {item.result_file_id for item in period_results if item.result_file_id is not None}
+    deleted_match_results = len(period_results)
+
+    tickets = LotteryTicket.query.filter(LotteryTicket.detail_period == detail_period).all()
+    cleanup_assets = []
+    deleted_winning_records = 0
+    for ticket in tickets:
+        ticket.is_winning = None
+        ticket.predicted_winning_gross = None
+        ticket.predicted_winning_amount = None
+        ticket.predicted_winning_tax = None
+        ticket.winning_gross = None
+        ticket.winning_amount = None
+        ticket.winning_tax = None
+
+        winning_record = WinningRecord.query.filter_by(ticket_id=ticket.id).first()
+        if winning_record and not winning_record.is_checked:
+            cleanup_assets.append((winning_record.image_oss_key, winning_record.winning_image_url, winning_record.id))
+            db.session.delete(winning_record)
+            deleted_winning_records += 1
+            ticket.winning_image_url = None
+        elif not winning_record:
+            ticket.winning_image_url = None
+
+    for item in period_results:
+        db.session.delete(item)
+    db.session.flush()
+
+    deleted_result_files = 0
+    result_file_paths = []
+    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    for result_file_id in result_file_ids:
+        if MatchResult.query.filter_by(result_file_id=result_file_id).first():
+            continue
+        result_file = db.session.get(ResultFile, result_file_id)
+        if not result_file:
+            continue
+        resolved_path = _resolve_stored_result_file_path(upload_folder, result_file.stored_filename)
+        if resolved_path:
+            result_file_paths.append(resolved_path)
+        elif result_file.stored_filename:
+            current_app.logger.warning(
+                'Skip deleting result file outside upload dir: %s',
+                result_file.stored_filename,
+            )
+        db.session.delete(result_file)
+        deleted_result_files += 1
+
+    AuditLog.log(
+        action_type='match_result_clear',
+        user_id=current_user.id,
+        ip_address=get_client_ip(),
+        resource_type='match_result_period',
+        resource_id=detail_period,
+        details={
+            'clicked_result_id': result_id,
+            'deleted_match_results': deleted_match_results,
+            'deleted_result_files': deleted_result_files,
+            'updated_tickets': len(tickets),
+            'deleted_winning_records': deleted_winning_records,
+        },
+        status_code=200,
+    )
+    db.session.commit()
+
+    from services.oss_service import delete_stored_image
+
+    for file_path in result_file_paths:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as cleanup_exc:
+            current_app.logger.warning('Failed to delete result file %s: %s', file_path, cleanup_exc)
+
+    for oss_key, image_url, record_id in cleanup_assets:
+        try:
+            delete_stored_image(oss_key, image_url)
+        except Exception as cleanup_exc:
+            current_app.logger.warning(
+                'winning image cleanup failed while clearing period %s record %s: %s',
+                detail_period,
+                record_id,
+                cleanup_exc,
+            )
+
+    return jsonify({
+        'success': True,
+        'detail_period': detail_period,
+        'deleted_match_results': deleted_match_results,
+        'deleted_result_files': deleted_result_files,
+        'updated_tickets': len(tickets),
+        'deleted_winning_records': deleted_winning_records,
+    })
 
 
 @admin_bp.route('/api/match-results/<int:result_id>/export-comparison')

@@ -238,7 +238,11 @@
             <td>
               <button class="btn btn-xs btn-outline-primary me-1" @click="viewResultDetail(r)">查看</button>
               <button class="btn btn-xs btn-outline-success me-1" @click="exportMatchResultComparison(r)">导出</button>
-              <button class="btn btn-xs btn-outline-secondary" @click="recalc(r.id)">重算</button>
+              <button class="btn btn-xs btn-outline-secondary me-1" @click="recalc(r.id)">重算</button>
+              <button class="btn btn-xs btn-outline-danger" @click="clearMatchResultPeriod(r)" :disabled="clearingMatchResultId === r.id">
+                <span v-if="clearingMatchResultId === r.id" class="spinner-border spinner-border-sm"></span>
+                <span v-else>清空</span>
+              </button>
             </td>
           </tr>
         </tbody>
@@ -362,7 +366,7 @@ createApp({
       // 上传赛果
       resultFile: null, uploadPeriod: '', uploadKind: 'final', uploading: false, uploadMsg: '', uploadSuccess: false,
       // 结果计算状态
-      matchResults: [], mrFilterDate: '', mrDateOptions: [],
+      matchResults: [], mrFilterDate: '', mrDateOptions: [], clearingMatchResultId: null,
       // 赛果详情弹窗
       detailVisible: false, detailLoading: false,
       detailPeriod: '', detailRows: {},
@@ -654,6 +658,27 @@ createApp({
         await this.loadMatchResults();
       } catch (e) {
         showToast(e.message || '提交失败', 'danger');
+      }
+    },
+    async clearMatchResultPeriod(row) {
+      if (!row || !row.id) return;
+      const period = row.detail_period || '';
+      if (!confirm(`确认清空 ${period} 期的彩果数据吗？这会删除本期彩果并清空已计算的中奖金额，之后需要重新上传本期彩果。`)) return;
+      this.clearingMatchResultId = row.id;
+      try {
+        const res = await fetch(`/admin/api/match-results/${row.id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+          throw new Error(data.error || '清空失败');
+        }
+        showToast(`已清空 ${data.detail_period || period} 期彩果数据`, 'success');
+        await this.loadMatchResults();
+        await this.loadWinning();
+        await this.loadFilterOptions();
+      } catch (e) {
+        showToast(e.message || '清空失败', 'danger');
+      } finally {
+        this.clearingMatchResultId = null;
       }
     },
     previewImage(url) {
