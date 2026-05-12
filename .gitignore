@@ -67,6 +67,7 @@ Thumbs.db
 !/scripts/setup_ubuntu_vm.sh
 !/scripts/configure_postgres_redis.sh
 !/scripts/run_linux_app.sh
+!/scripts/run_linux_scheduler.sh
 !/scripts/run_linux_strict_acceptance.sh
 !/scripts/run_linux_capacity_sweep.sh
 !/scripts/deploy_production_ubuntu.sh

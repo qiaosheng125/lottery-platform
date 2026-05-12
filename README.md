@@ -65,11 +65,16 @@ DB_POOL_RECYCLE=300
 GUNICORN_WORKERS=2
 GUNICORN_TIMEOUT=120
 GUNICORN_KEEPALIVE=5
-ENABLE_SCHEDULER=1
-DISABLE_SCHEDULER=0
+# Web Gunicorn workers only handle requests.
+ENABLE_SCHEDULER=0
+DISABLE_SCHEDULER=1
 UPLOAD_FOLDER=uploads
 MAX_CONTENT_LENGTH=16777216
 ```
+
+Production background jobs run in a separate `file-hub-scheduler.service`.
+Do not run APScheduler inside multi-worker Gunicorn web processes; otherwise
+background jobs can compete with ticket issuing requests.
 
 ## 本地启动
 

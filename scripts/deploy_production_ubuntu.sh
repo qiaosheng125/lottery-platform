@@ -9,6 +9,7 @@ APP_DB_USER="${APP_DB_USER:-lottery_app}"
 APP_DB_PASSWORD="${APP_DB_PASSWORD:-change-this-password}"
 SECRET_KEY_VALUE="${SECRET_KEY_VALUE:-change-this-to-a-random-secret-key-in-production}"
 SERVICE_NAME="${SERVICE_NAME:-file-hub}"
+SCHEDULER_SERVICE_NAME="${SCHEDULER_SERVICE_NAME:-${SERVICE_NAME}-scheduler}"
 
 sudo apt-get update
 sudo apt-get install -y \
@@ -44,9 +45,19 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${APP_DB_N
   sudo -u postgres psql -c "CREATE DATABASE ${APP_DB_NAME} OWNER ${APP_DB_USER};"
 
 python - <<PY
+import os
 from pathlib import Path
 
 env_path = Path(r"$ROOT_DIR/.env")
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+
+existing = {}
+for raw in lines:
+    if "=" not in raw or raw.lstrip().startswith("#"):
+        continue
+    key, value = raw.split("=", 1)
+    existing[key] = value
+
 updates = {
     "SECRET_KEY": r"$SECRET_KEY_VALUE",
     "FLASK_ENV": "production",
@@ -55,14 +66,13 @@ updates = {
     "DB_POOL_SIZE": "5",
     "DB_MAX_OVERFLOW": "5",
     "DB_POOL_RECYCLE": "300",
-    "GUNICORN_WORKERS": "2",
+    "GUNICORN_WORKERS": os.environ.get("GUNICORN_WORKERS") or existing.get("GUNICORN_WORKERS") or "2",
     "GUNICORN_TIMEOUT": "120",
     "GUNICORN_KEEPALIVE": "5",
-    "ENABLE_SCHEDULER": "1",
-    "DISABLE_SCHEDULER": "0",
+    "ENABLE_SCHEDULER": "0",
+    "DISABLE_SCHEDULER": "1",
 }
 
-lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
 for key, value in updates.items():
     replaced = False
     for idx, raw in enumerate(lines):
@@ -82,7 +92,7 @@ mkdir -p "$ROOT_DIR/uploads/images" "$ROOT_DIR/uploads/txt" "$ROOT_DIR/uploads/a
 set -a
 source "$ROOT_DIR/.env"
 set +a
-python "$ROOT_DIR/init_db.py"
+ENABLE_SCHEDULER=0 DISABLE_SCHEDULER=1 python "$ROOT_DIR/init_db.py"
 
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
@@ -103,10 +113,35 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+SCHEDULER_SERVICE_FILE="/etc/systemd/system/${SCHEDULER_SERVICE_NAME}.service"
+sudo tee "$SCHEDULER_SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=File Hub Scheduler Service
+After=network.target postgresql.service redis-server.service
+
+[Service]
+User=$(whoami)
+WorkingDirectory=$ROOT_DIR
+EnvironmentFile=$ROOT_DIR/.env
+Environment=PATH=$VENV_DIR/bin
+Environment=ENABLE_SCHEDULER=1
+Environment=DISABLE_SCHEDULER=0
+Environment=PROCESS_ROLE=scheduler
+ExecStart=$VENV_DIR/bin/python $ROOT_DIR/run_scheduler.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl enable "$SCHEDULER_SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
+sudo systemctl restart "$SCHEDULER_SERVICE_NAME"
 
 echo
 echo "Deployment completed."
 sudo systemctl --no-pager --full status "$SERVICE_NAME" || true
+sudo systemctl --no-pager --full status "$SCHEDULER_SERVICE_NAME" || true
