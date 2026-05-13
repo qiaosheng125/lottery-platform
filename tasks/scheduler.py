@@ -4,6 +4,7 @@ APScheduler initialization with cross-worker job locks.
 
 import hashlib
 import logging
+import os
 from contextlib import contextmanager
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -14,6 +15,17 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 
 _scheduler = None
+SCHEDULER_RUNTIME_SERVICE_NAME = 'scheduler'
+SCHEDULER_EXPECTED_JOB_IDS = (
+    'expire_tickets',
+    'clean_sessions',
+    'daily_reset',
+    'db_keepalive',
+    'archive_tickets',
+    'archive_uploaded_txt_files',
+    'purge_old_auxiliary_records',
+)
+SCHEDULER_HEARTBEAT_JOB_ID = 'scheduler_heartbeat'
 
 
 def _daily_reset_trigger(hour: int):
@@ -88,6 +100,37 @@ def reschedule_daily_reset(app, hour: int):
         name='daily_session_reset',
         replace_existing=True,
     )
+
+
+def _visible_job_ids(scheduler):
+    return sorted(
+        job.id
+        for job in scheduler.get_jobs()
+        if job.id != SCHEDULER_HEARTBEAT_JOB_ID
+    )
+
+
+def record_scheduler_heartbeat(app, scheduler=None):
+    scheduler = scheduler or get_scheduler()
+    if scheduler is None:
+        return
+
+    with app.app_context():
+        from extensions import db
+        from models.runtime import RuntimeStatus
+
+        payload = {
+            'pid': os.getpid(),
+            'process_role': os.environ.get('PROCESS_ROLE') or '',
+            'scheduler_running': bool(getattr(scheduler, 'running', True)),
+            'job_ids': _visible_job_ids(scheduler),
+            'expected_job_ids': list(SCHEDULER_EXPECTED_JOB_IDS),
+        }
+        try:
+            RuntimeStatus.upsert(SCHEDULER_RUNTIME_SERVICE_NAME, 'running', payload)
+        except Exception:
+            db.session.rollback()
+            logger.exception("Failed to record scheduler heartbeat")
 
 
 def start_scheduler(app):
@@ -168,8 +211,18 @@ def start_scheduler(app):
         replace_existing=True,
     )
 
+    scheduler.add_job(
+        func=record_scheduler_heartbeat,
+        args=[app, scheduler],
+        trigger=IntervalTrigger(minutes=1),
+        id=SCHEDULER_HEARTBEAT_JOB_ID,
+        name='record_scheduler_heartbeat',
+        replace_existing=True,
+    )
+
     scheduler.start()
     _scheduler = scheduler
+    record_scheduler_heartbeat(app, scheduler)
     logger.info("APScheduler started with %d jobs", len(scheduler.get_jobs()))
     return scheduler
 

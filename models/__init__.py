@@ -7,6 +7,7 @@ from .winning import WinningRecord
 from .result import MatchResult, ResultFile
 from .audit import AuditLog
 from .settings import SystemSettings
+from .runtime import RuntimeStatus
 
 __all__ = [
     'User', 'UserSession',
@@ -17,4 +18,5 @@ __all__ = [
     'MatchResult', 'ResultFile',
     'AuditLog',
     'SystemSettings',
+    'RuntimeStatus',
 ]

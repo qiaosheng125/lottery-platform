@@ -25,6 +25,7 @@ from models.user import User
 from models.result import MatchResult, ResultFile
 from models.archive import ArchivedLotteryTicket
 from models.winning import WinningRecord
+from models.runtime import RuntimeStatus
 from utils.filename_parser import parse_filename
 from utils.time_utils import beijing_now
 from routes.admin import _database_display_info
@@ -7605,6 +7606,58 @@ def test_admin_dashboard_data_includes_normal_health_summary(app, client, monkey
     assert health["generated_at"]
 
 
+def test_admin_dashboard_data_accepts_standalone_scheduler_heartbeat(app, client, monkeypatch):
+    from tasks.scheduler import SCHEDULER_EXPECTED_JOB_IDS, SCHEDULER_RUNTIME_SERVICE_NAME
+
+    expected_job_ids = list(SCHEDULER_EXPECTED_JOB_IDS)
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+
+    with app.app_context():
+        RuntimeStatus.upsert(
+            SCHEDULER_RUNTIME_SERVICE_NAME,
+            "running",
+            {
+                "scheduler_running": True,
+                "job_ids": expected_job_ids,
+                "expected_job_ids": expected_job_ids,
+            },
+        )
+        admin = User(username="admin_dashboard_health_runtime_scheduler", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_health_runtime_scheduler", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    assert health["status"] == "normal"
+    assert "scheduler_not_started" not in {item["type"] for item in health["items"]}
+
+
+def test_admin_dashboard_data_marks_missing_scheduler_heartbeat_as_not_started(app, client, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+
+    with app.app_context():
+        admin = User(username="admin_dashboard_missing_runtime_scheduler", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_dashboard_missing_runtime_scheduler", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/dashboard-data")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    health = data["health_summary"]
+    assert health["status"] == "critical"
+    assert health["items"][0]["type"] == "scheduler_not_started"
+
+
 def test_admin_dashboard_data_marks_overdue_pending_as_warning(app, client, monkeypatch):
     expected_job_ids = {
         "expire_tickets",
@@ -7903,6 +7956,42 @@ def test_admin_settings_marks_scheduler_none_as_critical(app, client, monkeypatc
     assert scheduler_status["scheduler_present"] is False
     assert scheduler_status["scheduler_running"] is False
     assert "daily_reset" in scheduler_status["missing_job_ids"]
+
+
+def test_admin_settings_uses_standalone_scheduler_heartbeat(app, client, monkeypatch):
+    from tasks.scheduler import SCHEDULER_EXPECTED_JOB_IDS, SCHEDULER_RUNTIME_SERVICE_NAME
+
+    expected_job_ids = list(SCHEDULER_EXPECTED_JOB_IDS)
+    monkeypatch.setattr("tasks.scheduler.get_scheduler", lambda: None)
+
+    with app.app_context():
+        RuntimeStatus.upsert(
+            SCHEDULER_RUNTIME_SERVICE_NAME,
+            "running",
+            {
+                "scheduler_running": True,
+                "job_ids": expected_job_ids,
+                "expected_job_ids": expected_job_ids,
+            },
+        )
+        admin = User(username="admin_settings_scheduler_runtime", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_settings_scheduler_runtime", "password": "secret123"})
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/api/settings")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    scheduler_status = data["scheduler_status"]
+    assert scheduler_status["status"] == "normal"
+    assert scheduler_status["status_source"] == "runtime_heartbeat"
+    assert scheduler_status["scheduler_present"] is True
+    assert scheduler_status["scheduler_running"] is True
+    assert scheduler_status["job_count"] == len(expected_job_ids)
+    assert scheduler_status["missing_job_ids"] == []
 
 
 def test_admin_settings_lists_missing_scheduler_jobs(app, client, monkeypatch):

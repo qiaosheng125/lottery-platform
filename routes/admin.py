@@ -21,6 +21,7 @@ from models.winning import WinningRecord
 from models.result import MatchResult, ResultFile
 from models.settings import SystemSettings
 from models.audit import AuditLog
+from models.runtime import RuntimeStatus
 from services.file_parser import process_uploaded_file, revoke_file
 from services.session_service import force_logout_user
 from services.ticket_pool import get_pool_status
@@ -28,17 +29,10 @@ from services.ticket_recycle_service import list_recyclable_assigned_tickets, re
 from services.notify_service import notify_admins, notify_all
 from utils.decorators import admin_required, get_client_ip, login_required_json, parse_json_object
 from utils.time_utils import beijing_now, get_business_date, get_business_window, get_today_noon
+from tasks.scheduler import SCHEDULER_EXPECTED_JOB_IDS, SCHEDULER_RUNTIME_SERVICE_NAME
 
 admin_bp = Blueprint('admin', __name__)
-SCHEDULER_EXPECTED_JOB_IDS = (
-    'expire_tickets',
-    'clean_sessions',
-    'daily_reset',
-    'db_keepalive',
-    'archive_tickets',
-    'archive_uploaded_txt_files',
-    'purge_old_auxiliary_records',
-)
+SCHEDULER_HEARTBEAT_MAX_AGE_SECONDS = 300
 
 RESULT_UPLOAD_KIND_HINTS = {
     'predicted': ('\u9884\u6d4b', 'predicted'),
@@ -365,29 +359,30 @@ def _build_health_summary(now=None):
 
     # 涓氬姟鍙ｅ緞锛氫腑濂栫エ涓嶅己鍒朵笂浼犲浘鐗囨垨琛ヤ腑濂栬褰曪紝鍥犳涓嶇撼鍏ュ仴搴锋憳瑕佹彁閱掗」銆?
 
-    from tasks.scheduler import get_scheduler
-
-    scheduler = get_scheduler()
-    expected_job_ids = set(SCHEDULER_EXPECTED_JOB_IDS)
-    if scheduler is None:
+    scheduler_status = _build_scheduler_status(now=now)
+    if scheduler_status['status'] == 'critical':
+        missing_job_count = len(scheduler_status.get('missing_job_ids') or [])
+        runtime_heartbeat = scheduler_status.get('status_source') == 'runtime_heartbeat'
+        heartbeat_age_seconds = scheduler_status.get('heartbeat_age_seconds')
+        scheduler_not_started = (
+            not scheduler_status.get('scheduler_present')
+            or not scheduler_status.get('scheduler_running')
+            or (
+                runtime_heartbeat
+                and (
+                    heartbeat_age_seconds is None
+                    or heartbeat_age_seconds > SCHEDULER_HEARTBEAT_MAX_AGE_SECONDS
+                )
+            )
+        )
+        item_type = 'scheduler_not_started' if scheduler_not_started else 'scheduler_job_missing'
         items.append({
-            'type': 'scheduler_not_started',
+            'type': item_type,
             'level': 'critical',
-            'count': 1,
-            'message': '\u8c03\u5ea6\u5668\u672a\u542f\u52a8',
-            'action': '\u8bf7\u5148\u786e\u8ba4\u670d\u52a1\u542f\u52a8\u65e5\u5fd7\u4e0e\u5b9a\u65f6\u4efb\u52a1\u521d\u59cb\u5316\u72b6\u6001\u3002',
+            'count': int(1 if scheduler_not_started else (missing_job_count or 1)),
+            'message': scheduler_status.get('message') or '\u8c03\u5ea6\u5668\u672a\u542f\u52a8',
+            'action': scheduler_status.get('action') or '\u8bf7\u5148\u786e\u8ba4\u670d\u52a1\u542f\u52a8\u65e5\u5fd7\u4e0e\u5b9a\u65f6\u4efb\u52a1\u521d\u59cb\u5316\u72b6\u6001\u3002',
         })
-    else:
-        current_job_ids = {job.id for job in scheduler.get_jobs()}
-        missing_job_count = len(expected_job_ids - current_job_ids)
-        if missing_job_count:
-            items.append({
-                'type': 'scheduler_job_missing',
-                'level': 'critical',
-                'count': int(missing_job_count),
-                'message': '\u8c03\u5ea6\u5668\u5173\u952e\u4efb\u52a1\u7f3a\u5931',
-                'action': '\u8bf7\u5728\u8bbe\u7f6e\u9875\u6838\u5bf9\u8c03\u5ea6\u4efb\u52a1\u5e76\u8054\u7cfb\u6280\u672f\u8865\u9f50\u3002',
-            })
 
     level_order = {'critical': 2, 'warning': 1}
     items.sort(key=lambda item: (level_order.get(item['level'], 0), item['count']), reverse=True)
@@ -411,13 +406,10 @@ def _build_health_summary(now=None):
     }
 
 
-def _build_scheduler_status():
-    expected_job_ids = list(SCHEDULER_EXPECTED_JOB_IDS)
-
-    from tasks.scheduler import get_scheduler
-
-    scheduler = get_scheduler()
-    if scheduler is None:
+def _build_scheduler_runtime_status(expected_job_ids, now=None):
+    now = now or beijing_now()
+    record = db.session.get(RuntimeStatus, SCHEDULER_RUNTIME_SERVICE_NAME)
+    if record is None:
         return {
             'scheduler_present': False,
             'scheduler_running': False,
@@ -426,9 +418,60 @@ def _build_scheduler_status():
             'expected_job_ids': expected_job_ids,
             'missing_job_ids': expected_job_ids,
             'status': 'critical',
+            'status_source': 'runtime_heartbeat',
+            'heartbeat_age_seconds': None,
             'message': '\u8c03\u5ea6\u5668\u672a\u542f\u52a8\u3002',
-            'action': '\u8bf7\u6682\u505c\u4f9d\u8d56\u81ea\u52a8\u8fc7\u671f\u4e0e\u81ea\u52a8\u6e05\u7406\u7684\u64cd\u4f5c\u5e76\u8054\u7cfb\u6280\u672f\u3002',
+            'action': '\u8bf7\u68c0\u67e5 file-hub-scheduler.service \u72b6\u6001\u548c\u542f\u52a8\u65e5\u5fd7\u3002',
         }
+
+    payload = record.payload or {}
+    job_ids = sorted(payload.get('job_ids') or [])
+    missing_job_ids = sorted(set(expected_job_ids) - set(job_ids))
+    scheduler_running = record.status == 'running' and bool(payload.get('scheduler_running', True))
+    heartbeat_age_seconds = None
+    if record.updated_at:
+        heartbeat_age_seconds = max(0, int((now - record.updated_at).total_seconds()))
+
+    if not scheduler_running:
+        status = 'critical'
+        message = '\u8c03\u5ea6\u5668\u672a\u8fd0\u884c\u3002'
+        action = '\u8bf7\u68c0\u67e5 file-hub-scheduler.service \u72b6\u6001\u548c\u6700\u8fd1\u65e5\u5fd7\u3002'
+    elif heartbeat_age_seconds is None or heartbeat_age_seconds > SCHEDULER_HEARTBEAT_MAX_AGE_SECONDS:
+        status = 'critical'
+        message = '\u8c03\u5ea6\u5668\u5fc3\u8df3\u8d85\u65f6\u3002'
+        action = '\u8bf7\u68c0\u67e5 file-hub-scheduler.service \u662f\u5426\u6b63\u5728\u8fd0\u884c\u3002'
+    elif missing_job_ids:
+        status = 'critical'
+        message = '\u8c03\u5ea6\u5668\u5173\u952e\u4efb\u52a1\u7f3a\u5931\u3002'
+        action = '\u8bf7\u91cd\u542f file-hub-scheduler.service \u540e\u6838\u5bf9\u4efb\u52a1\u521d\u59cb\u5316\u65e5\u5fd7\u3002'
+    else:
+        status = 'normal'
+        message = '\u72ec\u7acb\u8c03\u5ea6\u5668\u6b63\u5e38\uff0c\u53ef\u4ee5\u7ee7\u7eed\u64cd\u4f5c\u3002'
+        action = '\u53ef\u7ee7\u7eed\u65e5\u5e38\u64cd\u4f5c\u3002'
+
+    return {
+        'scheduler_present': True,
+        'scheduler_running': scheduler_running,
+        'job_count': len(job_ids),
+        'job_ids': job_ids,
+        'expected_job_ids': expected_job_ids,
+        'missing_job_ids': missing_job_ids,
+        'status': status,
+        'status_source': 'runtime_heartbeat',
+        'heartbeat_age_seconds': heartbeat_age_seconds,
+        'message': message,
+        'action': action,
+    }
+
+
+def _build_scheduler_status(now=None):
+    expected_job_ids = list(SCHEDULER_EXPECTED_JOB_IDS)
+
+    from tasks.scheduler import get_scheduler
+
+    scheduler = get_scheduler()
+    if scheduler is None:
+        return _build_scheduler_runtime_status(expected_job_ids, now=now)
 
     scheduler_running = bool(getattr(scheduler, 'running', True))
     try:
