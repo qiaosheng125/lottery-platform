@@ -6944,7 +6944,7 @@ def test_admin_export_tickets_by_date_empty_uses_selected_business_date_filename
     assert "filename*=UTF-8''{empty_filename_encoded}" in content
 
 
-def test_admin_export_tickets_by_date_default_filename_uses_business_date(app, client, monkeypatch):
+def test_admin_export_tickets_by_date_requires_date_param(app, client, monkeypatch):
     with app.app_context():
         admin = User(username="admin_export_default_date_name", is_admin=True)
         admin.set_password("secret123")
@@ -6957,9 +6957,11 @@ def test_admin_export_tickets_by_date_default_filename_uses_business_date(app, c
     assert resp.status_code == 200
 
     export_resp = client.get("/admin/api/tickets/export-by-date")
-    assert export_resp.status_code == 200
-    assert "attachment;" in export_resp.headers["Content-Disposition"]
-    assert "2026-04-09" in export_resp.headers["Content-Disposition"]
+    assert export_resp.status_code == 400
+    assert export_resp.is_json is True
+    data = export_resp.get_json()
+    assert data["success"] is False
+    assert "日期" in data["error"]
 
 
 def test_admin_export_tickets_by_date_localizes_status_labels_to_chinese(app, client):
@@ -8193,6 +8195,51 @@ def test_admin_winning_export_honors_checked_status_filter(app, client):
     exported_values = [row[1] for row in ws.iter_rows(min_row=2, values_only=True)]
     assert "CHK-001" in exported_values
     assert "UNCHK-001" not in exported_values
+
+
+def test_admin_winning_export_includes_assigned_time_and_download_filename(app, client):
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    assigned_at = datetime(2026, 4, 8, 13, 5, 0)
+    download_filename = "比分_2倍_53张_1112元_02.40_2026-0429-011309.txt"
+
+    with app.app_context():
+        admin = User(username="admin_winning_export_assigned", is_admin=True)
+        admin.set_password("secret123")
+        db.session.add(admin)
+        db.session.commit()
+
+        ticket = LotteryTicket(
+            source_file_id=1,
+            line_number=1,
+            raw_content="WIN-EXPORT-ASSIGNED",
+            status="completed",
+            assigned_username="user-a",
+            assigned_device_id="dev-a",
+            assigned_at=assigned_at,
+            download_filename=download_filename,
+            completed_at=beijing_now(),
+            is_winning=True,
+        )
+        db.session.add(ticket)
+        db.session.commit()
+
+    resp = client.post("/auth/login", json={"username": "admin_winning_export_assigned", "password": "secret123"})
+    assert resp.status_code == 200
+
+    export_resp = client.get("/admin/api/winning/export")
+    assert export_resp.status_code == 200
+    wb = load_workbook(BytesIO(export_resp.data))
+    ws = wb.active
+    header = [cell for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
+    target_row = next(row for row in rows if row[1] == "WIN-EXPORT-ASSIGNED")
+
+    assert "接单时间" in header
+    assert "分配文件名" in header
+    assert target_row[header.index("接单时间")] == "2026-04-08 13:05:00"
+    assert target_row[header.index("分配文件名")] == download_filename
 
 
 def test_admin_users_export_contains_desktop_only_column_and_value(app, client):
@@ -11651,7 +11698,7 @@ def test_admin_upload_template_clears_stale_date_filter_and_reloads():
     upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
     content = upload_template.read_text(encoding="utf-8")
     assert "if (this.filterDate && this.dateOptions.length > 0 && !this.dateOptions.includes(this.filterDate)) {" in content
-    assert "this.filterDate = '';" in content
+    assert "this.filterDate = this.dateOptions[0];" in content
     assert "await this.loadFiles();" in content
     assert "return;" in content
 
@@ -11671,6 +11718,12 @@ def test_admin_upload_template_defaults_date_filter_to_current_business_date():
     assert "defaultDateInitialized" not in content
     assert "this.currentBusinessDate = data.current_business_date || '';" in content
     assert "include_date_options" in content
+
+
+def test_admin_upload_template_removes_all_date_option():
+    upload_template = Path(__file__).resolve().parents[1] / "templates" / "admin" / "upload.html"
+    content = upload_template.read_text(encoding="utf-8")
+    assert '<option value="">全部日期</option>' not in content
 
 
 def test_admin_upload_template_checks_export_http_errors_before_download():

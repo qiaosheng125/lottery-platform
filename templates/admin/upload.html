@@ -41,7 +41,6 @@
       <span><i class="bi bi-list-ul"></i> 文件列表</span>
       <div class="d-flex gap-2 align-items-center">
         <select v-model="filterDate" class="form-select form-select-sm" style="width:auto" @change="page=1; loadFiles()">
-          <option value="">全部日期</option>
           <option v-for="d in dateOptions" :key="d" :value="d">{{ d }}</option>
         </select>
         <button class="btn btn-sm btn-outline-success" @click="exportByDate">
@@ -190,7 +189,7 @@ createApp({
         if (data.date_options) {
           this.dateOptions = data.date_options;
           if (this.filterDate && this.dateOptions.length > 0 && !this.dateOptions.includes(this.filterDate)) {
-            this.filterDate = '';
+            this.filterDate = this.dateOptions[0];
             this.page = 1;
             await this.loadFiles();
             return;
@@ -289,6 +288,10 @@ createApp({
       this.uploading = false;
     },
     async exportByDate() {
+      if (!this.filterDate) {
+        showToast('请选择日期后再导出', 'warning');
+        return;
+      }
       const params = new URLSearchParams();
       if (this.filterDate) params.set('date', this.filterDate);
       try {

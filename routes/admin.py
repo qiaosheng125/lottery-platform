@@ -1021,6 +1021,8 @@ def export_tickets_by_date():
     from urllib.parse import quote
 
     date_str = request.args.get('date', '').strip()
+    if not date_str:
+        return jsonify({'success': False, 'error': '请选择要导出的日期'}), 400
 
     q = db.session.query(
         LotteryTicket.line_number.label('line_number'),
@@ -1039,33 +1041,32 @@ def export_tickets_by_date():
         LotteryTicket.source_file_id.label('source_file_id'),
         UploadedFile.original_filename.label('original_filename'),
     ).outerjoin(UploadedFile, UploadedFile.id == LotteryTicket.source_file_id)
-    if date_str:
-        try:
-            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({'success': False, 'error': '鏃ユ湡鏍煎紡鏃犳晥锛岃浣跨敤 YYYY-MM-DD'}), 400
-        start_at, end_at = get_business_window(selected_date)
-        file_exists = db.session.query(UploadedFile.id).filter(
-            UploadedFile.uploaded_at >= start_at,
-            UploadedFile.uploaded_at < end_at,
-        ).first()
-        if not file_exists:
-            wb = Workbook()
-            ws = wb.active
-            ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '分配文件名', '完成时间', '来源文件名'])
-            buf = _io.BytesIO()
-            wb.save(buf)
-            buf.seek(0)
-            from flask import Response
-            empty_filename = f"{date_str}_无数据投注内容详情.xlsx"
-            empty_filename_encoded = quote(empty_filename, encoding='utf-8')
-            return Response(buf.read(),
-                            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            headers={'Content-Disposition': f"attachment; filename*=UTF-8''{empty_filename_encoded}"})
-        q = q.filter(
-            UploadedFile.uploaded_at >= start_at,
-            UploadedFile.uploaded_at < end_at,
-        )
+    try:
+        selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'success': False, 'error': '鏃ユ湡鏍煎紡鏃犳晥锛岃浣跨敤 YYYY-MM-DD'}), 400
+    start_at, end_at = get_business_window(selected_date)
+    file_exists = db.session.query(UploadedFile.id).filter(
+        UploadedFile.uploaded_at >= start_at,
+        UploadedFile.uploaded_at < end_at,
+    ).first()
+    if not file_exists:
+        wb = Workbook()
+        ws = wb.active
+        ws.append(['行号', '原始内容', '彩种', '倍投', '截止时间', '期号', '金额', '状态', '用户名', '设备ID', '分配时间', '分配文件名', '完成时间', '来源文件名'])
+        buf = _io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        from flask import Response
+        empty_filename = f"{date_str}_无数据投注内容详情.xlsx"
+        empty_filename_encoded = quote(empty_filename, encoding='utf-8')
+        return Response(buf.read(),
+                        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        headers={'Content-Disposition': f"attachment; filename*=UTF-8''{empty_filename_encoded}"})
+    q = q.filter(
+        UploadedFile.uploaded_at >= start_at,
+        UploadedFile.uploaded_at < end_at,
+    )
 
     tickets = q.order_by(LotteryTicket.source_file_id, LotteryTicket.line_number).all()
 
@@ -1103,7 +1104,7 @@ def export_tickets_by_date():
 
     from flask import Response
     period_str = next((t.detail_period for t in tickets if t.detail_period), 'unknown_period')
-    export_date = date_str or str(get_business_date())
+    export_date = date_str
     filename = f"{export_date}_{period_str}_tickets.xlsx"
     filename_encoded = quote(filename, encoding='utf-8')
     return Response(
@@ -1796,6 +1797,8 @@ def api_winning_export():
         '\u7968\u9762\u91d1\u989d',
         '\u7528\u6237\u540d',
         '\u8bbe\u5907ID',
+        '\u63a5\u5355\u65f6\u95f4',
+        '\u5206\u914d\u6587\u4ef6\u540d',
         '\u5f69\u79cd',
         '\u671f\u53f7',
         '\u72b6\u6001',
@@ -1814,6 +1817,8 @@ def api_winning_export():
             float(t.ticket_amount or 0),
             t.assigned_username or '',
             t.assigned_device_id or '',
+            t.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if t.assigned_at else '',
+            t.download_filename or '',
             t.lottery_type or '',
             t.detail_period or '',
             _winning_status_label(t.status),
